@@ -13,7 +13,9 @@ dependencies = [
 
 [[package]]
 name = "iocuddle"
-version = "0.2.0"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5fab23069aa80df2de983e9d2e989f838af07041e99d85245ea4b1dac7a5933"
 dependencies = [
  "zerocopy",
 ]

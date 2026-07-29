@@ -8,7 +8,7 @@ publish = false
 description = "High-level, iocuddle-based Linux device-mapper ioctl layer."
 
 [dependencies]
-iocuddle = { path = "/home/nathaniel/Projects/iocuddle" }
+iocuddle = "0.3"
 zerocopy = { version = "0.8", features = ["derive"] }
 thiserror = "2"
 
