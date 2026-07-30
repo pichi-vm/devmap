@@ -18,7 +18,7 @@ use crate::uapi::{DM_BUFFER_FULL_FLAG, DM_DEV_CREATE, DM_DEV_STATUS, DM_LIST_DEV
 
 /// Issue a `WriteRead` dm ioctl over a growing byte buffer, retrying with
 /// a doubled buffer while the kernel reports `DM_BUFFER_FULL_FLAG`. Used
-/// by `Control::list`, `Device::table_status`, and `Device::message` —
+/// by `Control::list`, `Device::table`/`Device::info`, and `Device::message` —
 /// every ioctl with variable-length output.
 ///
 /// `payload` is written immediately after the header on every attempt
@@ -86,9 +86,21 @@ impl Control {
     /// [`Error::Io`] if the control node can't be opened (typically because
     /// the process lacks `CAP_SYS_ADMIN`, or device-mapper isn't loaded).
     pub fn open() -> Result<Self, Error> {
-        Ok(Self(Arc::new(
-            OpenOptions::new().read(true).write(true).open("/dev/mapper/control")?,
-        )))
+        // Attach context: a bare `?` yields e.g. "io: Permission denied"
+        // with no hint it's the control node or why (the usual causes are
+        // lacking CAP_SYS_ADMIN or device-mapper not being loaded). The
+        // original `ErrorKind` is preserved.
+        let file = OpenOptions::new().read(true).write(true).open("/dev/mapper/control").map_err(
+            |source| {
+                Error::Io(io::Error::new(
+                    source.kind(),
+                    format!(
+                        "cannot open /dev/mapper/control (need CAP_SYS_ADMIN and dm loaded): {source}"
+                    ),
+                ))
+            },
+        )?;
+        Ok(Self(Arc::new(file)))
     }
 
     /// `DM_DEV_CREATE`. Fails with [`Error::NameConflict`] if `name` is
@@ -205,7 +217,11 @@ impl Iterator for ListDevicesIter {
     type Item = (String, Device);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.end || self.offset + 12 > self.buf.len() {
+        // `checked_add` guards a kernel-controlled `next` from overflowing
+        // `usize` on 32-bit targets (matches `TableStatusIter`); on overflow
+        // we stop.
+        let record_end = self.offset.checked_add(12)?;
+        if self.offset >= self.end || record_end > self.buf.len() {
             return None;
         }
         let entry = &self.buf[self.offset..];
@@ -216,7 +232,7 @@ impl Iterator for ListDevicesIter {
         let name = String::from_utf8_lossy(&name_bytes[..nul]).into_owned();
         let device = Device::new(DevId::from_dev_t(dev), Arc::clone(&self.control));
 
-        self.offset = if next == 0 { self.end } else { self.offset + next as usize };
+        self.offset = if next == 0 { self.end } else { self.offset.saturating_add(next as usize) };
 
         Some((name, device))
     }
@@ -226,12 +242,12 @@ impl Iterator for ListDevicesIter {
 mod tests {
     use super::*;
 
-    /// Hand-builds a synthetic `DM_LIST_DEVICES`-shaped response buffer:
-    /// N `dm_name_list` entries, each `next` relative to *that entry's
-    /// own* start (the opposite convention from `DM_TABLE_STATUS`'s
-    /// `dm_target_spec.next` — see `TableStatusIter`'s tests). Independent
-    /// of any real ioctl call, since this is testing the parser against
-    /// what a real kernel response looks like, not a round trip.
+    // Hand-builds a synthetic `DM_LIST_DEVICES`-shaped response buffer:
+    // N `dm_name_list` entries, each `next` relative to *that entry's
+    // own* start (the opposite convention from `DM_TABLE_STATUS`'s
+    // `dm_target_spec.next` — see `TableStatusIter`'s tests). Independent
+    // of any real ioctl call, exercising the parser against a
+    // kernel-shaped response rather than a round trip.
     // Test-only helper building tiny fixture buffers; lengths never approach u32::MAX.
     #[allow(clippy::cast_possible_truncation)]
     fn synthetic_list_devices_response(entries: &[(u64, &str)]) -> (Vec<u8>, usize, usize) {

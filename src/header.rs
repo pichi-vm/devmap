@@ -11,7 +11,10 @@
 //! (name, then uuid, then dev).
 
 use crate::Error;
-use crate::uapi::{DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_UUID_LEN, DM_SUSPEND_FLAG, dm_ioctl_raw};
+use crate::uapi::{
+    DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_STATUS_TABLE_FLAG, DM_SUSPEND_FLAG, DM_UUID_LEN,
+    dm_ioctl_raw,
+};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Safe wrapper over `dm_ioctl`. Hides the UAPI; only construction +
@@ -98,6 +101,12 @@ impl DmHeader {
         let mut header = Self::blank();
         header.inner.dev = dev_t;
         header
+    }
+
+    /// Request `STATUSTYPE_TABLE` output from `DM_TABLE_STATUS` (the table
+    /// params) instead of the default `STATUSTYPE_INFO` (runtime status).
+    pub(crate) fn set_status_table(&mut self) {
+        self.inner.flags |= DM_STATUS_TABLE_FLAG;
     }
 
     /// Toggle `DM_SUSPEND_FLAG` in place — set to suspend, clear to resume.
@@ -225,5 +234,12 @@ mod tests {
         assert_eq!(h.flags() & DM_SUSPEND_FLAG, DM_SUSPEND_FLAG);
         h.set_suspend(false);
         assert_eq!(h.flags() & DM_SUSPEND_FLAG, 0);
+    }
+
+    #[test]
+    fn set_status_table_sets_only_that_bit() {
+        let mut h = DmHeader::by_name("x").unwrap();
+        h.set_status_table();
+        assert_eq!(h.flags(), crate::uapi::DM_STATUS_TABLE_FLAG);
     }
 }

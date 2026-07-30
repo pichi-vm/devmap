@@ -1,27 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! A high-level, `iocuddle`-based Linux device-mapper ioctl layer.
+//! A high-level Linux device-mapper ioctl layer.
 //!
-//! Every dm ioctl this crate issues is `_IOWR` over `struct dm_ioctl` —
-//! confirmed directly against `<linux/dm-ioctl.h>`, not from memory (see
-//! the crate-private `uapi` module). None of the kernel structs involved (`dm_ioctl`,
-//! `dm_target_spec`, `dm_name_list`) embed a pointer field, so this crate
-//! needs none of `iocuddle`'s `Ptr`/`PtrMut` machinery — every argument
-//! type here is a plain `FromBytes + IntoBytes + Immutable + KnownLayout`
-//! struct, satisfying iocuddle's "Requirements on T" contract by
-//! representation alone.
+//! This crate lets you create device-mapper devices, load and read back
+//! their tables, suspend/resume them, and query their status, all through
+//! safe Rust types.
 //!
 //! [`Control`] is a factory for [`Device`]s: `open`/`create`/`by_device`/
 //! `by_node`/`by_name`/`by_uuid`/`list`. Every other operation — loading a
 //! table, suspending, resuming, removing, querying status — is a method
 //! on `Device` itself. `Device` is a plain, non-destructive handle;
 //! [`Removed`] is the auto-removing wrapper `Control::create` returns.
-//! Devices are identified by a [`DevId`] (`major:minor`), and a table is a
-//! slice of [`TableLine`]s, each pairing a sector range with a [`Target`].
+//! Devices are identified by a [`DevId`] (`major:minor`).
 //!
-//! Not covered here (deliberately, for now): `DM_DEV_RENAME`,
-//! `DM_DEV_WAIT`/event polling, `DM_TABLE_DEPS`, and clearing a staged
-//! inactive table.
+//! A table is built with [`Device::builder`], adding [`targets`] one at a
+//! time; it is read back with [`Device::table`] (the mapping) or
+//! [`Device::info`] (runtime status), each yielding [`Row`]s decoded via
+//! [`Row::parse`]. Each target type is a struct implementing [`Target`],
+//! so callers can define their own out-of-tree targets.
+//!
+//! Not covered here: `DM_DEV_RENAME`, `DM_DEV_WAIT`/event polling,
+//! `DM_TABLE_DEPS`, and clearing a staged inactive table.
 //!
 //! # Example
 //!
@@ -29,14 +28,14 @@
 //! let the [`Removed`] guard remove it on drop:
 //!
 //! ```no_run
-//! use devmap::{Control, Target, TableLine};
+//! use devmap::{Control, targets::Zero};
 //!
 //! # fn main() -> Result<(), devmap::Error> {
 //! let control = Control::open()?;               // needs CAP_SYS_ADMIN
 //! let dev = control.create("my-zero")?;         // a `Removed` guard
 //!
 //! // Map 8192 sectors of discard-writes / zero-reads.
-//! dev.load_table(&[TableLine::new(0, 8192, Target::Zero)])?;
+//! dev.builder().add(0, 8192, Zero)?.load()?;
 //! dev.resume()?;                                // promote the staged table
 //!
 //! let status = dev.status()?;
@@ -46,20 +45,20 @@
 //! # }                                            // `dev` drops here -> DM_DEV_REMOVE
 //! ```
 
+#![warn(missing_docs)]
+
 mod control;
 mod device;
 mod error;
 mod header;
 mod table;
+pub mod targets;
 mod uapi;
 
 pub use control::Control;
 pub use device::{DevId, Device, Removed, Status};
 pub use error::Error;
-pub use table::{
-    DelayLeg, FlakeyDirection, FlakeyFeature, IntegrityBuilder, IntegrityMode, RaidDevicePair, RaidType,
-    TableLine, Target, ThinPoolBuilder, WritecacheBuilder, WritecacheKind,
-};
+pub use table::{ParseError, RawInfo, Row, Target, TableBuilder, mode};
 
 /// The primary handles are cheap to clone and safe to share across
 /// threads; assert it at compile time so a future field addition can't
