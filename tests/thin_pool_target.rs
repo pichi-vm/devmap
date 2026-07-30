@@ -9,7 +9,7 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::{TableLine, Target};
+use devmap::targets::{Thin, ThinPool};
 
 #[test]
 fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
@@ -24,11 +24,16 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     let pool_name = format!("devmap-test-thinpool-{}", std::process::id());
     let pool_removed = control.create(&pool_name).expect("DM_DEV_CREATE pool");
     pool_removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             32 * 1024 * 1024 / 512,
-            Target::thin_pool(metadata_device.id(), data_device.id(), 128, 32).build(),
-        )])
+            ThinPool::builder(metadata_device.id(), data_device.id(), 128, 32)
+                .build()
+                .expect("build pool"),
+        )
+        .expect("add thin-pool")
+        .load()
         .expect("DM_TABLE_LOAD pool");
     pool_removed.resume().expect("resume pool");
 
@@ -38,11 +43,14 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     let thin_name = format!("devmap-test-thin-{}", std::process::id());
     let thin_removed = control.create(&thin_name).expect("DM_DEV_CREATE thin");
     thin_removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             16 * 1024 * 1024 / 512,
-            Target::Thin { pool: pool_removed.id(), dev_id: 0, external_origin: None },
-        )])
+            Thin::new(pool_removed.id(), 0, None).expect("valid thin"),
+        )
+        .expect("add thin")
+        .load()
         .expect("DM_TABLE_LOAD thin");
     thin_removed.resume().expect("resume thin");
 

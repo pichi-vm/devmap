@@ -7,7 +7,9 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::{IntegrityMode, TableLine, Target, WritecacheKind};
+use devmap::targets::integrity::Mode;
+use devmap::targets::writecache::Kind;
+use devmap::targets::{Integrity, Writecache};
 
 #[test]
 fn writecache_passes_data_through() {
@@ -22,11 +24,16 @@ fn writecache_passes_data_through() {
     let name = format!("devmap-test-writecache-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             16 * 1024 * 1024 / 512,
-            Target::writecache(WritecacheKind::Ssd, origin_device.id(), cache_device.id(), 4096).build(),
-        )])
+            Writecache::builder(Kind::Ssd, origin_device.id(), cache_device.id(), 4096)
+                .build()
+                .expect("build writecache"),
+        )
+        .expect("add writecache")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
@@ -47,7 +54,7 @@ fn writecache_passes_data_through() {
 /// 1-sector table so the kernel formats the device and reports the real
 /// `provided_data_sectors` back via status, then reload with that size.
 /// This state machine is the *caller's* responsibility per
-/// `Target::Integrity`'s doc comment — devmap only needs to render each
+/// `Integrity`'s doc comment — devmap only needs to render each
 /// table line correctly, which this test verifies against a real kernel.
 #[test]
 fn integrity_first_use_format_then_reload_sequence() {
@@ -60,19 +67,16 @@ fn integrity_first_use_format_then_reload_sequence() {
     let name = format!("devmap-test-integrity-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
 
-    let target = |length| {
-        TableLine::new(
-            0,
-            length,
-            Target::integrity(backing_device.id(), 0, IntegrityMode::Journaled)
-                .internal_hash("sha256")
-                .build(),
-        )
+    let target = || {
+        Integrity::builder(backing_device.id(), 0, Mode::Journaled)
+            .internal_hash("sha256")
+            .build()
+            .expect("build integrity")
     };
 
     // First load: 1-sector table lets the kernel format the (all-zero)
     // superblock rather than rejecting a mismatched size outright.
-    removed.load_table(&[target(1)]).expect("DM_TABLE_LOAD (format)");
+    removed.builder().add(0, 1, target()).expect("add integrity").load().expect("DM_TABLE_LOAD (format)");
     removed.resume().expect("resume (format)");
     removed.suspend().expect("suspend before reload");
 
@@ -83,7 +87,12 @@ fn integrity_first_use_format_then_reload_sequence() {
     // for this test any value safely inside it is enough to prove the
     // reload sequence itself works.
     let real_length = 8 * 1024 * 1024 / 512;
-    removed.load_table(&[target(real_length)]).expect("DM_TABLE_LOAD (real size)");
+    removed
+        .builder()
+        .add(0, real_length, target())
+        .expect("add integrity")
+        .load()
+        .expect("DM_TABLE_LOAD (real size)");
     removed.resume().expect("resume (real size)");
 
     let status = removed.status().expect("DM_DEV_STATUS");

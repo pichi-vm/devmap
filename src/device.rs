@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::Error;
 use crate::header::DmHeader;
-use crate::table::TableLine;
+use crate::table::{Row, TableBuilder, mode};
 use crate::uapi::{
     DM_ACTIVE_PRESENT_FLAG, DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_INACTIVE_PRESENT_FLAG,
     DM_IOCTL_VERSION_MAJOR, DM_READONLY_FLAG, DM_SUSPEND_FLAG, DM_UEVENT_GENERATED_FLAG,
@@ -140,25 +140,19 @@ impl Device {
         self.dev_t
     }
 
-    /// `DM_TABLE_LOAD` — stage `lines` into this device's inactive table
-    /// slot. Does not activate them; call [`Device::resume`] afterward.
+    /// Begin building a table to `DM_TABLE_LOAD`. Add targets with
+    /// [`TableBuilder::add`] and finish with [`TableBuilder::load`]; the
+    /// staged table activates on the next [`Device::resume`].
     ///
-    /// # Errors
-    ///
-    /// [`Error::Usage`] if a table line is malformed before any ioctl (e.g.
-    /// a thin-pool with too many feature flags), or [`Error::DmIoctl`] with
-    /// the rejected table line attached if the kernel refuses the load.
-    pub fn load_table(&self, lines: &[TableLine]) -> Result<(), Error> {
-        let mut buf = crate::table::DmTableBuf::build(self.dev_t, lines)?;
-        let header = buf.header_mut();
-        crate::uapi::DM_TABLE_LOAD.ioctl(&*self.control, header).map_err(|source| {
-            Error::DmIoctl {
-                op: "DM_TABLE_LOAD",
-                source,
-                table_line: Some(crate::table::render_all(lines)),
-            }
-        })?;
-        check_version("DM_TABLE_LOAD", header)
+    /// ```no_run
+    /// # use devmap::{Control, targets::Zero};
+    /// # fn f(dev: &devmap::Device) -> Result<(), devmap::Error> {
+    /// dev.builder().add(0, 8192, Zero)?.load()?;
+    /// # Ok(()) }
+    /// ```
+    #[must_use = "a TableBuilder does nothing until `.load()` is called"]
+    pub fn builder(&self) -> TableBuilder {
+        TableBuilder::new(Arc::clone(&self.control), self.dev_t)
     }
 
     fn suspend_or_resume(&self, suspend: bool) -> Result<(), Error> {
@@ -230,16 +224,40 @@ impl Device {
         Ok(Status::from_header(&header))
     }
 
-    /// `DM_TABLE_STATUS` — the currently active table, one [`TableLine`]
-    /// per target.
+    /// `DM_TABLE_STATUS` in table mode (`STATUSTYPE_TABLE`) — the active
+    /// table's construction params, one [`Row<mode::Spec>`] per target.
+    /// Reconstruct a target with [`Row::parse`].
     ///
     /// # Panics
     ///
     /// Never in practice: panics only if the kernel returned fewer than
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
-    pub fn table_status(&self) -> Result<impl Iterator<Item = TableLine>, Error> {
+    pub fn table(&self) -> Result<impl Iterator<Item = Row<mode::Spec>>, Error> {
+        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        header.set_status_table();
+        self.table_status_iter(header)
+    }
+
+    /// `DM_TABLE_STATUS` in info mode (`STATUSTYPE_INFO`) — per-target
+    /// runtime status, one [`Row<mode::Info>`] per target. Decode with
+    /// [`Row::parse`].
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: panics only if the kernel returned fewer than
+    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
+    /// indicate a kernel bug.
+    pub fn info(&self) -> Result<impl Iterator<Item = Row<mode::Info>>, Error> {
         let header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        self.table_status_iter(header)
+    }
+
+    #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
+    fn table_status_iter<M: mode::Mode>(
+        &self,
+        header: DmHeader,
+    ) -> Result<crate::table::TableStatusIter<M>, Error> {
         let buf = crate::control::ioctl_with_growing_buffer(
             &self.control,
             "DM_TABLE_STATUS",
@@ -251,12 +269,18 @@ impl Device {
         let (parsed, _): (&DmHeader, _) =
             zerocopy::FromBytes::ref_from_prefix(&buf).expect("buf is at least DmHeader::SIZE bytes");
         let target_count = parsed.target_count();
-        Ok(crate::table::TableStatusIter::new(buf, target_count))
+        let data_start = (parsed.data_start() as usize).min(buf.len());
+        Ok(crate::table::TableStatusIter::new(buf, data_start, target_count))
     }
 
     /// `DM_TARGET_MSG` — send a target-specific message string to whichever
     /// target covers `sector` in this device's active table. Returns the
     /// reply string if the target produced one (most messages don't).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Usage`] if `message` contains a NUL byte; otherwise
+    /// [`Error::DmIoctl`] if the kernel rejects the message.
     ///
     /// # Panics
     ///
@@ -264,6 +288,13 @@ impl Device {
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
     pub fn message(&self, sector: u64, message: &str) -> Result<Option<String>, Error> {
+        // The message is a NUL-terminated string; an interior NUL would
+        // silently truncate the command the target sees. Reject it (as the
+        // table builder and name/uuid paths do). Whitespace is legitimate —
+        // messages are space-separated commands.
+        if message.as_bytes().contains(&0) {
+            return Err(Error::Usage("dm target message contains a NUL byte".into()));
+        }
         let header = DmHeader::by_dev(self.dev_t.to_dev_t());
         let mut payload = Vec::with_capacity(8 + message.len() + 1);
         payload.extend_from_slice(&sector.to_ne_bytes());
@@ -295,7 +326,7 @@ fn parse_message_reply(buf: &[u8]) -> Option<String> {
     // nowhere else in this crate without a bound: clamp both to the actual
     // buffer so a buggy or hostile response (e.g. `data_start > data_size`,
     // or `data_size` past the buffer end) yields `None` instead of a
-    // panicking slice. `Control::list`/`table_status` bound their reads the
+    // panicking slice. `Control::list`/`table`/`info` bound their reads the
     // same way via the iterator loop; this is the one direct-slice path.
     let len = buf.len();
     let start = (parsed.data_start() as usize).min(len);

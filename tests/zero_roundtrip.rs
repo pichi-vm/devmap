@@ -17,7 +17,7 @@
 
 use std::io::Read as _;
 
-use devmap::{Control, TableLine, Target};
+use devmap::{Control, targets::Zero};
 
 /// Returns `None` (and prints a skip notice) if this process can't open
 /// `/dev/mapper/control` — i.e. isn't root / doesn't have `CAP_SYS_ADMIN`.
@@ -36,8 +36,7 @@ fn create_load_resume_read_zeros_remove() {
     let name = format!("devmap-test-zero-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
 
-    let lines = [TableLine::new(0, 8192, Target::Zero)];
-    removed.load_table(&lines).expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let id = removed.id();
@@ -60,8 +59,7 @@ fn suspend_resume_round_trips() {
     let name = format!("devmap-test-suspend-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
 
-    let lines = [TableLine::new(0, 8192, Target::Zero)];
-    removed.load_table(&lines).expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let status = removed.status().expect("DM_DEV_STATUS");
@@ -83,8 +81,7 @@ fn status_reports_sane_values_for_a_fresh_device() {
     let name = format!("devmap-test-status-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
 
-    let lines = [TableLine::new(0, 8192, Target::Zero)];
-    removed.load_table(&lines).expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let status = removed.status().expect("DM_DEV_STATUS");
@@ -99,12 +96,16 @@ fn table_status_reports_back_the_loaded_target() {
     let name = format!("devmap-test-tstatus-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
 
-    let lines = [TableLine::new(0, 8192, Target::Zero)];
-    removed.load_table(&lines).expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let reported: Vec<TableLine> = removed.table_status().expect("DM_TABLE_STATUS").collect();
-    assert_eq!(reported, [TableLine::new(0, 8192, Target::Zero)]);
+    let reported: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    assert_eq!(reported.len(), 1);
+    let row = &reported[0];
+    assert_eq!(row.start(), 0);
+    assert_eq!(row.length(), 8192);
+    assert_eq!(row.type_name(), "zero");
+    assert_eq!(row.parse::<Zero>(), Some(Zero));
 }
 
 #[test]
@@ -113,9 +114,7 @@ fn list_reports_the_created_device() {
 
     let name = format!("devmap-test-list-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .load_table(&[TableLine::new(0, 8192, Target::Zero)])
-        .expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let found = control
@@ -132,9 +131,7 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
 
     let name = format!("devmap-test-attach-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .load_table(&[TableLine::new(0, 8192, Target::Zero)])
-        .expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let id = removed.id();
@@ -154,9 +151,7 @@ fn by_name_finds_device_and_reports_status() {
 
     let name = format!("devmap-test-byname-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .load_table(&[TableLine::new(0, 8192, Target::Zero)])
-        .expect("DM_TABLE_LOAD");
+    removed.builder().add(0, 8192, Zero).expect("add zero").load().expect("DM_TABLE_LOAD");
     removed.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let (device, status) = control.by_name(&name).expect("DM_DEV_STATUS by_name");

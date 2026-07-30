@@ -7,8 +7,7 @@
 //! Raw structs (`dm_ioctl_raw`, `dm_target_spec_raw`) are `pub(crate)` so
 //! the safe wrappers in [`super::header`]/[`super::table`] can use them,
 //! but they never cross the crate boundary. All field layouts and command
-//! numbers below were verified against `/usr/include/linux/dm-ioctl.h`
-//! directly, not from memory.
+//! numbers below mirror `<linux/dm-ioctl.h>`.
 
 #![allow(unsafe_code)]
 
@@ -83,6 +82,11 @@ pub(crate) const DM_INACTIVE_PRESENT_FLAG: u32 = 1 << 6;
 /// `DM_UEVENT_GENERATED_FLAG` — a uevent was generated for the last
 /// operation (response-only).
 pub(crate) const DM_UEVENT_GENERATED_FLAG: u32 = 1 << 13;
+
+/// Request flag for `DM_TABLE_STATUS`: return the table (`STATUSTYPE_TABLE`,
+/// the construction parameters) rather than the default runtime status
+/// (`STATUSTYPE_INFO`).
+pub(crate) const DM_STATUS_TABLE_FLAG: u32 = 1 << 4;
 
 /// Set in the response when the caller's buffer was too small for
 /// `DM_LIST_DEVICES`/`DM_TABLE_STATUS`'s variable-length output.

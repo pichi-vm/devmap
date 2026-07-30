@@ -9,7 +9,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::time::{Duration, Instant};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::{RaidDevicePair, RaidType, TableLine, Target};
+use devmap::targets::Raid;
+use devmap::targets::raid::{DevicePair, Type};
 
 #[test]
 fn raid1_mirrors_writes_across_two_devices() {
@@ -24,18 +25,22 @@ fn raid1_mirrors_writes_across_two_devices() {
     let name = format!("devmap-test-raid1-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             16 * 1024 * 1024 / 512,
-            Target::Raid {
-                raid_type: RaidType::Raid1,
-                chunk_size_sectors: 128,
-                devices: vec![
-                    RaidDevicePair::data_only(disk0_device.id()),
-                    RaidDevicePair::data_only(disk1_device.id()),
+            Raid::new(
+                Type::Raid1,
+                128,
+                vec![
+                    DevicePair::data_only(disk0_device.id()),
+                    DevicePair::data_only(disk1_device.id()),
                 ],
-            },
-        )])
+            )
+            .expect("valid raid"),
+        )
+        .expect("add raid")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 

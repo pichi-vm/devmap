@@ -18,7 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::process::Command;
 
 use common::{ensure_module_loaded, open_control};
-use devmap::{TableLine, Target};
+use devmap::targets::Zoned;
 
 /// Whether `name` resolves on `$PATH`. Used to skip if `dmzadm` isn't
 /// installed, the same way `common::open_control` skips for missing root.
@@ -100,7 +100,10 @@ fn zoned_formats_with_dmzadm_and_passes_data_through() {
     let name = format!("devmap-test-zoned-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(0, usable_sectors, Target::Zoned { device: zoned_device.id() })])
+        .builder()
+        .add(0, usable_sectors, Zoned { device: zoned_device.id() })
+        .expect("add zoned")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
@@ -115,6 +118,7 @@ fn zoned_formats_with_dmzadm_and_passes_data_through() {
     file.read_exact(&mut readback).expect("read back");
     assert_eq!(readback, pattern);
 
-    let status: Vec<TableLine> = removed.table_status().expect("DM_TABLE_STATUS").collect();
+    let status: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(status.len(), 1);
+    assert_eq!(status[0].type_name(), "zoned");
 }

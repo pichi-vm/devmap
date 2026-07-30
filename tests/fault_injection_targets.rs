@@ -9,7 +9,8 @@
 mod common;
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::{DelayLeg, TableLine, Target};
+use devmap::targets::delay::Leg;
+use devmap::targets::{Delay, Dust, Flakey, Unstriped};
 
 fn write_then_read_back(path: &str) {
     use std::io::{Read, Seek, SeekFrom, Write};
@@ -34,15 +35,10 @@ fn delay_passes_data_through_unchanged() {
     let name = format!("devmap-test-delay-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
-            0,
-            16384,
-            Target::Delay {
-                read: DelayLeg::new(backing_device.id(), 0, 10),
-                write: None,
-                flush: None,
-            },
-        )])
+        .builder()
+        .add(0, 16384, Delay { read: Leg::new(backing_device.id(), 0, 10), write: None, flush: None })
+        .expect("add delay")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
@@ -61,17 +57,14 @@ fn flakey_behaves_normally_during_the_up_interval() {
     let name = format!("devmap-test-flakey-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             16384,
-            Target::Flakey {
-                device: backing_device.id(),
-                offset_sectors: 0,
-                up_interval_secs: 3600,
-                down_interval_secs: 1,
-                features: vec![],
-            },
-        )])
+            Flakey::new(backing_device.id(), 0, 3600, 1, vec![]).expect("valid flakey"),
+        )
+        .expect("add flakey")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
@@ -90,11 +83,10 @@ fn dust_bypass_mode_passes_data_through_and_message_interface_works() {
     let name = format!("devmap-test-dust-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
-            0,
-            16384,
-            Target::Dust { device: backing_device.id(), offset_sectors: 0, block_size: 512 },
-        )])
+        .builder()
+        .add(0, 16384, Dust::new(backing_device.id(), 0, 512).expect("valid dust"))
+        .expect("add dust")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
@@ -117,17 +109,14 @@ fn unstriped_with_a_single_stripe_is_a_pure_passthrough() {
     let name = format!("devmap-test-unstriped-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             16384,
-            Target::Unstriped {
-                stripes: 1,
-                chunk_size_sectors: 16384,
-                stripe_index: 0,
-                device: backing_device.id(),
-                offset_sectors: 0,
-            },
-        )])
+            Unstriped::new(1, 16384, 0, backing_device.id(), 0).expect("valid unstriped"),
+        )
+        .expect("add unstriped")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 

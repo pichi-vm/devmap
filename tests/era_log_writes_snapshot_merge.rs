@@ -9,7 +9,9 @@ mod common;
 use std::io::Write;
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::{TableLine, Target};
+use devmap::RawInfo;
+use devmap::targets::snapshot::{self, Snapshot};
+use devmap::targets::{Era, LogWrites};
 
 #[test]
 fn era_tracks_writes_and_responds_to_checkpoint_message() {
@@ -24,16 +26,16 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
     let name = format!("devmap-test-era-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
-            0,
-            16384,
-            Target::Era { metadata: metadata_device.id(), origin: origin_device.id(), block_size: 128 },
-        )])
+        .builder()
+        .add(0, 16384, Era { metadata: metadata_device.id(), origin: origin_device.id(), block_size: 128 })
+        .expect("add era")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
-    let status_before: Vec<TableLine> = removed.table_status().expect("DM_TABLE_STATUS").collect();
+    let status_before: Vec<_> = removed.info().expect("DM_TABLE_STATUS").collect();
     assert_eq!(status_before.len(), 1);
+    assert_eq!(status_before[0].type_name(), "era");
 
     // `checkpoint` may or may not bump the era counter on this call (the
     // kernel doc explicitly says not to assume it will), but it must not
@@ -55,11 +57,10 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
     let name = format!("devmap-test-logwrites-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
-        .load_table(&[TableLine::new(
-            0,
-            16384,
-            Target::LogWrites { device: data_device.id(), log_device: log_device.id() },
-        )])
+        .builder()
+        .add(0, 16384, LogWrites { device: data_device.id(), log_device: log_device.id() })
+        .expect("add log-writes")
+        .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
@@ -74,7 +75,7 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
     assert_eq!(reply, None);
 }
 
-/// Exercises `Target::SnapshotMerge`'s real handover procedure end to
+/// Exercises `snapshot::Merge`'s real handover procedure end to
 /// end: a `snapshot-origin` device, a `snapshot` device sharing its COW
 /// device, a write that creates a real COW exception, then the handover
 /// itself (suspend origin, reload it as `snapshot-merge`, suspend the old
@@ -102,11 +103,10 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     let origin_name = format!("devmap-test-snapmerge-origin-{}", std::process::id());
     let origin_removed = control.create(&origin_name).expect("DM_DEV_CREATE origin");
     origin_removed
-        .load_table(&[TableLine::new(
-            0,
-            origin_len_sectors,
-            Target::SnapshotOrigin { origin: origin_backing_device.id() },
-        )])
+        .builder()
+        .add(0, origin_len_sectors, snapshot::Origin { origin: origin_backing_device.id() })
+        .expect("add snapshot-origin")
+        .load()
         .expect("DM_TABLE_LOAD origin");
     origin_removed.resume().expect("resume origin");
 
@@ -120,11 +120,14 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     let snap_name = format!("devmap-test-snapmerge-snap-{}", std::process::id());
     let snap_removed = control.create(&snap_name).expect("DM_DEV_CREATE snapshot");
     snap_removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             origin_len_sectors,
-            Target::Snapshot { origin: origin_backing_device.id(), cow: cow_device.id(), chunk_size_sectors: 8 },
-        )])
+            Snapshot { origin: origin_backing_device.id(), cow: cow_device.id(), chunk_size_sectors: 8 },
+        )
+        .expect("add snapshot")
+        .load()
         .expect("DM_TABLE_LOAD snapshot");
     snap_removed.resume().expect("resume snapshot");
 
@@ -142,15 +145,18 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     //    activating the merge, which runs in the background.
     origin_removed.suspend().expect("suspend origin");
     origin_removed
-        .load_table(&[TableLine::new(
+        .builder()
+        .add(
             0,
             origin_len_sectors,
-            Target::SnapshotMerge {
+            snapshot::Merge {
                 origin: origin_backing_device.id(),
                 cow: cow_device.id(),
                 chunk_size_sectors: 8,
             },
-        )])
+        )
+        .expect("add snapshot-merge")
+        .load()
         .expect("DM_TABLE_LOAD snapshot-merge");
     snap_removed.suspend().expect("suspend old snapshot before handover");
     origin_removed.resume().expect("resume as snapshot-merge");
@@ -161,11 +167,11 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     loop {
         let status = origin_removed.status().expect("DM_DEV_STATUS");
         assert_eq!(status.target_count(), 1);
-        let reported: Vec<TableLine> = origin_removed.table_status().expect("DM_TABLE_STATUS").collect();
-        // Both new-format fields fall back to `Other` (see
-        // `from_status_falls_back_to_other_for_every_new_target`), so the
-        // merge-completion check parses the raw status string directly.
-        if let devmap::Target::Other { params, .. } = &reported[0].target {
+        let reported: Vec<_> = origin_removed.info().expect("DM_TABLE_STATUS").collect();
+        // snapshot-merge's runtime status isn't typed by this crate, so it
+        // parses back as `RawInfo` — the merge-completion check reads the
+        // raw status string directly.
+        if let Some(RawInfo(params)) = reported[0].parse::<snapshot::Merge>() {
             let mut nums = params.split(['/', ' ']).filter_map(|tok| tok.parse::<u64>().ok());
             if let (Some(allocated), Some(_total), Some(metadata)) = (nums.next(), nums.next(), nums.next())
                 && allocated == metadata
