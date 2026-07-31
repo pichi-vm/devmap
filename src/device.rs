@@ -517,7 +517,7 @@ mod tests {
     }
 
     /// Hand-builds a synthetic `DM_TARGET_MSG` response buffer, poking
-    /// `dm_ioctl_raw`'s fields directly by byte offset rather than going
+    /// the `dm_ioctl` fields directly by byte offset rather than going
     /// through `DmHeader`'s typed API (which has no public flags/
     /// `data_start`/`data_size` setters — those are only ever set by the
     /// kernel on a real response).
