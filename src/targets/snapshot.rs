@@ -36,16 +36,68 @@ impl FromStr for Origin {
     }
 }
 
+// Largest COW chunk size the kernel accepts, in 512-byte sectors:
+// `INT_MAX >> SECTOR_SHIFT` (`SECTOR_SHIFT` is 9).
+const SNAPSHOT_MAX_CHUNK_SIZE_SECTORS: u32 = 4_194_303;
+
+/// Validate a copy-on-write `chunk_size_sectors` against the kernel's
+/// rules: nonzero, a power of two, and no larger than
+/// `INT_MAX >> SECTOR_SHIFT`.
+fn check_chunk_size_sectors(chunk_size_sectors: u32) -> Result<(), crate::Error> {
+    if chunk_size_sectors == 0 {
+        return Err(crate::Error::Usage("snapshot chunk_size_sectors must not be zero".into()));
+    }
+    if !chunk_size_sectors.is_power_of_two() {
+        return Err(crate::Error::Usage(format!(
+            "snapshot chunk_size_sectors must be a power of two, got {chunk_size_sectors}"
+        )));
+    }
+    if chunk_size_sectors > SNAPSHOT_MAX_CHUNK_SIZE_SECTORS {
+        return Err(crate::Error::Usage(format!(
+            "snapshot chunk_size_sectors must be <= {SNAPSHOT_MAX_CHUNK_SIZE_SECTORS}, \
+             got {chunk_size_sectors}"
+        )));
+    }
+    Ok(())
+}
+
 /// A copy-on-write snapshot of an origin device. Always persistent with
 /// overflow support ("PO").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Snapshot {
+    origin: DevId,
+    cow: DevId,
+    chunk_size_sectors: u32,
+}
+impl Snapshot {
+    /// Construct a [`Snapshot`].
+    ///
+    /// # Errors
+    ///
+    /// [`crate::Error::Usage`] if `chunk_size_sectors` is zero, not a
+    /// power of two, or greater than `4_194_303`
+    /// (`INT_MAX >> SECTOR_SHIFT`).
+    pub fn new(origin: DevId, cow: DevId, chunk_size_sectors: u32) -> Result<Self, crate::Error> {
+        check_chunk_size_sectors(chunk_size_sectors)?;
+        Ok(Snapshot { origin, cow, chunk_size_sectors })
+    }
+
     /// The device being snapshotted.
-    pub origin: DevId,
+    #[must_use]
+    pub fn origin(&self) -> DevId {
+        self.origin
+    }
     /// The copy-on-write store holding changed chunks.
-    pub cow: DevId,
+    #[must_use]
+    pub fn cow(&self) -> DevId {
+        self.cow
+    }
     /// Copy-on-write chunk size, in 512-byte sectors.
-    pub chunk_size_sectors: u64,
+    #[must_use]
+    pub fn chunk_size_sectors(&self) -> u32 {
+        self.chunk_size_sectors
+    }
 }
 impl Target for Snapshot {
     const TYPE_NAME: &'static str = "snapshot";
@@ -61,13 +113,40 @@ impl fmt::Display for Snapshot {
 /// into its origin. Takes the same fields as [`Snapshot`] and is always
 /// persistent with overflow support ("PO").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Merge {
+    origin: DevId,
+    cow: DevId,
+    chunk_size_sectors: u32,
+}
+impl Merge {
+    /// Construct a [`Merge`].
+    ///
+    /// # Errors
+    ///
+    /// [`crate::Error::Usage`] if `chunk_size_sectors` is zero, not a
+    /// power of two, or greater than `4_194_303`
+    /// (`INT_MAX >> SECTOR_SHIFT`).
+    pub fn new(origin: DevId, cow: DevId, chunk_size_sectors: u32) -> Result<Self, crate::Error> {
+        check_chunk_size_sectors(chunk_size_sectors)?;
+        Ok(Merge { origin, cow, chunk_size_sectors })
+    }
+
     /// The origin device to merge back into.
-    pub origin: DevId,
+    #[must_use]
+    pub fn origin(&self) -> DevId {
+        self.origin
+    }
     /// The copy-on-write store to merge from.
-    pub cow: DevId,
+    #[must_use]
+    pub fn cow(&self) -> DevId {
+        self.cow
+    }
     /// Copy-on-write chunk size, in 512-byte sectors.
-    pub chunk_size_sectors: u64,
+    #[must_use]
+    pub fn chunk_size_sectors(&self) -> u32 {
+        self.chunk_size_sectors
+    }
 }
 impl Target for Merge {
     const TYPE_NAME: &'static str = "snapshot-merge";
@@ -94,7 +173,7 @@ mod tests {
 
     #[test]
     fn snapshot_renders_with_po_persistence() {
-        let t = Snapshot { origin: DevId::new(252, 1), cow: DevId::new(252, 2), chunk_size_sectors: 8 };
+        let t = Snapshot::new(DevId::new(252, 1), DevId::new(252, 2), 8).expect("valid snapshot");
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot 252:1 252:2 PO 8");
     }
 
@@ -106,12 +185,60 @@ mod tests {
 
     #[test]
     fn snapshot_merge_renders_like_snapshot_with_po() {
-        let t = Merge { origin: DevId::new(252, 1), cow: DevId::new(252, 2), chunk_size_sectors: 8 };
+        let t = Merge::new(DevId::new(252, 1), DevId::new(252, 2), 8).expect("valid merge");
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-merge 252:1 252:2 PO 8");
+    }
+
+    #[test]
+    fn snapshot_new_rejects_bad_chunk_size() {
+        // Zero.
+        assert!(matches!(
+            Snapshot::new(DevId::new(252, 1), DevId::new(252, 2), 0),
+            Err(crate::Error::Usage(_))
+        ));
+        // Not a power of two.
+        assert!(matches!(
+            Snapshot::new(DevId::new(252, 1), DevId::new(252, 2), 6),
+            Err(crate::Error::Usage(_))
+        ));
+        // Over the kernel cap.
+        assert!(matches!(
+            Snapshot::new(DevId::new(252, 1), DevId::new(252, 2), 8_388_608),
+            Err(crate::Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn snapshot_new_accepts_valid_chunk_size() {
+        assert!(Snapshot::new(DevId::new(252, 1), DevId::new(252, 2), 8).is_ok());
+        assert!(Merge::new(DevId::new(252, 1), DevId::new(252, 2), 8).is_ok());
+    }
+
+    #[test]
+    fn merge_new_rejects_bad_chunk_size() {
+        assert!(matches!(
+            Merge::new(DevId::new(252, 1), DevId::new(252, 2), 0),
+            Err(crate::Error::Usage(_))
+        ));
+        assert!(matches!(
+            Merge::new(DevId::new(252, 1), DevId::new(252, 2), 6),
+            Err(crate::Error::Usage(_))
+        ));
+        assert!(matches!(
+            Merge::new(DevId::new(252, 1), DevId::new(252, 2), 8_388_608),
+            Err(crate::Error::Usage(_))
+        ));
     }
 
     #[test]
     fn snapshot_origin_from_str_rejects_trailing_tokens() {
         assert!("252:1 extra".parse::<Origin>().is_err());
+    }
+
+    #[test]
+    fn snapshot_origin_display_from_str_round_trips() {
+        let original = Origin { origin: DevId::new(252, 7) };
+        let params = original.to_string();
+        assert_eq!(params.parse::<Origin>(), Ok(original));
     }
 }

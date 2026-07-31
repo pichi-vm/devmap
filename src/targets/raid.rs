@@ -35,9 +35,9 @@ impl DevicePair {
     }
 }
 
-/// [`Raid`]'s raid level. Default layouts only; for the raid5/6
-/// layout-suffix variants (`_la`/`_ra`/`_ls`/`_rs`/`_n`), use a
-/// user-defined target.
+/// [`Raid`]'s raid level. `Raid5`/`Raid6` use the conventional default
+/// parity layouts (`raid5_ls`, `raid6_zr`); for other layout suffixes
+/// (`_la`/`_ra`/`_rs`/`_n`, ...) use a user-defined target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Type {
@@ -77,15 +77,27 @@ impl Raid {
     ///
     /// # Errors
     ///
-    /// [`crate::Error::Usage`] if `devices` is empty, or if (for a
+    /// [`crate::Error::Usage`] if `devices` has fewer than the level's
+    /// minimum (raid1/4/5/10 need ≥2, raid6 needs ≥3), or if (for a
     /// non-raid1 level) `chunk_size_sectors` is not a power of two `>= 8`.
     pub fn new(
         raid_type: Type,
         chunk_size_sectors: u64,
         devices: Vec<DevicePair>,
     ) -> Result<Self, crate::Error> {
-        if devices.is_empty() {
-            return Err(crate::Error::Usage("raid requires at least one device".into()));
+        // The kernel's raid_set_alloc requires more total devices than parity
+        // devices: raid4/5 need ≥2, raid6 ≥3; raid1/raid10 need ≥2 to be
+        // meaningful. raid0 (no parity) needs ≥1.
+        let min_devices = match raid_type {
+            Type::Raid0 => 1,
+            Type::Raid1 | Type::Raid4 | Type::Raid5 | Type::Raid10 => 2,
+            Type::Raid6 => 3,
+        };
+        if devices.len() < min_devices {
+            return Err(crate::Error::Usage(format!(
+                "{raid_type:?} requires at least {min_devices} device(s), got {}",
+                devices.len()
+            )));
         }
         let chunk_size_sectors = if raid_type == Type::Raid1 {
             // raid1 has no stripes; the kernel ignores (and rejects a
@@ -128,8 +140,10 @@ impl fmt::Display for Raid {
             Type::Raid0 => "raid0",
             Type::Raid1 => "raid1",
             Type::Raid4 => "raid4",
-            Type::Raid5 => "raid5",
-            Type::Raid6 => "raid6",
+            // The kernel's raid_types[] has no bare "raid5"/"raid6"; emit the
+            // conventional default parity layouts it does accept.
+            Type::Raid5 => "raid5_ls",
+            Type::Raid6 => "raid6_zr",
             Type::Raid10 => "raid10",
         };
         // `<chunk_size>` is a bare positional number, not a
@@ -175,33 +189,41 @@ mod tests {
         assert_eq!(line(0, 1_048_576, &t), "0 1048576 raid raid1 1 0 2 - 252:1 252:2 252:3");
     }
 
+    fn devs(n: u32) -> Vec<DevicePair> {
+        (0..n).map(|i| DevicePair::data_only(DevId::new(252, i))).collect()
+    }
+
     #[test]
     fn raid_non_power_of_two_or_too_small_chunk_is_rejected() {
-        let npot =
-            Raid::new(Type::Raid5, 100, vec![DevicePair::data_only(DevId::new(252, 1))]);
+        // Two devices so the chunk-size check (not the device-count check) is
+        // what rejects these.
+        let npot = Raid::new(Type::Raid5, 100, devs(2));
         assert!(matches!(npot, Err(crate::Error::Usage(_))));
-        let small =
-            Raid::new(Type::Raid5, 4, vec![DevicePair::data_only(DevId::new(252, 1))]);
+        let small = Raid::new(Type::Raid5, 4, devs(2));
         assert!(matches!(small, Err(crate::Error::Usage(_))));
     }
 
     #[test]
-    fn raid_empty_devices_is_rejected() {
-        let r = Raid::new(Type::Raid1, 0, vec![]);
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
+    fn raid_too_few_devices_is_rejected() {
+        assert!(matches!(Raid::new(Type::Raid1, 0, devs(1)), Err(crate::Error::Usage(_))));
+        assert!(matches!(Raid::new(Type::Raid5, 8, devs(1)), Err(crate::Error::Usage(_))));
+        assert!(matches!(Raid::new(Type::Raid6, 8, devs(2)), Err(crate::Error::Usage(_))));
+        assert!(matches!(Raid::new(Type::Raid0, 8, devs(0)), Err(crate::Error::Usage(_))));
+        // Minimums accepted.
+        assert!(Raid::new(Type::Raid6, 8, devs(3)).is_ok());
     }
 
     #[test]
     fn raid_renders_each_type_token() {
-        let dev = || vec![DevicePair::data_only(DevId::new(252, 1))];
-        for (ty, token) in [
-            (Type::Raid0, "raid0"),
-            (Type::Raid4, "raid4"),
-            (Type::Raid5, "raid5"),
-            (Type::Raid6, "raid6"),
-            (Type::Raid10, "raid10"),
+        // raid5/raid6 render the kernel's default layout suffix, not a bare name.
+        for (ty, token, n) in [
+            (Type::Raid0, "raid0", 1),
+            (Type::Raid4, "raid4", 2),
+            (Type::Raid5, "raid5_ls", 2),
+            (Type::Raid6, "raid6_zr", 3),
+            (Type::Raid10, "raid10", 2),
         ] {
-            let t = Raid::new(ty, 8, dev()).expect("valid raid");
+            let t = Raid::new(ty, 8, devs(n)).expect("valid raid");
             assert!(line(0, 1024, &t).contains(&format!("raid {token} 1 8 ")), "{token}");
         }
     }

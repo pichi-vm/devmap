@@ -24,7 +24,8 @@ impl Unstriped {
     ///
     /// # Errors
     ///
-    /// [`crate::Error::Usage`] if `stripe_index >= stripes`.
+    /// [`crate::Error::Usage`] if `stripes` is zero, `chunk_size_sectors`
+    /// is zero, or `stripe_index >= stripes`.
     pub fn new(
         stripes: u32,
         chunk_size_sectors: u32,
@@ -32,6 +33,14 @@ impl Unstriped {
         device: DevId,
         offset_sectors: u64,
     ) -> Result<Self, crate::Error> {
+        if stripes == 0 {
+            return Err(crate::Error::Usage("unstriped requires at least one stripe".into()));
+        }
+        if chunk_size_sectors == 0 {
+            return Err(crate::Error::Usage(
+                "unstriped chunk_size_sectors must not be zero".into(),
+            ));
+        }
         if stripe_index >= stripes {
             return Err(crate::Error::Usage(format!(
                 "unstriped stripe_index ({stripe_index}) must be less than stripes ({stripes})"
@@ -103,6 +112,22 @@ mod tests {
     fn unstriped_rejects_out_of_range_stripe_index() {
         assert!(matches!(
             Unstriped::new(2, 256, 2, DevId::new(252, 1), 0),
+            Err(crate::Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn unstriped_rejects_zero_stripes() {
+        assert!(matches!(
+            Unstriped::new(0, 256, 0, DevId::new(252, 1), 0),
+            Err(crate::Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn unstriped_rejects_zero_chunk_size() {
+        assert!(matches!(
+            Unstriped::new(2, 0, 0, DevId::new(252, 1), 0),
             Err(crate::Error::Usage(_))
         ));
     }

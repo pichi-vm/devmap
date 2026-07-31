@@ -121,8 +121,18 @@ impl Flakey {
     /// - a [`Feature::CorruptBioByte`] has `nth_byte == 0` (the kernel
     ///   byte index is 1-based);
     /// - the same feature *kind* appears more than once;
+    /// - the total (up + down) interval is `0` or overflows `u32`;
+    /// - a [`Feature::RandomReadCorrupt`] or [`Feature::RandomWriteCorrupt`]
+    ///   has a `probability` above `1_000_000_000`;
     /// - both [`Feature::DropWrites`] and [`Feature::ErrorWrites`] are
-    ///   present (the kernel rejects the combination).
+    ///   present (the kernel rejects the combination);
+    /// - a write-dropping/erroring feature ([`Feature::DropWrites`] or
+    ///   [`Feature::ErrorWrites`]) is combined with write-side corruption
+    ///   ([`Feature::RandomWriteCorrupt`] or a [`Feature::CorruptBioByte`]
+    ///   with [`Direction::Write`]);
+    /// - [`Feature::ErrorReads`] is combined with read-side corruption
+    ///   ([`Feature::RandomReadCorrupt`] or a [`Feature::CorruptBioByte`]
+    ///   with [`Direction::Read`]).
     pub fn new(
         device: DevId,
         offset_sectors: u64,
@@ -130,12 +140,33 @@ impl Flakey {
         down_interval_secs: u32,
         features: Vec<Feature>,
     ) -> Result<Self, crate::Error> {
+        match up_interval_secs.checked_add(down_interval_secs) {
+            None => {
+                return Err(crate::Error::Usage(
+                    "flakey up+down interval overflows u32".into(),
+                ));
+            }
+            Some(0) => {
+                return Err(crate::Error::Usage(
+                    "flakey requires a nonzero total (up + down) interval".into(),
+                ));
+            }
+            Some(_) => {}
+        }
         let mut seen_kinds = 0u8;
         for feature in &features {
             if let Feature::CorruptBioByte { nth_byte: 0, .. } = feature {
                 return Err(crate::Error::Usage(
                     "flakey corrupt_bio_byte nth_byte is 1-based; 0 is invalid".into(),
                 ));
+            }
+            if let Feature::RandomReadCorrupt { probability }
+            | Feature::RandomWriteCorrupt { probability } = feature
+                && *probability > 1_000_000_000
+            {
+                return Err(crate::Error::Usage(format!(
+                    "flakey random corrupt probability must be <= 1000000000, got {probability}"
+                )));
             }
             let bit = 1u8 << feature.kind();
             if seen_kinds & bit != 0 {
@@ -150,6 +181,31 @@ impl Flakey {
         if has_drop && has_error {
             return Err(crate::Error::Usage(
                 "flakey cannot combine drop_writes and error_writes".into(),
+            ));
+        }
+        let has_error_reads = features.iter().any(|f| matches!(f, Feature::ErrorReads));
+        let has_write_corrupt = features.iter().any(|f| {
+            matches!(
+                f,
+                Feature::RandomWriteCorrupt { .. }
+                    | Feature::CorruptBioByte { direction: Direction::Write, .. }
+            )
+        });
+        let has_read_corrupt = features.iter().any(|f| {
+            matches!(
+                f,
+                Feature::RandomReadCorrupt { .. }
+                    | Feature::CorruptBioByte { direction: Direction::Read, .. }
+            )
+        });
+        if (has_drop || has_error) && has_write_corrupt {
+            return Err(crate::Error::Usage(
+                "flakey cannot combine drop_writes/error_writes with write-side corruption".into(),
+            ));
+        }
+        if has_error_reads && has_read_corrupt {
+            return Err(crate::Error::Usage(
+                "flakey cannot combine error_reads with read-side corruption".into(),
             ));
         }
         Ok(Flakey { device, offset_sectors, up_interval_secs, down_interval_secs, features })
@@ -312,6 +368,72 @@ mod tests {
         )
         .expect("valid flakey");
         assert_eq!(line(0, 8192, &t), "0 8192 flakey 252:1 0 60 5 2 random_read_corrupt 500000000");
+    }
+
+    #[test]
+    fn flakey_rejects_zero_total_interval() {
+        let r = Flakey::new(DevId::new(252, 1), 0, 0, 0, vec![]);
+        assert!(matches!(r, Err(crate::Error::Usage(_))));
+    }
+
+    #[test]
+    fn flakey_rejects_probability_over_one_billion() {
+        let r = Flakey::new(
+            DevId::new(252, 1),
+            0,
+            60,
+            5,
+            vec![Feature::RandomReadCorrupt { probability: 1_000_000_001 }],
+        );
+        assert!(matches!(r, Err(crate::Error::Usage(_))));
+    }
+
+    #[test]
+    fn flakey_rejects_drop_writes_with_write_side_corruption() {
+        let r = Flakey::new(
+            DevId::new(252, 1),
+            0,
+            60,
+            5,
+            vec![Feature::DropWrites, Feature::RandomWriteCorrupt { probability: 10 }],
+        );
+        assert!(matches!(r, Err(crate::Error::Usage(_))));
+    }
+
+    #[test]
+    fn flakey_rejects_error_reads_with_read_side_corruption() {
+        let r = Flakey::new(
+            DevId::new(252, 1),
+            0,
+            60,
+            5,
+            vec![Feature::ErrorReads, Feature::RandomReadCorrupt { probability: 10 }],
+        );
+        assert!(matches!(r, Err(crate::Error::Usage(_))));
+    }
+
+    #[test]
+    fn flakey_accepts_valid_multi_feature() {
+        // drop_writes (write-side) with read-side corruption is a legal
+        // combination — the incompatibility rules only forbid mixing a
+        // side's drop/error flag with corruption on that *same* side.
+        let t = Flakey::new(
+            DevId::new(252, 1),
+            0,
+            60,
+            5,
+            vec![
+                Feature::DropWrites,
+                Feature::RandomReadCorrupt { probability: 1_000_000_000 },
+                Feature::CorruptBioByte {
+                    nth_byte: 1,
+                    direction: Direction::Read,
+                    value: 7,
+                    flags: 0,
+                },
+            ],
+        );
+        assert!(t.is_ok());
     }
 
     #[test]
