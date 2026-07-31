@@ -3,9 +3,12 @@ name = "devmap"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/pichi-vm/devmap"
-publish = false
 description = "High-level, iocuddle-based Linux device-mapper ioctl layer."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+readme = "README.md"
+keywords = ["linux", "device-mapper", "dm", "ioctl", "block-device"]
+categories = ["os::unix-apis", "api-bindings"]
 
 [dependencies]
 iocuddle = "0.3"
