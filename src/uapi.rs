@@ -4,10 +4,11 @@
 //! ONLY module in the crate that needs `#![allow(unsafe_code)]` — every
 //! unsafe block here is an iocuddle const constructor.
 //!
-//! Raw structs (`dm_ioctl_raw`, `dm_target_spec_raw`) are `pub(crate)` so
-//! the safe wrappers in [`super::header`]/[`super::table`] can use them,
-//! but they never cross the crate boundary. All field layouts and command
-//! numbers below mirror `<linux/dm-ioctl.h>`.
+//! The raw `dm_target_spec_raw` struct is `pub(crate)` so the table builder
+//! in [`super::table`] can use it, and [`super::header::DmHeader`] is the
+//! safe `#[repr(C)]` mirror of `struct dm_ioctl` — neither crosses the crate
+//! boundary. All field layouts and command numbers below mirror
+//! `<linux/dm-ioctl.h>`.
 
 #![allow(unsafe_code)]
 
@@ -19,29 +20,6 @@ pub(crate) const DM_UUID_LEN: usize = 129;
 pub(crate) const DM_MAX_TYPE_NAME: usize = 16;
 
 pub(crate) const DM_IOCTL_VERSION_MAJOR: u32 = 4;
-
-/// Mirror of `struct dm_ioctl` from `<linux/dm-ioctl.h>`. Field order is
-/// byte-for-byte identical to the kernel UAPI. Sizeof locked at 312 bytes
-/// by a unit test in [`super::header`].
-#[repr(C)]
-#[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Immutable)]
-#[allow(non_camel_case_types)]
-pub(crate) struct dm_ioctl_raw {
-    pub version: [u32; 3],
-    pub data_size: u32,
-    pub data_start: u32,
-    pub target_count: u32,
-    pub open_count: i32,
-    pub flags: u32,
-    pub event_nr: u32,
-    pub padding: u32,
-    pub dev: u64,
-    pub name: [u8; DM_NAME_LEN],
-    pub uuid: [u8; DM_UUID_LEN],
-    pub data: [u8; 7],
-}
-
-const _: () = assert!(core::mem::size_of::<dm_ioctl_raw>() == 312);
 
 /// Mirror of `struct dm_target_spec`. Sizeof locked at 40 bytes.
 ///
@@ -101,7 +79,7 @@ const DM_IOCTL_GROUP: Group = Group::new(0xfd);
 // SAFETY: every dm ioctl is `_IOWR(0xfd, N, struct dm_ioctl)` per
 // `<linux/dm-ioctl.h>` — confirmed directly against the installed header,
 // not from memory. We declare against `&super::header::DmHeader`, a
-// `#[repr(transparent)]` newtype over `dm_ioctl_raw` with private fields
+// `#[repr(C)]` mirror of `struct dm_ioctl` with private fields
 // and invariant-enforcing constructors, satisfying iocuddle's
 // "T provides safe wrappers around its raw contents" contract.
 pub(crate) const DM_DEV_CREATE: Ioctl<WriteRead, &super::header::DmHeader> =
