@@ -44,4 +44,11 @@ mod tests {
     fn error_target_kernel_abi_is_empty() {
         assert_eq!(line(0, 8, &Error), "0 8 error");
     }
+
+    #[test]
+    fn error_display_from_str_round_trips() {
+        let original = Error;
+        let params = original.to_string();
+        assert_eq!(params.parse::<Error>(), Ok(original));
+    }
 }

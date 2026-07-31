@@ -8,6 +8,11 @@ use std::fmt;
 use crate::DevId;
 use crate::table::{RawInfo, Target};
 
+/// The kernel's default high watermark (percent) when unset.
+const DEFAULT_HIGH_WATERMARK: u32 = 50;
+/// The kernel's default low watermark (percent) when unset.
+const DEFAULT_LOW_WATERMARK: u32 = 45;
+
 /// Backing store kind for a [`Writecache`] cache device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -148,11 +153,14 @@ impl Builder {
                 "writecache low_watermark must be <= 100, got {lw}"
             )));
         }
-        if let (Some(hw), Some(lw)) = (self.high_watermark_percent, self.low_watermark_percent)
-            && hw < lw
-        {
+        // The kernel fills an unset watermark with its default (high 50,
+        // low 45) and *always* checks high >= low — so resolve the effective
+        // values before comparing, not only when both are set.
+        let effective_high = self.high_watermark_percent.unwrap_or(DEFAULT_HIGH_WATERMARK);
+        let effective_low = self.low_watermark_percent.unwrap_or(DEFAULT_LOW_WATERMARK);
+        if effective_high < effective_low {
             return Err(crate::Error::Usage(format!(
-                "writecache high_watermark ({hw}) must be >= low_watermark ({lw})"
+                "writecache high_watermark ({effective_high}) must be >= low_watermark ({effective_low})"
             )));
         }
         if !self.block_size.is_power_of_two() || self.block_size < 512 {
@@ -236,6 +244,21 @@ mod tests {
             .low_watermark_percent(90)
             .build();
         assert!(matches!(r, Err(crate::Error::Usage(_))));
+    }
+
+    #[test]
+    fn writecache_rejects_high_below_default_low_when_low_unset() {
+        // low unset -> kernel default 45; high 40 < 45 must be rejected even
+        // though only one watermark was supplied.
+        let r = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
+            .high_watermark_percent(40)
+            .build();
+        assert!(matches!(r, Err(crate::Error::Usage(_))));
+        // high 50 (== default low+) is fine.
+        let ok = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
+            .high_watermark_percent(50)
+            .build();
+        assert!(ok.is_ok());
     }
 
     #[test]

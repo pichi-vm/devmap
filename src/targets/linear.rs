@@ -59,6 +59,13 @@ mod tests {
     }
 
     #[test]
+    fn linear_display_from_str_round_trips() {
+        let original = Linear { device: DevId::new(252, 5), offset_sectors: 42 };
+        let params = original.to_string();
+        assert_eq!(params.parse::<Linear>(), Ok(original));
+    }
+
+    #[test]
     fn linear_from_str_rejects_malformed_params() {
         for params in ["252:5 5 6" /* trailing */, "garbage" /* no colon */, "252:x 5" /* bad minor */, ""] {
             assert!(params.parse::<Linear>().is_err(), "linear should reject {params:?}");

@@ -27,7 +27,11 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
         .builder()
-        .add(0, 16384, Era { metadata: metadata_device.id(), origin: origin_device.id(), block_size: 128 })
+        .add(
+            0,
+            16384,
+            Era::new(metadata_device.id(), origin_device.id(), 128).expect("valid era"),
+        )
         .expect("add era")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -124,7 +128,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            Snapshot { origin: origin_backing_device.id(), cow: cow_device.id(), chunk_size_sectors: 8 },
+            Snapshot::new(origin_backing_device.id(), cow_device.id(), 8).expect("valid snapshot"),
         )
         .expect("add snapshot")
         .load()
@@ -149,11 +153,8 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            snapshot::Merge {
-                origin: origin_backing_device.id(),
-                cow: cow_device.id(),
-                chunk_size_sectors: 8,
-            },
+            snapshot::Merge::new(origin_backing_device.id(), cow_device.id(), 8)
+                .expect("valid snapshot-merge"),
         )
         .expect("add snapshot-merge")
         .load()

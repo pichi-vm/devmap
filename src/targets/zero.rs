@@ -63,6 +63,13 @@ mod tests {
     }
 
     #[test]
+    fn zero_display_from_str_round_trips() {
+        let original = Zero;
+        let params = original.to_string();
+        assert_eq!(params.parse::<Zero>(), Ok(original));
+    }
+
+    #[test]
     fn zero_and_error_reject_non_empty_params() {
         assert!("junk".parse::<Zero>().is_err());
         assert!("junk".parse::<Error>().is_err());
