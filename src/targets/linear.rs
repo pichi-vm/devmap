@@ -31,11 +31,18 @@ impl FromStr for Linear {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut it = s.split_whitespace();
         let device = it.next().and_then(parse_device).ok_or(ParseError)?;
-        let offset_sectors = it.next().ok_or(ParseError)?.parse().map_err(|_| ParseError)?;
+        let offset_sectors = it
+            .next()
+            .ok_or(ParseError)?
+            .parse()
+            .map_err(|_| ParseError)?;
         if it.next().is_some() {
             return Err(ParseError);
         }
-        Ok(Linear { device, offset_sectors })
+        Ok(Linear {
+            device,
+            offset_sectors,
+        })
     }
 }
 
@@ -54,21 +61,35 @@ mod tests {
 
     #[test]
     fn linear_renders_device_and_offset() {
-        let t = Linear { device: DevId::new(252, 5), offset_sectors: 5 };
+        let t = Linear {
+            device: DevId::new(252, 5),
+            offset_sectors: 5,
+        };
         assert_eq!(line(0, 1024, &t), "0 1024 linear 252:5 5");
     }
 
     #[test]
     fn linear_display_from_str_round_trips() {
-        let original = Linear { device: DevId::new(252, 5), offset_sectors: 42 };
+        let original = Linear {
+            device: DevId::new(252, 5),
+            offset_sectors: 42,
+        };
         let params = original.to_string();
         assert_eq!(params.parse::<Linear>(), Ok(original));
     }
 
     #[test]
     fn linear_from_str_rejects_malformed_params() {
-        for params in ["252:5 5 6" /* trailing */, "garbage" /* no colon */, "252:x 5" /* bad minor */, ""] {
-            assert!(params.parse::<Linear>().is_err(), "linear should reject {params:?}");
+        for params in [
+            "252:5 5 6", /* trailing */
+            "garbage",   /* no colon */
+            "252:x 5",   /* bad minor */
+            "",
+        ] {
+            assert!(
+                params.parse::<Linear>().is_err(),
+                "linear should reject {params:?}"
+            );
         }
     }
 }

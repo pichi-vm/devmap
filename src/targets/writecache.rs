@@ -93,7 +93,11 @@ impl fmt::Display for Writecache {
             Kind::Ssd => 's',
             Kind::PersistentMemory => 'p',
         };
-        write!(f, "{kind} {} {} {}", self.origin, self.cache, self.block_size)?;
+        write!(
+            f,
+            "{kind} {} {} {}",
+            self.origin, self.cache, self.block_size
+        )?;
         let opt_count = 2
             * (u32::from(self.high_watermark_percent.is_some())
                 + u32::from(self.low_watermark_percent.is_some()));
@@ -156,7 +160,9 @@ impl Builder {
         // The kernel fills an unset watermark with its default (high 50,
         // low 45) and *always* checks high >= low — so resolve the effective
         // values before comparing, not only when both are set.
-        let effective_high = self.high_watermark_percent.unwrap_or(DEFAULT_HIGH_WATERMARK);
+        let effective_high = self
+            .high_watermark_percent
+            .unwrap_or(DEFAULT_HIGH_WATERMARK);
         let effective_low = self.low_watermark_percent.unwrap_or(DEFAULT_LOW_WATERMARK);
         if effective_high < effective_low {
             return Err(crate::Error::Usage(format!(
@@ -199,7 +205,10 @@ mod tests {
             .high_watermark_percent(90)
             .build()
             .expect("valid writecache");
-        assert_eq!(line(0, 8192, &t), "0 8192 writecache s 252:1 252:2 4096 2 high_watermark 90");
+        assert_eq!(
+            line(0, 8192, &t),
+            "0 8192 writecache s 252:1 252:2 4096 2 high_watermark 90"
+        );
     }
 
     #[test]
@@ -221,7 +230,10 @@ mod tests {
             .low_watermark_percent(20)
             .build()
             .expect("valid writecache");
-        assert_eq!(line(0, 8192, &t), "0 8192 writecache s 252:1 252:2 4096 2 low_watermark 20");
+        assert_eq!(
+            line(0, 8192, &t),
+            "0 8192 writecache s 252:1 252:2 4096 2 low_watermark 20"
+        );
     }
 
     #[test]
@@ -272,14 +284,18 @@ mod tests {
     #[test]
     fn writecache_rejects_bad_block_size() {
         // Not a power of two.
-        let npot = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4000).build();
+        let npot =
+            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4000).build();
         assert!(matches!(npot, Err(crate::Error::Usage(_))));
         // Below 512.
-        let small = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 256).build();
+        let small =
+            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 256).build();
         assert!(matches!(small, Err(crate::Error::Usage(_))));
         // Valid: 512.
         assert!(
-            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 512).build().is_ok()
+            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 512)
+                .build()
+                .is_ok()
         );
     }
 }

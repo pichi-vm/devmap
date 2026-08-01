@@ -23,7 +23,11 @@ impl fmt::Display for Zero {
 impl FromStr for Zero {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() { Ok(Zero) } else { Err(ParseError) }
+        if s.is_empty() {
+            Ok(Zero)
+        } else {
+            Err(ParseError)
+        }
     }
 }
 
@@ -54,11 +58,16 @@ mod tests {
         assert_eq!("".parse::<Error>(), Ok(Error));
         assert_eq!(
             "252:5 5".parse::<Linear>(),
-            Ok(Linear { device: DevId::new(252, 5), offset_sectors: 5 })
+            Ok(Linear {
+                device: DevId::new(252, 5),
+                offset_sectors: 5
+            })
         );
         assert_eq!(
             "252:1".parse::<snapshot::Origin>(),
-            Ok(snapshot::Origin { origin: DevId::new(252, 1) })
+            Ok(snapshot::Origin {
+                origin: DevId::new(252, 1)
+            })
         );
     }
 

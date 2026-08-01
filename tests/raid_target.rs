@@ -14,7 +14,9 @@ use devmap::targets::raid::{DevicePair, Type};
 
 #[test]
 fn raid1_mirrors_writes_across_two_devices() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-raid");
 
     let disk0 = LoopDevice::create("raid1-disk0", 16 * 1024 * 1024);
@@ -53,13 +55,19 @@ fn raid1_mirrors_writes_across_two_devices() {
         if status.target_count() == 1 {
             break;
         }
-        assert!(Instant::now() < deadline, "raid1 target never reported ready");
+        assert!(
+            Instant::now() < deadline,
+            "raid1 target never reported ready"
+        );
         std::thread::sleep(Duration::from_millis(100));
     }
 
     let minor = removed.id().minor();
-    let mut file =
-        std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dm-{minor}")).expect("open");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("/dev/dm-{minor}"))
+        .expect("open");
     let pattern = [0x77u8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");

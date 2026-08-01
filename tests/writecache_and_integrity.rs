@@ -13,7 +13,9 @@ use devmap::targets::{Integrity, Writecache};
 
 #[test]
 fn writecache_passes_data_through() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-writecache");
 
     let origin = LoopDevice::create("writecache-origin", 16 * 1024 * 1024);
@@ -38,8 +40,11 @@ fn writecache_passes_data_through() {
     removed.resume().expect("resume");
 
     let minor = removed.id().minor();
-    let mut file =
-        std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dm-{minor}")).expect("open");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("/dev/dm-{minor}"))
+        .expect("open");
     let pattern = [0x5Au8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");
@@ -58,7 +63,9 @@ fn writecache_passes_data_through() {
 /// table line correctly, which this test verifies against a real kernel.
 #[test]
 fn integrity_first_use_format_then_reload_sequence() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-integrity");
 
     let backing = LoopDevice::create("integrity", 32 * 1024 * 1024);
@@ -76,7 +83,12 @@ fn integrity_first_use_format_then_reload_sequence() {
 
     // First load: 1-sector table lets the kernel format the (all-zero)
     // superblock rather than rejecting a mismatched size outright.
-    removed.builder().add(0, 1, target()).expect("add integrity").load().expect("DM_TABLE_LOAD (format)");
+    removed
+        .builder()
+        .add(0, 1, target())
+        .expect("add integrity")
+        .load()
+        .expect("DM_TABLE_LOAD (format)");
     removed.resume().expect("resume (format)");
     removed.suspend().expect("suspend before reload");
 

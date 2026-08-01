@@ -34,7 +34,9 @@ impl Unstriped {
         offset_sectors: u64,
     ) -> Result<Self, crate::Error> {
         if stripes == 0 {
-            return Err(crate::Error::Usage("unstriped requires at least one stripe".into()));
+            return Err(crate::Error::Usage(
+                "unstriped requires at least one stripe".into(),
+            ));
         }
         if chunk_size_sectors == 0 {
             return Err(crate::Error::Usage(
@@ -46,7 +48,13 @@ impl Unstriped {
                 "unstriped stripe_index ({stripe_index}) must be less than stripes ({stripes})"
             )));
         }
-        Ok(Unstriped { stripes, chunk_size_sectors, stripe_index, device, offset_sectors })
+        Ok(Unstriped {
+            stripes,
+            chunk_size_sectors,
+            stripe_index,
+            device,
+            offset_sectors,
+        })
     }
 
     /// The total number of stripes in the underlying mapping.
@@ -84,7 +92,11 @@ impl fmt::Display for Unstriped {
         write!(
             f,
             "{} {} {} {} {}",
-            self.stripes, self.chunk_size_sectors, self.stripe_index, self.device, self.offset_sectors
+            self.stripes,
+            self.chunk_size_sectors,
+            self.stripe_index,
+            self.device,
+            self.offset_sectors
         )
     }
 }

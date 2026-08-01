@@ -56,7 +56,8 @@ impl DevId {
 
     /// Inverse of [`DevId::from_dev_t`].
     pub(crate) fn to_dev_t(self) -> u64 {
-        let dev = (self.minor & 0xff) | ((self.major & 0xfff) << 8) | (((self.minor >> 8) & 0xfff) << 20);
+        let dev =
+            (self.minor & 0xff) | ((self.major & 0xfff) << 8) | (((self.minor >> 8) & 0xfff) << 20);
         u64::from(dev)
     }
 }
@@ -126,7 +127,9 @@ impl fmt::Debug for Device {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // `control` is deliberately omitted: a raw fd number adds nothing
         // useful to a Debug rendering.
-        f.debug_struct("Device").field("dev_t", &self.dev_t).finish_non_exhaustive()
+        f.debug_struct("Device")
+            .field("dev_t", &self.dev_t)
+            .finish_non_exhaustive()
     }
 }
 
@@ -158,11 +161,13 @@ impl Device {
     fn suspend_or_resume(&self, suspend: bool) -> Result<(), Error> {
         let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
         header.set_suspend(suspend);
-        DM_DEV_SUSPEND.ioctl(&*self.control, &mut header).map_err(|source| Error::DmIoctl {
-            op: "DM_DEV_SUSPEND",
-            source,
-            table_line: None,
-        })?;
+        DM_DEV_SUSPEND
+            .ioctl(&*self.control, &mut header)
+            .map_err(|source| Error::DmIoctl {
+                op: "DM_DEV_SUSPEND",
+                source,
+                table_line: None,
+            })?;
         check_version("DM_DEV_SUSPEND", &header)
     }
 
@@ -189,11 +194,13 @@ impl Device {
 
     fn remove_now(control: &File, dev_t: DevId) -> Result<(), Error> {
         let mut header = DmHeader::by_dev(dev_t.to_dev_t());
-        DM_DEV_REMOVE.ioctl(control, &mut header).map_err(|source| Error::DmIoctl {
-            op: "DM_DEV_REMOVE",
-            source,
-            table_line: None,
-        })?;
+        DM_DEV_REMOVE
+            .ioctl(control, &mut header)
+            .map_err(|source| Error::DmIoctl {
+                op: "DM_DEV_REMOVE",
+                source,
+                table_line: None,
+            })?;
         check_version("DM_DEV_REMOVE", &header)
     }
 
@@ -215,11 +222,13 @@ impl Device {
     /// doesn't exist — `ENXIO`).
     pub fn status(&self) -> Result<Status, Error> {
         let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
-        DM_DEV_STATUS.ioctl(&*self.control, &mut header).map_err(|source| Error::DmIoctl {
-            op: "DM_DEV_STATUS",
-            source,
-            table_line: None,
-        })?;
+        DM_DEV_STATUS
+            .ioctl(&*self.control, &mut header)
+            .map_err(|source| Error::DmIoctl {
+                op: "DM_DEV_STATUS",
+                source,
+                table_line: None,
+            })?;
         check_version("DM_DEV_STATUS", &header)?;
         Ok(Status::from_header(&header))
     }
@@ -266,11 +275,15 @@ impl Device {
             &[],
             4096,
         )?;
-        let (parsed, _): (&DmHeader, _) =
-            zerocopy::FromBytes::ref_from_prefix(&buf).expect("buf is at least DmHeader::SIZE bytes");
+        let (parsed, _): (&DmHeader, _) = zerocopy::FromBytes::ref_from_prefix(&buf)
+            .expect("buf is at least DmHeader::SIZE bytes");
         let target_count = parsed.target_count();
         let data_start = (parsed.data_start() as usize).min(buf.len());
-        Ok(crate::table::TableStatusIter::new(buf, data_start, target_count))
+        Ok(crate::table::TableStatusIter::new(
+            buf,
+            data_start,
+            target_count,
+        ))
     }
 
     /// `DM_TARGET_MSG` — send a target-specific message string to whichever
@@ -485,7 +498,11 @@ mod tests {
     fn dev_id_round_trips() {
         for (major, minor) in [(0u32, 0u32), (252, 5), (7, 0), (0xfff, 0xf_ffff), (1, 1)] {
             let id = DevId::new(major, minor);
-            assert_eq!(DevId::from_dev_t(id.to_dev_t()), id, "major={major} minor={minor}");
+            assert_eq!(
+                DevId::from_dev_t(id.to_dev_t()),
+                id,
+                "major={major} minor={minor}"
+            );
         }
     }
 

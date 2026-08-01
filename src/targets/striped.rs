@@ -22,17 +22,21 @@ impl Striped {
     ///
     /// [`crate::Error::Usage`] if `stripes` is empty or
     /// `chunk_size_sectors` is zero.
-    pub fn new(
-        chunk_size_sectors: u32,
-        stripes: Vec<(DevId, u64)>,
-    ) -> Result<Self, crate::Error> {
+    pub fn new(chunk_size_sectors: u32, stripes: Vec<(DevId, u64)>) -> Result<Self, crate::Error> {
         if stripes.is_empty() {
-            return Err(crate::Error::Usage("striped requires at least one stripe".into()));
+            return Err(crate::Error::Usage(
+                "striped requires at least one stripe".into(),
+            ));
         }
         if chunk_size_sectors == 0 {
-            return Err(crate::Error::Usage("striped chunk_size_sectors must not be zero".into()));
+            return Err(crate::Error::Usage(
+                "striped chunk_size_sectors must not be zero".into(),
+            ));
         }
-        Ok(Striped { chunk_size_sectors, stripes })
+        Ok(Striped {
+            chunk_size_sectors,
+            stripes,
+        })
     }
 
     /// The chunk size in sectors.
@@ -82,7 +86,10 @@ mod tests {
 
     #[test]
     fn striped_rejects_empty_stripes() {
-        assert!(matches!(Striped::new(128, vec![]), Err(crate::Error::Usage(_))));
+        assert!(matches!(
+            Striped::new(128, vec![]),
+            Err(crate::Error::Usage(_))
+        ));
     }
 
     #[test]

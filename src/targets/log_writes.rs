@@ -43,7 +43,10 @@ mod tests {
 
     #[test]
     fn log_writes_renders_both_devices() {
-        let t = LogWrites { device: DevId::new(252, 1), log_device: DevId::new(252, 2) };
+        let t = LogWrites {
+            device: DevId::new(252, 1),
+            log_device: DevId::new(252, 2),
+        };
         assert_eq!(line(0, 8192, &t), "0 8192 log-writes 252:1 252:2");
     }
 }

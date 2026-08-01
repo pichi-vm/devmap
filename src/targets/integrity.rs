@@ -162,13 +162,18 @@ impl Builder {
     pub fn build(self) -> Result<Integrity, crate::Error> {
         if let Some(alg) = &self.internal_hash
             && (alg.is_empty()
-                || alg.bytes().any(|b| b == 0 || b.is_ascii_whitespace() || b.is_ascii_control()))
+                || alg
+                    .bytes()
+                    .any(|b| b == 0 || b.is_ascii_whitespace() || b.is_ascii_control()))
         {
-            return Err(crate::Error::Usage(format!("invalid integrity internal_hash: {alg:?}")));
+            return Err(crate::Error::Usage(format!(
+                "invalid integrity internal_hash: {alg:?}"
+            )));
         }
         if self.tag_size.is_none() && self.internal_hash.is_none() {
             return Err(crate::Error::Usage(
-                "integrity needs either a tag_size or an internal_hash to derive the tag size".into(),
+                "integrity needs either a tag_size or an internal_hash to derive the tag size"
+                    .into(),
             ));
         }
         if let Some(size) = self.tag_size
@@ -230,7 +235,10 @@ mod tests {
             .internal_hash("sha256")
             .build()
             .expect("valid integrity");
-        assert_eq!(line(0, 8192, &t), "0 8192 integrity 252:1 0 - J 1 internal_hash:sha256");
+        assert_eq!(
+            line(0, 8192, &t),
+            "0 8192 integrity 252:1 0 - J 1 internal_hash:sha256"
+        );
     }
 
     #[test]
@@ -241,7 +249,10 @@ mod tests {
             .allow_discards(true)
             .build()
             .expect("valid integrity");
-        assert_eq!(line(0, 8192, &t), "0 8192 integrity 252:1 0 32 D 2 internal_hash:sha256 allow_discards");
+        assert_eq!(
+            line(0, 8192, &t),
+            "0 8192 integrity 252:1 0 32 D 2 internal_hash:sha256 allow_discards"
+        );
     }
 
     #[test]
@@ -252,17 +263,28 @@ mod tests {
 
     #[test]
     fn integrity_bad_tag_size_is_rejected() {
-        let r0 = Integrity::builder(DevId::new(252, 1), 0, Mode::Direct).tag_size(0).build();
+        let r0 = Integrity::builder(DevId::new(252, 1), 0, Mode::Direct)
+            .tag_size(0)
+            .build();
         assert!(matches!(r0, Err(crate::Error::Usage(_))));
-        let r256 = Integrity::builder(DevId::new(252, 1), 0, Mode::Direct).tag_size(256).build();
+        let r256 = Integrity::builder(DevId::new(252, 1), 0, Mode::Direct)
+            .tag_size(256)
+            .build();
         assert!(matches!(r256, Err(crate::Error::Usage(_))));
         // A tag_size alone (no internal_hash) is fine when in range.
-        assert!(Integrity::builder(DevId::new(252, 1), 0, Mode::Direct).tag_size(32).build().is_ok());
+        assert!(
+            Integrity::builder(DevId::new(252, 1), 0, Mode::Direct)
+                .tag_size(32)
+                .build()
+                .is_ok()
+        );
     }
 
     #[test]
     fn integrity_inline_without_hash_or_with_discards_is_rejected() {
-        let no_hash = Integrity::builder(DevId::new(252, 1), 0, Mode::Inline).tag_size(32).build();
+        let no_hash = Integrity::builder(DevId::new(252, 1), 0, Mode::Inline)
+            .tag_size(32)
+            .build();
         assert!(matches!(no_hash, Err(crate::Error::Usage(_))));
         let with_discards = Integrity::builder(DevId::new(252, 1), 0, Mode::Inline)
             .internal_hash("sha256")
@@ -273,7 +295,9 @@ mod tests {
 
     #[test]
     fn integrity_bitmap_without_hash_is_rejected() {
-        let r = Integrity::builder(DevId::new(252, 1), 0, Mode::Bitmap).tag_size(32).build();
+        let r = Integrity::builder(DevId::new(252, 1), 0, Mode::Bitmap)
+            .tag_size(32)
+            .build();
         assert!(matches!(r, Err(crate::Error::Usage(_))));
     }
 

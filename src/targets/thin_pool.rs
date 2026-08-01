@@ -188,7 +188,8 @@ impl Builder {
             + u32::from(self.error_if_no_space);
         if set > 4 {
             return Err(crate::Error::Usage(
-                "thin-pool accepts at most 4 feature flags; the kernel rejects all 5 at once".into(),
+                "thin-pool accepts at most 4 feature flags; the kernel rejects all 5 at once"
+                    .into(),
             ));
         }
         if !(128..=2_097_152).contains(&self.data_block_size_sectors)
@@ -278,7 +279,15 @@ mod tests {
 
     #[test]
     fn thin_pool_valid_data_block_size_is_accepted() {
-        assert!(ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0).build().is_ok());
-        assert!(ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 2_097_152, 0).build().is_ok());
+        assert!(
+            ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0)
+                .build()
+                .is_ok()
+        );
+        assert!(
+            ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 2_097_152, 0)
+                .build()
+                .is_ok()
+        );
     }
 }

@@ -214,7 +214,10 @@ mod tests {
 
     #[test]
     fn by_name_rejects_nul_and_overlong() {
-        assert!(matches!(DmHeader::by_name("foo\0bar"), Err(Error::Usage(_))));
+        assert!(matches!(
+            DmHeader::by_name("foo\0bar"),
+            Err(Error::Usage(_))
+        ));
         let long = "a".repeat(200);
         assert!(matches!(DmHeader::by_name(&long), Err(Error::Usage(_))));
     }

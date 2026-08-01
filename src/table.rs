@@ -160,7 +160,11 @@ impl<M: mode::Mode> fmt::Display for Row<M> {
         if self.params.is_empty() {
             write!(f, "{} {} {}", self.start, self.length, self.type_name)
         } else {
-            write!(f, "{} {} {} {}", self.start, self.length, self.type_name, self.params)
+            write!(
+                f,
+                "{} {} {} {}",
+                self.start, self.length, self.type_name, self.params
+            )
         }
     }
 }
@@ -181,7 +185,13 @@ impl TableBuilder {
     pub(crate) fn new(control: Arc<File>, dev: DevId) -> Self {
         let mut buf = Vec::with_capacity(DmHeader::SIZE + 256);
         buf.extend_from_slice(DmHeader::by_dev(dev.to_dev_t()).as_bytes());
-        Self { control, buf, count: 0, last_spec_off: None, rendered: Vec::new() }
+        Self {
+            control,
+            buf,
+            count: 0,
+            last_spec_off: None,
+            rendered: Vec::new(),
+        }
     }
 
     /// Append a target mapping sectors `[start, start + length)`.
@@ -195,13 +205,21 @@ impl TableBuilder {
     // `target` is taken by value (the builder owns each row's rendering) even
     // though it's only read through `Display`.
     #[allow(clippy::cast_possible_truncation, clippy::needless_pass_by_value)]
-    pub fn add<T: Target + fmt::Display>(mut self, start: u64, length: u64, target: T) -> Result<Self, Error> {
+    pub fn add<T: Target + fmt::Display>(
+        mut self,
+        start: u64,
+        length: u64,
+        target: T,
+    ) -> Result<Self, Error> {
         let name = T::TYPE_NAME.as_bytes();
         if name.is_empty()
             || name.len() >= DM_MAX_TYPE_NAME
             || name.iter().any(|b| *b == 0 || b.is_ascii_whitespace())
         {
-            return Err(Error::Usage(format!("invalid dm target type name: {:?}", T::TYPE_NAME)));
+            return Err(Error::Usage(format!(
+                "invalid dm target type name: {:?}",
+                T::TYPE_NAME
+            )));
         }
 
         let mut params = String::new();
@@ -223,7 +241,13 @@ impl TableBuilder {
 
         let mut target_type = [0u8; DM_MAX_TYPE_NAME];
         target_type[..name.len()].copy_from_slice(name);
-        let spec = dm_target_spec_raw { sector_start: start, length, status: 0, next: 0, target_type };
+        let spec = dm_target_spec_raw {
+            sector_start: start,
+            length,
+            status: 0,
+            next: 0,
+            target_type,
+        };
         self.buf.extend_from_slice(spec.as_bytes());
 
         self.buf.extend_from_slice(params.as_bytes());
@@ -254,8 +278,8 @@ impl TableBuilder {
     pub fn load(mut self) -> Result<(), Error> {
         let total = self.buf.len() as u32;
         {
-            let (header, _) = DmHeader::mut_from_prefix(&mut self.buf)
-                .expect("buf begins with a DmHeader");
+            let (header, _) =
+                DmHeader::mut_from_prefix(&mut self.buf).expect("buf begins with a DmHeader");
             let header: &mut DmHeader = header;
             header.set_data_size(total);
             header.set_target_count(self.count);
@@ -263,13 +287,15 @@ impl TableBuilder {
         let (header, _) =
             DmHeader::mut_from_prefix(&mut self.buf).expect("buf begins with a DmHeader");
         let header: &mut DmHeader = header;
-        DM_TABLE_LOAD.ioctl(&*self.control, header).map_err(|source| Error::DmIoctl {
-            op: "DM_TABLE_LOAD",
-            source,
-            // ` | `-joined so the whole error stays on one line in loggers;
-            // omitted entirely for an empty table so there's no `(table: )`.
-            table_line: (!self.rendered.is_empty()).then(|| self.rendered.join(" | ")),
-        })?;
+        DM_TABLE_LOAD
+            .ioctl(&*self.control, header)
+            .map_err(|source| Error::DmIoctl {
+                op: "DM_TABLE_LOAD",
+                source,
+                // ` | `-joined so the whole error stays on one line in loggers;
+                // omitted entirely for an empty table so there's no `(table: )`.
+                table_line: (!self.rendered.is_empty()).then(|| self.rendered.join(" | ")),
+            })?;
         check_version("DM_TABLE_LOAD", header)
     }
 }
@@ -292,7 +318,13 @@ impl<M: mode::Mode> TableStatusIter<M> {
     /// `data_start` is the kernel-reported offset of the first spec (the
     /// base for read-side `next`); callers pass it clamped to `buf.len()`.
     pub(crate) fn new(buf: Vec<u8>, data_start: usize, target_count: u32) -> Self {
-        Self { buf, first: data_start, offset: data_start, remaining: target_count, _mode: PhantomData }
+        Self {
+            buf,
+            first: data_start,
+            offset: data_start,
+            remaining: target_count,
+            _mode: PhantomData,
+        }
     }
 }
 
@@ -318,17 +350,33 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
         let length = u64::from_ne_bytes(spec[8..16].try_into().unwrap());
         let next = u32::from_ne_bytes(spec[20..24].try_into().unwrap());
         let type_field = &spec[24..24 + DM_MAX_TYPE_NAME];
-        let type_nul = type_field.iter().position(|&b| b == 0).unwrap_or(type_field.len());
+        let type_nul = type_field
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(type_field.len());
         let type_name = String::from_utf8_lossy(&type_field[..type_nul]).into_owned();
 
         let param_area = &self.buf[end..];
-        let param_nul = param_area.iter().position(|&b| b == 0).unwrap_or(param_area.len());
+        let param_nul = param_area
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(param_area.len());
         let params = String::from_utf8_lossy(&param_area[..param_nul]).into_owned();
 
         self.remaining -= 1;
-        self.offset = if next == 0 { self.buf.len() } else { self.first.saturating_add(next as usize) };
+        self.offset = if next == 0 {
+            self.buf.len()
+        } else {
+            self.first.saturating_add(next as usize)
+        };
 
-        Some(Row { start: sector_start, length, type_name, params, _mode: PhantomData })
+        Some(Row {
+            start: sector_start,
+            length,
+            type_name,
+            params,
+            _mode: PhantomData,
+        })
     }
 }
 
@@ -337,7 +385,6 @@ pub(crate) fn parse_device(s: &str) -> Option<DevId> {
     let (maj, min) = s.split_once(':')?;
     Some(DevId::new(maj.parse().ok()?, min.parse().ok()?))
 }
-
 
 #[cfg(test)]
 #[allow(clippy::cast_possible_truncation)] // test fixtures: sizes are tiny, never near u32::MAX
@@ -369,7 +416,14 @@ mod tests {
     #[test]
     fn buf_for_linear_target_has_correct_layout_and_params() {
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
-            .add(0, 1024, Linear { device: DevId::new(252, 5), offset_sectors: 0 })
+            .add(
+                0,
+                1024,
+                Linear {
+                    device: DevId::new(252, 5),
+                    offset_sectors: 0,
+                },
+            )
             .expect("add linear");
         let params = "252:5 0";
         let aligned = (DM_TARGET_SPEC_SIZE + params.len() + 1).next_multiple_of(8);
@@ -377,7 +431,10 @@ mod tests {
 
         let bytes = &b.buf;
         let param_start = DmHeader::SIZE + DM_TARGET_SPEC_SIZE;
-        assert_eq!(&bytes[param_start..param_start + params.len()], params.as_bytes());
+        assert_eq!(
+            &bytes[param_start..param_start + params.len()],
+            params.as_bytes()
+        );
         assert_eq!(bytes[param_start + params.len()], 0); // NUL terminator
         let type_field = &bytes[DmHeader::SIZE + 24..DmHeader::SIZE + 24 + DM_MAX_TYPE_NAME];
         assert_eq!(&type_field[..6], b"linear");
@@ -385,9 +442,18 @@ mod tests {
 
     #[test]
     fn buf_for_verity_target_has_correct_layout_and_params() {
-        let t = Verity::new(DevId::new(253, 3), DevId::new(253, 4), 7, "sha256", vec![0xCD; 32], vec![0x55; 32])
-            .expect("valid verity");
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9)).add(0, 56, t).expect("add verity");
+        let t = Verity::new(
+            DevId::new(253, 3),
+            DevId::new(253, 4),
+            7,
+            "sha256",
+            vec![0xCD; 32],
+            vec![0x55; 32],
+        )
+        .expect("valid verity");
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
+            .add(0, 56, t)
+            .expect("add verity");
         let cd_hex = "cd".repeat(32);
         let salt_hex = "55".repeat(32);
         let params = format!("1 253:3 253:4 4096 4096 7 1 sha256 {cd_hex} {salt_hex}");
@@ -395,7 +461,10 @@ mod tests {
         assert_eq!(b.buf.len(), DmHeader::SIZE + aligned);
 
         let param_start = DmHeader::SIZE + DM_TARGET_SPEC_SIZE;
-        assert_eq!(&b.buf[param_start..param_start + params.len()], params.as_bytes());
+        assert_eq!(
+            &b.buf[param_start..param_start + params.len()],
+            params.as_bytes()
+        );
         assert_eq!(b.buf[param_start + params.len()], 0);
     }
 
@@ -407,7 +476,16 @@ mod tests {
         // "relative to first".
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
             .add(0, 8, targets::Zero)
-            .and_then(|b| b.add(8, 1024, Linear { device: DevId::new(252, 5), offset_sectors: 5 }))
+            .and_then(|b| {
+                b.add(
+                    8,
+                    1024,
+                    Linear {
+                        device: DevId::new(252, 5),
+                        offset_sectors: 5,
+                    },
+                )
+            })
             .and_then(|b| b.add(1032, 8, targets::Error))
             .expect("build three-target table");
         let bytes = &b.buf;
@@ -415,7 +493,10 @@ mod tests {
         let zero_aligned = (DM_TARGET_SPEC_SIZE + 1).next_multiple_of(8);
         let linear_aligned = (DM_TARGET_SPEC_SIZE + "252:5 5".len() + 1).next_multiple_of(8);
         let error_aligned = (DM_TARGET_SPEC_SIZE + 1).next_multiple_of(8);
-        assert_eq!(bytes.len(), DmHeader::SIZE + zero_aligned + linear_aligned + error_aligned);
+        assert_eq!(
+            bytes.len(),
+            DmHeader::SIZE + zero_aligned + linear_aligned + error_aligned
+        );
 
         let spec0 = DmHeader::SIZE;
         let spec1 = spec0 + zero_aligned;
@@ -425,8 +506,14 @@ mod tests {
         let next1 = u32::from_ne_bytes(bytes[spec1 + 20..spec1 + 24].try_into().unwrap());
         let next2 = u32::from_ne_bytes(bytes[spec2 + 20..spec2 + 24].try_into().unwrap());
 
-        assert_eq!(next0, zero_aligned as u32, "spec0.next: bytes from spec0's own start to spec1");
-        assert_eq!(next1, linear_aligned as u32, "spec1.next: bytes from spec1's own start to spec2");
+        assert_eq!(
+            next0, zero_aligned as u32,
+            "spec0.next: bytes from spec0's own start to spec1"
+        );
+        assert_eq!(
+            next1, linear_aligned as u32,
+            "spec1.next: bytes from spec1's own start to spec2"
+        );
         assert_eq!(next2, 0, "last spec's next must be 0");
         assert_eq!(b.count, 3);
     }
@@ -452,8 +539,11 @@ mod tests {
         for (i, (type_name, params)) in entries.iter().enumerate() {
             let abs_offset = first + abs_offset_from_first;
             let aligned_len = aligned_lens[i];
-            let next =
-                if i == entries.len() - 1 { 0 } else { (abs_offset_from_first + aligned_len) as u32 };
+            let next = if i == entries.len() - 1 {
+                0
+            } else {
+                (abs_offset_from_first + aligned_len) as u32
+            };
 
             bytes[abs_offset..abs_offset + 8].copy_from_slice(&0u64.to_ne_bytes()); // sector_start
             bytes[abs_offset + 8..abs_offset + 16].copy_from_slice(&0u64.to_ne_bytes()); // length
@@ -473,11 +563,19 @@ mod tests {
     #[test]
     fn spec_row_parses_matching_target_and_rejects_others() {
         let (bytes, count) = synthetic_table_status_response(&[(b"linear", "252:5 5")]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count).next().expect("one row");
+        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
         assert_eq!(row.type_name(), "linear");
         assert_eq!(row.start(), 0);
         // Round-trips into a Linear...
-        assert_eq!(row.parse::<Linear>(), Some(Linear { device: DevId::new(252, 5), offset_sectors: 5 }));
+        assert_eq!(
+            row.parse::<Linear>(),
+            Some(Linear {
+                device: DevId::new(252, 5),
+                offset_sectors: 5
+            })
+        );
         // ...but a type-name mismatch yields None, not a misparse. (Only
         // FromStr targets can be `parse`d on a Spec row, so this uses
         // snapshot::Origin — a different type name that would parse "252:5 5"
@@ -488,11 +586,15 @@ mod tests {
     #[test]
     fn spec_row_display_reconstructs_the_full_line() {
         let (bytes, count) = synthetic_table_status_response(&[(b"linear", "252:5 5")]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count).next().expect("one row");
+        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
         assert_eq!(row.to_string(), "0 0 linear 252:5 5");
 
         let (empty, count) = synthetic_table_status_response(&[(b"zero", "")]);
-        let row = TableStatusIter::<mode::Spec>::new(empty, DmHeader::SIZE, count).next().expect("one row");
+        let row = TableStatusIter::<mode::Spec>::new(empty, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
         assert_eq!(row.to_string(), "0 0 zero");
     }
 
@@ -506,10 +608,17 @@ mod tests {
             (b"linear", "252:5 5"),
             (b"error", ""),
         ]);
-        let rows: Vec<Row<mode::Spec>> = TableStatusIter::new(bytes, DmHeader::SIZE, count).collect();
+        let rows: Vec<Row<mode::Spec>> =
+            TableStatusIter::new(bytes, DmHeader::SIZE, count).collect();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].parse::<targets::Zero>(), Some(targets::Zero));
-        assert_eq!(rows[1].parse::<Linear>(), Some(Linear { device: DevId::new(252, 5), offset_sectors: 5 }));
+        assert_eq!(
+            rows[1].parse::<Linear>(),
+            Some(Linear {
+                device: DevId::new(252, 5),
+                offset_sectors: 5
+            })
+        );
         assert_eq!(rows[2].parse::<targets::Error>(), Some(targets::Error));
     }
 
@@ -541,10 +650,15 @@ mod tests {
         // type-name mismatch (RawInfo's own FromStr is infallible, so the
         // guard is the type_name check).
         let (bytes, count) = synthetic_table_status_response(&[(b"raid", "raid1 2 AA 1.0 idle 0")]);
-        let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count).next().expect("one row");
+        let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
         assert_eq!(row.type_name(), "raid");
         // Matching type: RawInfo captures the raw status string.
-        assert_eq!(row.parse::<targets::Raid>(), Some(RawInfo("raid1 2 AA 1.0 idle 0".to_owned())));
+        assert_eq!(
+            row.parse::<targets::Raid>(),
+            Some(RawInfo("raid1 2 AA 1.0 idle 0".to_owned()))
+        );
         // Non-matching type: None.
         assert_eq!(row.parse::<Linear>(), None);
     }
@@ -556,7 +670,9 @@ mod tests {
         let (mut bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
         let type_off = DmHeader::SIZE + 24;
         bytes[type_off..type_off + DM_MAX_TYPE_NAME].copy_from_slice(b"abcdefghijklmnop");
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count).next().expect("one row");
+        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
         assert_eq!(row.type_name(), "abcdefghijklmnop");
         assert_eq!(row.type_name().len(), DM_MAX_TYPE_NAME);
     }
@@ -618,7 +734,11 @@ mod tests {
     impl FromStr for CustomTarget {
         type Err = ParseError;
         fn from_str(s: &str) -> Result<Self, Self::Err> {
-            let value = s.strip_prefix("1 2 ").ok_or(ParseError)?.parse().map_err(|_| ParseError)?;
+            let value = s
+                .strip_prefix("1 2 ")
+                .ok_or(ParseError)?
+                .parse()
+                .map_err(|_| ParseError)?;
             Ok(CustomTarget { value })
         }
     }
@@ -633,7 +753,9 @@ mod tests {
         assert_eq!(b.rendered, ["0 8 custom-target 1 2 3"]);
 
         let (bytes, count) = synthetic_table_status_response(&[(b"custom-target", "1 2 3")]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count).next().expect("one row");
+        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
         assert_eq!(row.parse::<CustomTarget>().map(|t| t.value), Some(3));
     }
 
@@ -681,7 +803,11 @@ mod tests {
             TableBuilder::new(dummy_control(), dev).add(0, 8, SixteenByteName),
             Err(Error::Usage(_))
         ));
-        assert!(TableBuilder::new(dummy_control(), dev).add(0, 8, FifteenByteName).is_ok());
+        assert!(
+            TableBuilder::new(dummy_control(), dev)
+                .add(0, 8, FifteenByteName)
+                .is_ok()
+        );
     }
 
     #[test]
