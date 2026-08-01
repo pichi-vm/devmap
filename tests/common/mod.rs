@@ -42,7 +42,8 @@ impl LoopDevice {
     /// Creates a `size_bytes`-sized sparse file and attaches it.
     pub(crate) fn create(name: &str, size_bytes: u64) -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let file_path = std::env::temp_dir().join(format!("devmap-test-{name}-{}-{id}", std::process::id()));
+        let file_path =
+            std::env::temp_dir().join(format!("devmap-test-{name}-{}-{id}", std::process::id()));
         let file = File::create(&file_path).expect("create backing file");
         file.set_len(size_bytes).expect("set_len backing file");
         drop(file);
@@ -52,8 +53,15 @@ impl LoopDevice {
             .arg(&file_path)
             .output()
             .expect("run losetup -f --show");
-        assert!(output.status.success(), "losetup failed: {}", String::from_utf8_lossy(&output.stderr));
-        let path = String::from_utf8(output.stdout).expect("losetup output is utf8").trim().to_string();
+        assert!(
+            output.status.success(),
+            "losetup failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let path = String::from_utf8(output.stdout)
+            .expect("losetup output is utf8")
+            .trim()
+            .to_string();
 
         Self { path, file_path }
     }

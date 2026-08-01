@@ -15,7 +15,9 @@ use devmap::targets::{Era, LogWrites};
 
 #[test]
 fn era_tracks_writes_and_responds_to_checkpoint_message() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-era");
 
     let metadata = LoopDevice::create("era-meta", 8 * 1024 * 1024);
@@ -44,13 +46,17 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
     // `checkpoint` may or may not bump the era counter on this call (the
     // kernel doc explicitly says not to assume it will), but it must not
     // error, and it produces no reply string.
-    let reply = removed.message(0, "checkpoint").expect("checkpoint message");
+    let reply = removed
+        .message(0, "checkpoint")
+        .expect("checkpoint message");
     assert_eq!(reply, None);
 }
 
 #[test]
 fn log_writes_counts_logged_entries_and_accepts_marks() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-log-writes");
 
     let data = LoopDevice::create("logwrites-data", 8 * 1024 * 1024);
@@ -62,7 +68,14 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
         .builder()
-        .add(0, 16384, LogWrites { device: data_device.id(), log_device: log_device.id() })
+        .add(
+            0,
+            16384,
+            LogWrites {
+                device: data_device.id(),
+                log_device: log_device.id(),
+            },
+        )
         .expect("add log-writes")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -70,12 +83,18 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
 
     let minor = removed.id().minor();
     let path = format!("/dev/dm-{minor}");
-    let mut file = std::fs::OpenOptions::new().write(true).open(&path).expect("open mapped device");
-    file.write_all(&[0xCDu8; 4096]).expect("write to logged device");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("open mapped device");
+    file.write_all(&[0xCDu8; 4096])
+        .expect("write to logged device");
     file.sync_all().expect("fsync");
 
     // Marking a point in the log must succeed and produce no reply.
-    let reply = removed.message(0, "mark after-write").expect("mark message");
+    let reply = removed
+        .message(0, "mark after-write")
+        .expect("mark message");
     assert_eq!(reply, None);
 }
 
@@ -93,12 +112,16 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
 /// load-bearing, not optional.
 #[test]
 fn snapshot_merge_takes_over_from_snapshot_and_merges() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-snapshot");
 
     let origin_backing = LoopDevice::create("snapmerge-origin", 16 * 1024 * 1024);
     let cow_backing = LoopDevice::create("snapmerge-cow", 16 * 1024 * 1024);
-    let origin_backing_device = control.by_node(&origin_backing.path).expect("by_node origin backing");
+    let origin_backing_device = control
+        .by_node(&origin_backing.path)
+        .expect("by_node origin backing");
     let cow_device = control.by_node(&cow_backing.path).expect("by_node cow");
     let origin_len_sectors = 16 * 1024 * 1024 / 512;
 
@@ -108,7 +131,13 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     let origin_removed = control.create(&origin_name).expect("DM_DEV_CREATE origin");
     origin_removed
         .builder()
-        .add(0, origin_len_sectors, snapshot::Origin { origin: origin_backing_device.id() })
+        .add(
+            0,
+            origin_len_sectors,
+            snapshot::Origin {
+                origin: origin_backing_device.id(),
+            },
+        )
         .expect("add snapshot-origin")
         .load()
         .expect("DM_TABLE_LOAD origin");
@@ -159,7 +188,9 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .expect("add snapshot-merge")
         .load()
         .expect("DM_TABLE_LOAD snapshot-merge");
-    snap_removed.suspend().expect("suspend old snapshot before handover");
+    snap_removed
+        .suspend()
+        .expect("suspend old snapshot before handover");
     origin_removed.resume().expect("resume as snapshot-merge");
 
     // 6. Wait for the background merge to finish: sectors_allocated drops
@@ -173,14 +204,20 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         // parses back as `RawInfo` — the merge-completion check reads the
         // raw status string directly.
         if let Some(RawInfo(params)) = reported[0].parse::<snapshot::Merge>() {
-            let mut nums = params.split(['/', ' ']).filter_map(|tok| tok.parse::<u64>().ok());
-            if let (Some(allocated), Some(_total), Some(metadata)) = (nums.next(), nums.next(), nums.next())
+            let mut nums = params
+                .split(['/', ' '])
+                .filter_map(|tok| tok.parse::<u64>().ok());
+            if let (Some(allocated), Some(_total), Some(metadata)) =
+                (nums.next(), nums.next(), nums.next())
                 && allocated == metadata
             {
                 break;
             }
         }
-        assert!(std::time::Instant::now() < deadline, "snapshot-merge never finished");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "snapshot-merge never finished"
+        );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
@@ -197,13 +234,19 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     // access to it once merging has started) — remove it explicitly
     // rather than relying on `Removed`'s best-effort drop, so a failure
     // here is visible instead of silently swallowed.
-    devmap::Device::from(snap_removed).remove().expect("remove handed-over snapshot device");
+    devmap::Device::from(snap_removed)
+        .remove()
+        .expect("remove handed-over snapshot device");
 }
 
 fn write_block(path: &str, block_index: u64, byte: u8) {
     use std::io::{Seek, SeekFrom};
-    let mut file = std::fs::OpenOptions::new().write(true).open(path).expect("open for write_block");
-    file.seek(SeekFrom::Start(block_index * 4096)).expect("seek");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open for write_block");
+    file.seek(SeekFrom::Start(block_index * 4096))
+        .expect("seek");
     file.write_all(&[byte; 4096]).expect("write");
     file.sync_all().expect("fsync");
 }
@@ -211,8 +254,12 @@ fn write_block(path: &str, block_index: u64, byte: u8) {
 fn assert_block(path: &str, block_index: u64, expected_byte: u8) {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path).expect("open for assert_block");
-    file.seek(SeekFrom::Start(block_index * 4096)).expect("seek");
+    file.seek(SeekFrom::Start(block_index * 4096))
+        .expect("seek");
     let mut buf = [0u8; 4096];
     file.read_exact(&mut buf).expect("read");
-    assert!(buf.iter().all(|&b| b == expected_byte), "block {block_index} does not match expected pattern");
+    assert!(
+        buf.iter().all(|&b| b == expected_byte),
+        "block {block_index} does not match expected pattern"
+    );
 }

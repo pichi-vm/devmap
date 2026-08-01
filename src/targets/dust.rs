@@ -31,7 +31,11 @@ impl Dust {
                 "dust block_size must be a power of two in 512..=1073741824, got {block_size}"
             )));
         }
-        Ok(Dust { device, offset_sectors, block_size })
+        Ok(Dust {
+            device,
+            offset_sectors,
+            block_size,
+        })
     }
 
     /// The backing device.
@@ -56,7 +60,11 @@ impl Target for Dust {
 }
 impl fmt::Display for Dust {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.device, self.offset_sectors, self.block_size)
+        write!(
+            f,
+            "{} {} {}",
+            self.device, self.offset_sectors, self.block_size
+        )
     }
 }
 
@@ -82,9 +90,15 @@ mod tests {
     #[test]
     fn dust_rejects_bad_block_size() {
         // Not a power of two.
-        assert!(matches!(Dust::new(DevId::new(252, 1), 0, 1000), Err(crate::Error::Usage(_))));
+        assert!(matches!(
+            Dust::new(DevId::new(252, 1), 0, 1000),
+            Err(crate::Error::Usage(_))
+        ));
         // Below 512.
-        assert!(matches!(Dust::new(DevId::new(252, 1), 0, 256), Err(crate::Error::Usage(_))));
+        assert!(matches!(
+            Dust::new(DevId::new(252, 1), 0, 256),
+            Err(crate::Error::Usage(_))
+        ));
         // Above the max.
         assert!(matches!(
             Dust::new(DevId::new(252, 1), 0, 2_147_483_648),

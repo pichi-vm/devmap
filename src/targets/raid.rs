@@ -31,7 +31,10 @@ impl DevicePair {
     /// metadata).
     #[must_use]
     pub fn data_only(data: DevId) -> Self {
-        Self { metadata: None, data }
+        Self {
+            metadata: None,
+            data,
+        }
     }
 }
 
@@ -111,7 +114,11 @@ impl Raid {
             }
             chunk_size_sectors
         };
-        Ok(Raid { raid_type, chunk_size_sectors, devices })
+        Ok(Raid {
+            raid_type,
+            chunk_size_sectors,
+            devices,
+        })
     }
 
     /// The raid level.
@@ -149,7 +156,12 @@ impl fmt::Display for Raid {
         // `<chunk_size>` is a bare positional number, not a
         // `chunk_size <value>` keyword pair — confirmed against
         // dm-raid.c's `parse_raid_params`. `#raid_params` is therefore 1.
-        write!(f, "{raid_type} 1 {} {}", self.chunk_size_sectors, self.devices.len())?;
+        write!(
+            f,
+            "{raid_type} 1 {} {}",
+            self.chunk_size_sectors,
+            self.devices.len()
+        )?;
         for pair in &self.devices {
             match pair.metadata {
                 Some(metadata) => write!(f, " {metadata}")?,
@@ -186,11 +198,16 @@ mod tests {
             ],
         )
         .expect("valid raid");
-        assert_eq!(line(0, 1_048_576, &t), "0 1048576 raid raid1 1 0 2 - 252:1 252:2 252:3");
+        assert_eq!(
+            line(0, 1_048_576, &t),
+            "0 1048576 raid raid1 1 0 2 - 252:1 252:2 252:3"
+        );
     }
 
     fn devs(n: u32) -> Vec<DevicePair> {
-        (0..n).map(|i| DevicePair::data_only(DevId::new(252, i))).collect()
+        (0..n)
+            .map(|i| DevicePair::data_only(DevId::new(252, i)))
+            .collect()
     }
 
     #[test]
@@ -205,10 +222,22 @@ mod tests {
 
     #[test]
     fn raid_too_few_devices_is_rejected() {
-        assert!(matches!(Raid::new(Type::Raid1, 0, devs(1)), Err(crate::Error::Usage(_))));
-        assert!(matches!(Raid::new(Type::Raid5, 8, devs(1)), Err(crate::Error::Usage(_))));
-        assert!(matches!(Raid::new(Type::Raid6, 8, devs(2)), Err(crate::Error::Usage(_))));
-        assert!(matches!(Raid::new(Type::Raid0, 8, devs(0)), Err(crate::Error::Usage(_))));
+        assert!(matches!(
+            Raid::new(Type::Raid1, 0, devs(1)),
+            Err(crate::Error::Usage(_))
+        ));
+        assert!(matches!(
+            Raid::new(Type::Raid5, 8, devs(1)),
+            Err(crate::Error::Usage(_))
+        ));
+        assert!(matches!(
+            Raid::new(Type::Raid6, 8, devs(2)),
+            Err(crate::Error::Usage(_))
+        ));
+        assert!(matches!(
+            Raid::new(Type::Raid0, 8, devs(0)),
+            Err(crate::Error::Usage(_))
+        ));
         // Minimums accepted.
         assert!(Raid::new(Type::Raid6, 8, devs(3)).is_ok());
     }
@@ -224,7 +253,10 @@ mod tests {
             (Type::Raid10, "raid10", 2),
         ] {
             let t = Raid::new(ty, 8, devs(n)).expect("valid raid");
-            assert!(line(0, 1024, &t).contains(&format!("raid {token} 1 8 ")), "{token}");
+            assert!(
+                line(0, 1024, &t).contains(&format!("raid {token} 1 8 ")),
+                "{token}"
+            );
         }
     }
 
@@ -232,11 +264,17 @@ mod tests {
     fn raid_device_pair_constructors() {
         assert_eq!(
             DevicePair::data_only(DevId::new(252, 1)),
-            DevicePair { metadata: None, data: DevId::new(252, 1) }
+            DevicePair {
+                metadata: None,
+                data: DevId::new(252, 1)
+            }
         );
         assert_eq!(
             DevicePair::new(Some(DevId::new(252, 2)), DevId::new(252, 3)),
-            DevicePair { metadata: Some(DevId::new(252, 2)), data: DevId::new(252, 3) }
+            DevicePair {
+                metadata: Some(DevId::new(252, 2)),
+                data: DevId::new(252, 3)
+            }
         );
     }
 }

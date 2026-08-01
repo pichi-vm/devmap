@@ -23,7 +23,11 @@ impl fmt::Display for Error {
 impl FromStr for Error {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() { Ok(Error) } else { Err(ParseError) }
+        if s.is_empty() {
+            Ok(Error)
+        } else {
+            Err(ParseError)
+        }
     }
 }
 

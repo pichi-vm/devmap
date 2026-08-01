@@ -31,7 +31,11 @@ impl Era {
                 "era block_size must be a nonzero multiple of 8, got {block_size}"
             )));
         }
-        Ok(Era { metadata, origin, block_size })
+        Ok(Era {
+            metadata,
+            origin,
+            block_size,
+        })
     }
 
     /// Device holding the era metadata (the change map).

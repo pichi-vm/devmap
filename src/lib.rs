@@ -58,7 +58,7 @@ mod uapi;
 pub use control::Control;
 pub use device::{DevId, Device, Removed, Status};
 pub use error::Error;
-pub use table::{ParseError, RawInfo, Row, Target, TableBuilder, mode};
+pub use table::{ParseError, RawInfo, Row, TableBuilder, Target, mode};
 
 /// The primary handles are cheap to clone and safe to share across
 /// threads; assert it at compile time so a future field addition can't

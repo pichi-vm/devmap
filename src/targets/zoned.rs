@@ -41,7 +41,9 @@ mod tests {
 
     #[test]
     fn zoned_renders_device_only() {
-        let t = Zoned { device: DevId::new(252, 1) };
+        let t = Zoned {
+            device: DevId::new(252, 1),
+        };
         assert_eq!(line(0, 8192, &t), "0 8192 zoned 252:1");
     }
 }

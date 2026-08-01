@@ -53,17 +53,30 @@ impl Verity {
     ) -> Result<Self, crate::Error> {
         let algorithm = algorithm.into();
         if algorithm.is_empty()
-            || algorithm.bytes().any(|b| b == 0 || b.is_ascii_whitespace() || b.is_ascii_control())
+            || algorithm
+                .bytes()
+                .any(|b| b == 0 || b.is_ascii_whitespace() || b.is_ascii_control())
         {
-            return Err(crate::Error::Usage(format!("invalid verity algorithm: {algorithm:?}")));
+            return Err(crate::Error::Usage(format!(
+                "invalid verity algorithm: {algorithm:?}"
+            )));
         }
         if digest.is_empty() {
-            return Err(crate::Error::Usage("verity digest must not be empty".into()));
+            return Err(crate::Error::Usage(
+                "verity digest must not be empty".into(),
+            ));
         }
         if salt.is_empty() {
             return Err(crate::Error::Usage("verity salt must not be empty".into()));
         }
-        Ok(Verity { data_dev, hash_dev, num_data_blocks, algorithm, digest, salt })
+        Ok(Verity {
+            data_dev,
+            hash_dev,
+            num_data_blocks,
+            algorithm,
+            digest,
+            salt,
+        })
     }
 
     /// The data device.
@@ -151,11 +164,25 @@ mod tests {
         let d = vec![0xBB; 32];
         let s = vec![0xAA; 32];
         assert!(matches!(
-            Verity::new(DevId::new(1, 0), DevId::new(1, 1), 1, "sha 256", d.clone(), s.clone()),
+            Verity::new(
+                DevId::new(1, 0),
+                DevId::new(1, 1),
+                1,
+                "sha 256",
+                d.clone(),
+                s.clone()
+            ),
             Err(crate::Error::Usage(_))
         ));
         assert!(matches!(
-            Verity::new(DevId::new(1, 0), DevId::new(1, 1), 1, "sha\x00256", d.clone(), s.clone()),
+            Verity::new(
+                DevId::new(1, 0),
+                DevId::new(1, 1),
+                1,
+                "sha\x00256",
+                d.clone(),
+                s.clone()
+            ),
             Err(crate::Error::Usage(_))
         ));
         assert!(matches!(
@@ -167,16 +194,37 @@ mod tests {
     #[test]
     fn verity_new_rejects_empty_digest_or_salt() {
         assert!(matches!(
-            Verity::new(DevId::new(1, 0), DevId::new(1, 1), 1, "sha256", vec![], vec![0xAA; 32]),
+            Verity::new(
+                DevId::new(1, 0),
+                DevId::new(1, 1),
+                1,
+                "sha256",
+                vec![],
+                vec![0xAA; 32]
+            ),
             Err(crate::Error::Usage(_))
         ));
         assert!(matches!(
-            Verity::new(DevId::new(1, 0), DevId::new(1, 1), 1, "sha256", vec![0xBB; 32], vec![]),
+            Verity::new(
+                DevId::new(1, 0),
+                DevId::new(1, 1),
+                1,
+                "sha256",
+                vec![0xBB; 32],
+                vec![]
+            ),
             Err(crate::Error::Usage(_))
         ));
         assert!(
-            Verity::new(DevId::new(1, 0), DevId::new(1, 1), 1, "sha256", vec![0xBB; 32], vec![0xAA; 32])
-                .is_ok()
+            Verity::new(
+                DevId::new(1, 0),
+                DevId::new(1, 1),
+                1,
+                "sha256",
+                vec![0xBB; 32],
+                vec![0xAA; 32]
+            )
+            .is_ok()
         );
     }
 }

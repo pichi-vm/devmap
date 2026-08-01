@@ -24,7 +24,11 @@ impl Leg {
     /// by `delay_ms` milliseconds.
     #[must_use]
     pub fn new(device: DevId, offset_sectors: u64, delay_ms: u32) -> Self {
-        Self { device, offset_sectors, delay_ms }
+        Self {
+            device,
+            offset_sectors,
+            delay_ms,
+        }
     }
 }
 
@@ -49,7 +53,11 @@ impl Target for Delay {
 impl fmt::Display for Delay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let read = self.read;
-        write!(f, "{} {} {}", read.device, read.offset_sectors, read.delay_ms)?;
+        write!(
+            f,
+            "{} {} {}",
+            read.device, read.offset_sectors, read.delay_ms
+        )?;
         // Once any second leg exists, emit both write and flush explicitly
         // (9-arg form): the kernel's 6-arg form would bind flush to the
         // write leg, which would silently contradict "unset legs follow
@@ -79,7 +87,11 @@ mod tests {
 
     #[test]
     fn delay_renders_three_arg_form_when_only_read_is_set() {
-        let t = Delay { read: Leg::new(DevId::new(252, 1), 0, 500), write: None, flush: None };
+        let t = Delay {
+            read: Leg::new(DevId::new(252, 1), 0, 500),
+            write: None,
+            flush: None,
+        };
         assert_eq!(line(0, 8, &t), "0 8 delay 252:1 0 500");
     }
 
@@ -92,7 +104,10 @@ mod tests {
             write: Some(Leg::new(DevId::new(252, 2), 0, 100)),
             flush: None,
         };
-        assert_eq!(line(0, 8, &t), "0 8 delay 252:1 0 500 252:2 0 100 252:1 0 500");
+        assert_eq!(
+            line(0, 8, &t),
+            "0 8 delay 252:1 0 500 252:2 0 100 252:1 0 500"
+        );
     }
 
     #[test]
@@ -102,7 +117,10 @@ mod tests {
             write: Some(Leg::new(DevId::new(252, 2), 0, 100)),
             flush: Some(Leg::new(DevId::new(252, 3), 0, 50)),
         };
-        assert_eq!(line(0, 8, &t), "0 8 delay 252:1 0 500 252:2 0 100 252:3 0 50");
+        assert_eq!(
+            line(0, 8, &t),
+            "0 8 delay 252:1 0 500 252:2 0 100 252:3 0 50"
+        );
     }
 
     #[test]
@@ -112,6 +130,9 @@ mod tests {
             write: None,
             flush: Some(Leg::new(DevId::new(252, 3), 0, 50)),
         };
-        assert_eq!(line(0, 8, &t), "0 8 delay 252:1 0 500 252:1 0 500 252:3 0 50");
+        assert_eq!(
+            line(0, 8, &t),
+            "0 8 delay 252:1 0 500 252:1 0 500 252:3 0 50"
+        );
     }
 }

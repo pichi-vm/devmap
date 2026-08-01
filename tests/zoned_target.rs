@@ -23,7 +23,11 @@ use devmap::targets::Zoned;
 /// Whether `name` resolves on `$PATH`. Used to skip if `dmzadm` isn't
 /// installed, the same way `common::open_control` skips for missing root.
 fn command_exists(name: &str) -> bool {
-    Command::new("which").arg(name).stdout(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+    Command::new("which")
+        .arg(name)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// A `null_blk`-emulated host-managed zoned block device (`/dev/nullb0`),
@@ -42,7 +46,9 @@ struct NullBlkZonedDevice {
 impl NullBlkZonedDevice {
     /// `zone_size_mb` must be a power of two; `gb` must be a multiple of it.
     fn create(zone_size_mb: u32, zone_nr_conv: u32, gb: u32) -> Option<Self> {
-        let _ = Command::new("modprobe").args(["-q", "-r", "null_blk"]).status();
+        let _ = Command::new("modprobe")
+            .args(["-q", "-r", "null_blk"])
+            .status();
         let status = Command::new("modprobe")
             .arg("null_blk")
             .arg("nr_devices=1")
@@ -56,29 +62,45 @@ impl NullBlkZonedDevice {
             eprintln!("skip: null_blk zoned emulation unavailable on this kernel");
             return None;
         }
-        Some(Self { path: "/dev/nullb0" })
+        Some(Self {
+            path: "/dev/nullb0",
+        })
     }
 }
 
 impl Drop for NullBlkZonedDevice {
     fn drop(&mut self) {
-        let _ = Command::new("modprobe").args(["-q", "-r", "null_blk"]).status();
+        let _ = Command::new("modprobe")
+            .args(["-q", "-r", "null_blk"])
+            .status();
     }
 }
 
 #[test]
 fn zoned_formats_with_dmzadm_and_passes_data_through() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     if !command_exists("dmzadm") {
         eprintln!("skip: requires the dmzadm tool (package: dm-zoned-tools)");
         return;
     }
     ensure_module_loaded("dm-zoned");
 
-    let Some(zoned) = NullBlkZonedDevice::create(4, 8, 1) else { return };
+    let Some(zoned) = NullBlkZonedDevice::create(4, 8, 1) else {
+        return;
+    };
 
-    let format = Command::new("dmzadm").arg("--format").arg(zoned.path).output().expect("run dmzadm --format");
-    assert!(format.status.success(), "dmzadm --format failed: {}", String::from_utf8_lossy(&format.stderr));
+    let format = Command::new("dmzadm")
+        .arg("--format")
+        .arg(zoned.path)
+        .output()
+        .expect("run dmzadm --format");
+    assert!(
+        format.status.success(),
+        "dmzadm --format failed: {}",
+        String::from_utf8_lossy(&format.stderr)
+    );
 
     let zoned_device = control.by_node(zoned.path).expect("by_node zoned device");
 
@@ -87,29 +109,57 @@ fn zoned_formats_with_dmzadm_and_passes_data_through() {
     // something devmap computes — `dmzadm --start` already knows it, so
     // ask it once via a throwaway device rather than guessing. `dmzadm`
     // names the device `dmz-<basename>` (e.g. `dmz-nullb0`).
-    let start = Command::new("dmzadm").arg("--start").arg(zoned.path).output().expect("run dmzadm --start");
-    assert!(start.status.success(), "dmzadm --start failed: {}", String::from_utf8_lossy(&start.stderr));
+    let start = Command::new("dmzadm")
+        .arg("--start")
+        .arg(zoned.path)
+        .output()
+        .expect("run dmzadm --start");
+    assert!(
+        start.status.success(),
+        "dmzadm --start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
     let dm_name = format!("dmz-{}", zoned.path.trim_start_matches("/dev/"));
-    let table_output =
-        Command::new("dmsetup").args(["table", &dm_name]).output().expect("dmsetup table");
-    let table_line = String::from_utf8_lossy(&table_output.stdout).trim().to_string();
-    let usable_sectors: u64 =
-        table_line.split_whitespace().nth(1).expect("table line has a length field").parse().expect("parse length");
-    Command::new("dmsetup").args(["remove", &dm_name]).status().expect("dmsetup remove probe device");
+    let table_output = Command::new("dmsetup")
+        .args(["table", &dm_name])
+        .output()
+        .expect("dmsetup table");
+    let table_line = String::from_utf8_lossy(&table_output.stdout)
+        .trim()
+        .to_string();
+    let usable_sectors: u64 = table_line
+        .split_whitespace()
+        .nth(1)
+        .expect("table line has a length field")
+        .parse()
+        .expect("parse length");
+    Command::new("dmsetup")
+        .args(["remove", &dm_name])
+        .status()
+        .expect("dmsetup remove probe device");
 
     let name = format!("devmap-test-zoned-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
         .builder()
-        .add(0, usable_sectors, Zoned { device: zoned_device.id() })
+        .add(
+            0,
+            usable_sectors,
+            Zoned {
+                device: zoned_device.id(),
+            },
+        )
         .expect("add zoned")
         .load()
         .expect("DM_TABLE_LOAD");
     removed.resume().expect("resume");
 
     let minor = removed.id().minor();
-    let mut file =
-        std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dm-{minor}")).expect("open");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("/dev/dm-{minor}"))
+        .expect("open");
     let pattern = [0x5Eu8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");

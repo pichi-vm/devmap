@@ -58,8 +58,11 @@ pub(crate) fn ioctl_with_growing_buffer(
         let (header_mut, _) = zerocopy::FromBytes::mut_from_prefix(&mut buf)
             .expect("buf is at least DmHeader::SIZE bytes");
         let header_mut: &mut DmHeader = header_mut;
-        ioctl(control, header_mut)
-            .map_err(|source| Error::DmIoctl { op, source, table_line: None })?;
+        ioctl(control, header_mut).map_err(|source| Error::DmIoctl {
+            op,
+            source,
+            table_line: None,
+        })?;
 
         check_version(op, header_mut)?;
 
@@ -122,7 +125,11 @@ impl Control {
                 return Err(Error::NameConflict { name: name.into() });
             }
             Err(source) => {
-                return Err(Error::DmIoctl { op: "DM_DEV_CREATE", source, table_line: None });
+                return Err(Error::DmIoctl {
+                    op: "DM_DEV_CREATE",
+                    source,
+                    table_line: None,
+                });
             }
         }
         check_version("DM_DEV_CREATE", &header)?;
@@ -150,7 +157,10 @@ impl Control {
                 format!("cannot stat device node {}: {source}", path.display()),
             ))
         })?;
-        Ok(Device::new(DevId::from_dev_t(meta.rdev()), Arc::clone(&self.0)))
+        Ok(Device::new(
+            DevId::from_dev_t(meta.rdev()),
+            Arc::clone(&self.0),
+        ))
     }
 
     #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
@@ -158,7 +168,11 @@ impl Control {
         let mut header = header;
         DM_DEV_STATUS
             .ioctl(&*self.0, &mut header)
-            .map_err(|source| Error::DmIoctl { op: "DM_DEV_STATUS", source, table_line: None })?;
+            .map_err(|source| Error::DmIoctl {
+                op: "DM_DEV_STATUS",
+                source,
+                table_line: None,
+            })?;
         check_version("DM_DEV_STATUS", &header)?;
         let device = Device::new(DevId::from_dev_t(header.dev()), Arc::clone(&self.0));
         Ok((device, Status::from_header(&header)))
@@ -192,11 +206,16 @@ impl Control {
             &[],
             4096,
         )?;
-        let (header, _): (&DmHeader, _) =
-            zerocopy::FromBytes::ref_from_prefix(&buf).expect("buf is at least DmHeader::SIZE bytes");
+        let (header, _): (&DmHeader, _) = zerocopy::FromBytes::ref_from_prefix(&buf)
+            .expect("buf is at least DmHeader::SIZE bytes");
         let start = header.data_start() as usize;
         let end = header.data_size() as usize;
-        Ok(ListDevicesIter { buf, offset: start, end, control: Arc::clone(&self.0) })
+        Ok(ListDevicesIter {
+            buf,
+            offset: start,
+            end,
+            control: Arc::clone(&self.0),
+        })
     }
 }
 
@@ -228,11 +247,18 @@ impl Iterator for ListDevicesIter {
         let dev = u64::from_ne_bytes(entry[0..8].try_into().unwrap());
         let next = u32::from_ne_bytes(entry[8..12].try_into().unwrap());
         let name_bytes = &entry[12..];
-        let nul = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+        let nul = name_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(name_bytes.len());
         let name = String::from_utf8_lossy(&name_bytes[..nul]).into_owned();
         let device = Device::new(DevId::from_dev_t(dev), Arc::clone(&self.control));
 
-        self.offset = if next == 0 { self.end } else { self.offset.saturating_add(next as usize) };
+        self.offset = if next == 0 {
+            self.end
+        } else {
+            self.offset.saturating_add(next as usize)
+        };
 
         Some((name, device))
     }
@@ -267,7 +293,11 @@ mod tests {
         let mut offset = start;
         for (i, (dev, name)) in entries.iter().enumerate() {
             let len = lens[i];
-            let next = if i == entries.len() - 1 { 0 } else { len as u32 };
+            let next = if i == entries.len() - 1 {
+                0
+            } else {
+                len as u32
+            };
             bytes[offset..offset + 8].copy_from_slice(&dev.to_ne_bytes());
             bytes[offset + 8..offset + 12].copy_from_slice(&next.to_ne_bytes());
             bytes[offset + 12..offset + 12 + name.len()].copy_from_slice(name.as_bytes());
@@ -283,8 +313,14 @@ mod tests {
 
     #[test]
     fn list_devices_iter_parses_single_entry() {
-        let (buf, start, end) = synthetic_list_devices_response(&[(DevId::new(252, 5).to_dev_t(), "foo")]);
-        let iter = ListDevicesIter { buf, offset: start, end, control: dummy_control() };
+        let (buf, start, end) =
+            synthetic_list_devices_response(&[(DevId::new(252, 5).to_dev_t(), "foo")]);
+        let iter = ListDevicesIter {
+            buf,
+            offset: start,
+            end,
+            control: dummy_control(),
+        };
         let entries: Vec<(String, DevId)> = iter.map(|(name, dev)| (name, dev.id())).collect();
         assert_eq!(entries, [("foo".to_string(), DevId::new(252, 5))]);
     }
@@ -296,7 +332,12 @@ mod tests {
             (DevId::new(252, 6).to_dev_t(), "second-longer-name"),
             (DevId::new(252, 7).to_dev_t(), "third"),
         ]);
-        let iter = ListDevicesIter { buf, offset: start, end, control: dummy_control() };
+        let iter = ListDevicesIter {
+            buf,
+            offset: start,
+            end,
+            control: dummy_control(),
+        };
         let entries: Vec<(String, DevId)> = iter.map(|(name, dev)| (name, dev.id())).collect();
         assert_eq!(
             entries,
@@ -311,7 +352,12 @@ mod tests {
     #[test]
     fn list_devices_iter_yields_nothing_for_empty_list() {
         let start = DmHeader::SIZE;
-        let iter = ListDevicesIter { buf: vec![0u8; start], offset: start, end: start, control: dummy_control() };
+        let iter = ListDevicesIter {
+            buf: vec![0u8; start],
+            offset: start,
+            end: start,
+            control: dummy_control(),
+        };
         assert_eq!(iter.count(), 0);
     }
 
@@ -321,7 +367,12 @@ mod tests {
         // 12-byte-header guard must stop cleanly rather than slice OOB.
         let start = DmHeader::SIZE;
         let buf = vec![0u8; start + 8]; // only 8 bytes of a 12+-byte record
-        let iter = ListDevicesIter { buf, offset: start, end: start + 100, control: dummy_control() };
+        let iter = ListDevicesIter {
+            buf,
+            offset: start,
+            end: start + 100,
+            control: dummy_control(),
+        };
         assert_eq!(iter.count(), 0);
     }
 
@@ -370,7 +421,11 @@ mod tests {
         )
         .expect_err("version mismatch must error");
         match err {
-            Error::DmIoctl { op, source, table_line } => {
+            Error::DmIoctl {
+                op,
+                source,
+                table_line,
+            } => {
                 assert_eq!(op, "TEST");
                 assert_eq!(source.kind(), io::ErrorKind::Unsupported);
                 assert!(table_line.is_none());

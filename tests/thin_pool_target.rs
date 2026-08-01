@@ -13,7 +13,9 @@ use devmap::targets::{Thin, ThinPool};
 
 #[test]
 fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
-    let Some(control) = open_control() else { return };
+    let Some(control) = open_control() else {
+        return;
+    };
     ensure_module_loaded("dm-thin-pool");
 
     let metadata = LoopDevice::create("thinpool-meta", 8 * 1024 * 1024);
@@ -37,8 +39,13 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .expect("DM_TABLE_LOAD pool");
     pool_removed.resume().expect("resume pool");
 
-    let reply = pool_removed.message(0, "create_thin 0").expect("create_thin message");
-    assert_eq!(reply, None, "create_thin produces no reply string on success");
+    let reply = pool_removed
+        .message(0, "create_thin 0")
+        .expect("create_thin message");
+    assert_eq!(
+        reply, None,
+        "create_thin produces no reply string on success"
+    );
 
     let thin_name = format!("devmap-test-thin-{}", std::process::id());
     let thin_removed = control.create(&thin_name).expect("DM_DEV_CREATE thin");
@@ -55,8 +62,11 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     thin_removed.resume().expect("resume thin");
 
     let minor = thin_removed.id().minor();
-    let mut file =
-        std::fs::OpenOptions::new().read(true).write(true).open(format!("/dev/dm-{minor}")).expect("open");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("/dev/dm-{minor}"))
+        .expect("open");
     let pattern = [0x33u8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");
@@ -67,5 +77,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     drop(file); // DM_DEV_REMOVE fails with EBUSY while the device node is open
 
     // Thin devices must be removed before their pool.
-    devmap::Device::from(thin_removed).remove().expect("remove thin device");
+    devmap::Device::from(thin_removed)
+        .remove()
+        .expect("remove thin device");
 }

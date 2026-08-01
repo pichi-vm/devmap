@@ -45,7 +45,9 @@ const SNAPSHOT_MAX_CHUNK_SIZE_SECTORS: u32 = 4_194_303;
 /// `INT_MAX >> SECTOR_SHIFT`.
 fn check_chunk_size_sectors(chunk_size_sectors: u32) -> Result<(), crate::Error> {
     if chunk_size_sectors == 0 {
-        return Err(crate::Error::Usage("snapshot chunk_size_sectors must not be zero".into()));
+        return Err(crate::Error::Usage(
+            "snapshot chunk_size_sectors must not be zero".into(),
+        ));
     }
     if !chunk_size_sectors.is_power_of_two() {
         return Err(crate::Error::Usage(format!(
@@ -80,7 +82,11 @@ impl Snapshot {
     /// (`INT_MAX >> SECTOR_SHIFT`).
     pub fn new(origin: DevId, cow: DevId, chunk_size_sectors: u32) -> Result<Self, crate::Error> {
         check_chunk_size_sectors(chunk_size_sectors)?;
-        Ok(Snapshot { origin, cow, chunk_size_sectors })
+        Ok(Snapshot {
+            origin,
+            cow,
+            chunk_size_sectors,
+        })
     }
 
     /// The device being snapshotted.
@@ -105,7 +111,11 @@ impl Target for Snapshot {
 }
 impl fmt::Display for Snapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} PO {}", self.origin, self.cow, self.chunk_size_sectors)
+        write!(
+            f,
+            "{} {} PO {}",
+            self.origin, self.cow, self.chunk_size_sectors
+        )
     }
 }
 
@@ -129,7 +139,11 @@ impl Merge {
     /// (`INT_MAX >> SECTOR_SHIFT`).
     pub fn new(origin: DevId, cow: DevId, chunk_size_sectors: u32) -> Result<Self, crate::Error> {
         check_chunk_size_sectors(chunk_size_sectors)?;
-        Ok(Merge { origin, cow, chunk_size_sectors })
+        Ok(Merge {
+            origin,
+            cow,
+            chunk_size_sectors,
+        })
     }
 
     /// The origin device to merge back into.
@@ -154,7 +168,11 @@ impl Target for Merge {
 }
 impl fmt::Display for Merge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} PO {}", self.origin, self.cow, self.chunk_size_sectors)
+        write!(
+            f,
+            "{} {} PO {}",
+            self.origin, self.cow, self.chunk_size_sectors
+        )
     }
 }
 
@@ -179,7 +197,9 @@ mod tests {
 
     #[test]
     fn snapshot_origin_renders_device_only() {
-        let t = Origin { origin: DevId::new(252, 1) };
+        let t = Origin {
+            origin: DevId::new(252, 1),
+        };
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-origin 252:1");
     }
 
@@ -237,7 +257,9 @@ mod tests {
 
     #[test]
     fn snapshot_origin_display_from_str_round_trips() {
-        let original = Origin { origin: DevId::new(252, 7) };
+        let original = Origin {
+            origin: DevId::new(252, 7),
+        };
         let params = original.to_string();
         assert_eq!(params.parse::<Origin>(), Ok(original));
     }

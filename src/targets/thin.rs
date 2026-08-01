@@ -40,7 +40,11 @@ impl Thin {
                 Self::MAX_DEV_ID
             )));
         }
-        Ok(Thin { pool, dev_id, external_origin })
+        Ok(Thin {
+            pool,
+            dev_id,
+            external_origin,
+        })
     }
 
     /// The backing thin-pool device.
