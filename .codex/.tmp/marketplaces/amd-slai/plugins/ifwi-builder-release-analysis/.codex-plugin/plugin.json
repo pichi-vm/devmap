@@ -1,0 +1,5 @@
+{
+  "name": "ifwi-builder-release-analysis",
+  "description": "Retrieves and analyzes IFWI Builder data for a given ASIC to produce",
+  "version": "1.0.3"
+}

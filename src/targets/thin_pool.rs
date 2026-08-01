@@ -124,9 +124,7 @@ impl fmt::Display for ThinPool {
     }
 }
 
-/// Builder for [`ThinPool`] — see [`ThinPool::builder`]. At most four
-/// feature flags may be set at once (the kernel rejects all five);
-/// [`build`](Builder::build) enforces this.
+/// Builder for [`ThinPool`] — see [`ThinPool::builder`].
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)] // mirrors ThinPool's five kernel feature flags
 pub struct Builder {
@@ -172,35 +170,9 @@ impl Builder {
         self
     }
     /// Finish building the [`ThinPool`].
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if all five feature flags are set
-    /// (dm-thin's `parse_pool_features` caps the count at 4 and rejects
-    /// 5 with `EINVAL` before inspecting the keywords), or if
-    /// `data_block_size_sectors` is outside `128..=2_097_152` or not a
-    /// multiple of `128`.
-    pub fn build(self) -> Result<ThinPool, crate::Error> {
-        let set = u32::from(self.skip_block_zeroing)
-            + u32::from(self.ignore_discard)
-            + u32::from(self.no_discard_passdown)
-            + u32::from(self.read_only)
-            + u32::from(self.error_if_no_space);
-        if set > 4 {
-            return Err(crate::Error::Usage(
-                "thin-pool accepts at most 4 feature flags; the kernel rejects all 5 at once"
-                    .into(),
-            ));
-        }
-        if !(128..=2_097_152).contains(&self.data_block_size_sectors)
-            || !self.data_block_size_sectors.is_multiple_of(128)
-        {
-            return Err(crate::Error::Usage(format!(
-                "thin-pool data_block_size must be in 128..=2097152 and a multiple of 128, got {}",
-                self.data_block_size_sectors
-            )));
-        }
-        Ok(ThinPool {
+    #[must_use]
+    pub fn build(self) -> ThinPool {
+        ThinPool {
             metadata: self.metadata,
             data: self.data,
             data_block_size_sectors: self.data_block_size_sectors,
@@ -210,14 +182,13 @@ impl Builder {
             no_discard_passdown: self.no_discard_passdown,
             read_only: self.read_only,
             error_if_no_space: self.error_if_no_space,
-        })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Error;
 
     fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
         let params = target.to_string();
@@ -233,61 +204,10 @@ mod tests {
         let t = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0)
             .no_discard_passdown(true)
             .error_if_no_space(true)
-            .build()
-            .expect("valid thin-pool");
+            .build();
         assert_eq!(
             line(0, 1_048_576, &t),
             "0 1048576 thin-pool 252:1 252:2 128 0 2 no_discard_passdown error_if_no_space"
-        );
-    }
-
-    #[test]
-    fn thin_pool_with_all_five_feature_flags_is_rejected_at_build() {
-        let r = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0)
-            .skip_block_zeroing(true)
-            .ignore_discard(true)
-            .no_discard_passdown(true)
-            .read_only(true)
-            .error_if_no_space(true)
-            .build();
-        assert!(matches!(r, Err(Error::Usage(_))));
-    }
-
-    #[test]
-    fn thin_pool_with_four_feature_flags_builds() {
-        let r = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0)
-            .skip_block_zeroing(true)
-            .ignore_discard(true)
-            .no_discard_passdown(true)
-            .read_only(true)
-            .build();
-        assert!(r.is_ok());
-    }
-
-    #[test]
-    fn thin_pool_bad_data_block_size_is_rejected() {
-        // Too small.
-        let small = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 64, 0).build();
-        assert!(matches!(small, Err(Error::Usage(_))));
-        // Too large.
-        let large = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 2_097_280, 0).build();
-        assert!(matches!(large, Err(Error::Usage(_))));
-        // Not a multiple of 128.
-        let misaligned = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 200, 0).build();
-        assert!(matches!(misaligned, Err(Error::Usage(_))));
-    }
-
-    #[test]
-    fn thin_pool_valid_data_block_size_is_accepted() {
-        assert!(
-            ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0)
-                .build()
-                .is_ok()
-        );
-        assert!(
-            ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 2_097_152, 0)
-                .build()
-                .is_ok()
         );
     }
 }

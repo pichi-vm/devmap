@@ -1,0 +1,5 @@
+{
+  "name": "veda-serverpmo",
+  "description": "Connects Claude to the SERVER_OPS database in Snowflake using AMD corporate",
+  "version": "1.0.7"
+}

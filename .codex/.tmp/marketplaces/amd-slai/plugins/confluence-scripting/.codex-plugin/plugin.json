@@ -1,0 +1,5 @@
+{
+  "name": "confluence-scripting",
+  "description": "Confluence wiki CLI scripts for searching pages, creating/updating documentation, managing attachments, and working with spaces. Uses Python script...",
+  "version": "2.0.1"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "regnow-secip-run",
+  "description": "regnow SECIP extract workflow. Create cldata based on mini PPR. Gather",
+  "version": "1.0.2"
+}

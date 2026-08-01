@@ -8,11 +8,6 @@ use std::fmt;
 use crate::DevId;
 use crate::table::{RawInfo, Target};
 
-/// The kernel's default high watermark (percent) when unset.
-const DEFAULT_HIGH_WATERMARK: u32 = 50;
-/// The kernel's default low watermark (percent) when unset.
-const DEFAULT_LOW_WATERMARK: u32 = 45;
-
 /// Backing store kind for a [`Writecache`] cache device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -136,53 +131,16 @@ impl Builder {
         self
     }
     /// Finish building the [`Writecache`].
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if either watermark percentage exceeds
-    /// `100`, if both are set and `high < low`, or if `block_size` is not
-    /// a power of two or is below `512`.
-    pub fn build(self) -> Result<Writecache, crate::Error> {
-        if let Some(hw) = self.high_watermark_percent
-            && hw > 100
-        {
-            return Err(crate::Error::Usage(format!(
-                "writecache high_watermark must be <= 100, got {hw}"
-            )));
-        }
-        if let Some(lw) = self.low_watermark_percent
-            && lw > 100
-        {
-            return Err(crate::Error::Usage(format!(
-                "writecache low_watermark must be <= 100, got {lw}"
-            )));
-        }
-        // The kernel fills an unset watermark with its default (high 50,
-        // low 45) and *always* checks high >= low — so resolve the effective
-        // values before comparing, not only when both are set.
-        let effective_high = self
-            .high_watermark_percent
-            .unwrap_or(DEFAULT_HIGH_WATERMARK);
-        let effective_low = self.low_watermark_percent.unwrap_or(DEFAULT_LOW_WATERMARK);
-        if effective_high < effective_low {
-            return Err(crate::Error::Usage(format!(
-                "writecache high_watermark ({effective_high}) must be >= low_watermark ({effective_low})"
-            )));
-        }
-        if !self.block_size.is_power_of_two() || self.block_size < 512 {
-            return Err(crate::Error::Usage(format!(
-                "writecache block_size must be a power of two >= 512, got {}",
-                self.block_size
-            )));
-        }
-        Ok(Writecache {
+    #[must_use]
+    pub fn build(self) -> Writecache {
+        Writecache {
             kind: self.kind,
             origin: self.origin,
             cache: self.cache,
             block_size: self.block_size,
             high_watermark_percent: self.high_watermark_percent,
             low_watermark_percent: self.low_watermark_percent,
-        })
+        }
     }
 }
 
@@ -203,8 +161,7 @@ mod tests {
     fn writecache_renders_mode_and_optional_watermarks() {
         let t = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
             .high_watermark_percent(90)
-            .build()
-            .expect("valid writecache");
+            .build();
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 2 high_watermark 90"
@@ -219,8 +176,7 @@ mod tests {
             DevId::new(252, 2),
             4096,
         )
-        .build()
-        .expect("valid writecache");
+        .build();
         assert_eq!(line(0, 8192, &t), "0 8192 writecache p 252:1 252:2 4096 0");
     }
 
@@ -228,8 +184,7 @@ mod tests {
     fn writecache_renders_low_watermark_only() {
         let t = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
             .low_watermark_percent(20)
-            .build()
-            .expect("valid writecache");
+            .build();
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 2 low_watermark 20"
@@ -241,61 +196,10 @@ mod tests {
         let t = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
             .high_watermark_percent(90)
             .low_watermark_percent(20)
-            .build()
-            .expect("valid writecache");
+            .build();
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 4 high_watermark 90 low_watermark 20"
-        );
-    }
-
-    #[test]
-    fn writecache_rejects_high_below_low() {
-        let r = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .high_watermark_percent(20)
-            .low_watermark_percent(90)
-            .build();
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn writecache_rejects_high_below_default_low_when_low_unset() {
-        // low unset -> kernel default 45; high 40 < 45 must be rejected even
-        // though only one watermark was supplied.
-        let r = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .high_watermark_percent(40)
-            .build();
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-        // high 50 (== default low+) is fine.
-        let ok = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .high_watermark_percent(50)
-            .build();
-        assert!(ok.is_ok());
-    }
-
-    #[test]
-    fn writecache_rejects_percent_over_100() {
-        let r = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .high_watermark_percent(101)
-            .build();
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn writecache_rejects_bad_block_size() {
-        // Not a power of two.
-        let npot =
-            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4000).build();
-        assert!(matches!(npot, Err(crate::Error::Usage(_))));
-        // Below 512.
-        let small =
-            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 256).build();
-        assert!(matches!(small, Err(crate::Error::Usage(_))));
-        // Valid: 512.
-        assert!(
-            Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 512)
-                .build()
-                .is_ok()
         );
     }
 }

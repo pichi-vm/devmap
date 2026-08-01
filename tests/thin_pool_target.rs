@@ -30,9 +30,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .add(
             0,
             32 * 1024 * 1024 / 512,
-            ThinPool::builder(metadata_device.id(), data_device.id(), 128, 32)
-                .build()
-                .expect("build pool"),
+            ThinPool::builder(metadata_device.id(), data_device.id(), 128, 32).build(),
         )
         .expect("add thin-pool")
         .load()
@@ -54,7 +52,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .add(
             0,
             16 * 1024 * 1024 / 512,
-            Thin::new(pool_removed.id(), 0, None).expect("valid thin"),
+            Thin::new(pool_removed.id(), 0, None),
         )
         .expect("add thin")
         .load()

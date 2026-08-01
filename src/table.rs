@@ -449,8 +449,7 @@ mod tests {
             "sha256",
             vec![0xCD; 32],
             vec![0x55; 32],
-        )
-        .expect("valid verity");
+        );
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
             .add(0, 56, t)
             .expect("add verity");

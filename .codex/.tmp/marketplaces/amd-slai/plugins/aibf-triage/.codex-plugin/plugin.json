@@ -1,0 +1,5 @@
+{
+  "name": "aibf-triage",
+  "description": "Triage software test failures using AI BlameFinder (AIBF). Find culprit CLs, generate AI debug insights, and triage IP test regressions. Accepts a ...",
+  "version": "1.3.2"
+}

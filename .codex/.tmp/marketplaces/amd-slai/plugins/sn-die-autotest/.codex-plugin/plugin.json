@@ -1,0 +1,5 @@
+{
+  "name": "sn-die-autotest",
+  "description": "Add a SOC die to automated test suite",
+  "version": "0.1.3"
+}

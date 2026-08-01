@@ -1,0 +1,5 @@
+{
+  "name": "m365-teams",
+  "description": "Send AND read Microsoft Teams chat messages, plus enumerate meeting",
+  "version": "2.4.2"
+}

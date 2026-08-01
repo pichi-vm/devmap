@@ -1,0 +1,5 @@
+{
+  "name": "p4-search",
+  "description": "Search for documents in AMD perforce",
+  "version": "1.0.1"
+}
