@@ -365,8 +365,8 @@ fn parse_message_reply(buf: &[u8]) -> Option<String> {
 #[must_use = "dropping a `Removed` removes the device; bind it to keep the device alive"]
 pub struct Removed(Option<Device>);
 
-impl std::fmt::Debug for Removed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Removed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Removed").field(&self.0).finish()
     }
 }

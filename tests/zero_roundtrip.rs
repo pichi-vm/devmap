@@ -227,6 +227,37 @@ fn by_name_finds_device_and_reports_status() {
 }
 
 #[test]
+fn dropping_guard_removes_the_device() {
+    let Some(control) = open_control() else {
+        return;
+    };
+
+    let name = format!("devmap-test-drop-{}", std::process::id());
+    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    removed
+        .builder()
+        .add(0, 8192, Zero)
+        .expect("add zero")
+        .load()
+        .expect("DM_TABLE_LOAD");
+    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+
+    // Present before the guard drops.
+    control
+        .by_name(&name)
+        .expect("device should exist before drop");
+
+    // Dropping the guard removes the device.
+    drop(removed);
+
+    // The device is gone, so a name lookup now fails.
+    assert!(
+        control.by_name(&name).is_err(),
+        "device should be gone after the guard drops"
+    );
+}
+
+#[test]
 fn create_rejects_a_duplicate_name() {
     let Some(control) = open_control() else {
         return;
