@@ -14,6 +14,16 @@ pub enum Error {
     #[error("usage: {0}")]
     Usage(String),
 
+    /// A `(major, minor)` pair that can't be represented as a device-mapper
+    /// `dev_t`: the major exceeds 12 bits or the minor exceeds 20 bits.
+    #[error("dev_t out of range: {major}:{minor} (major must fit 12 bits, minor 20 bits)")]
+    DevIdRange {
+        /// The rejected major number.
+        major: u32,
+        /// The rejected minor number.
+        minor: u32,
+    },
+
     /// A non-ioctl I/O failure (opening `/dev/mapper/control`, `stat()`ing
     /// a device node, etc.).
     #[error("io: {0}")]

@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn unstriped_renders_all_fields() {
-        let t = Unstriped::new(2, 256, 0, DevId::new(252, 1), 0);
+        let t = Unstriped::new(2, 256, 0, DevId::new(252, 1).unwrap(), 0);
         assert_eq!(line(0, 512, &t), "0 512 unstriped 2 256 0 252:1 0");
     }
 }

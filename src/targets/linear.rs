@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn linear_renders_device_and_offset() {
         let t = Linear {
-            device: DevId::new(252, 5),
+            device: DevId::new(252, 5).unwrap(),
             offset_sectors: 5,
         };
         assert_eq!(line(0, 1024, &t), "0 1024 linear 252:5 5");
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn linear_display_from_str_round_trips() {
         let original = Linear {
-            device: DevId::new(252, 5),
+            device: DevId::new(252, 5).unwrap(),
             offset_sectors: 42,
         };
         let params = original.to_string();

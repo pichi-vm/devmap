@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn delay_renders_three_arg_form_when_only_read_is_set() {
         let t = Delay {
-            read: Leg::new(DevId::new(252, 1), 0, 500),
+            read: Leg::new(DevId::new(252, 1).unwrap(), 0, 500),
             write: None,
             flush: None,
         };
@@ -100,8 +100,8 @@ mod tests {
         // write set, flush unset -> 9-arg form with flush = read (not the
         // kernel's 6-arg "flush follows write").
         let t = Delay {
-            read: Leg::new(DevId::new(252, 1), 0, 500),
-            write: Some(Leg::new(DevId::new(252, 2), 0, 100)),
+            read: Leg::new(DevId::new(252, 1).unwrap(), 0, 500),
+            write: Some(Leg::new(DevId::new(252, 2).unwrap(), 0, 100)),
             flush: None,
         };
         assert_eq!(
@@ -113,9 +113,9 @@ mod tests {
     #[test]
     fn delay_renders_nine_arg_form_when_flush_is_set() {
         let t = Delay {
-            read: Leg::new(DevId::new(252, 1), 0, 500),
-            write: Some(Leg::new(DevId::new(252, 2), 0, 100)),
-            flush: Some(Leg::new(DevId::new(252, 3), 0, 50)),
+            read: Leg::new(DevId::new(252, 1).unwrap(), 0, 500),
+            write: Some(Leg::new(DevId::new(252, 2).unwrap(), 0, 100)),
+            flush: Some(Leg::new(DevId::new(252, 3).unwrap(), 0, 50)),
         };
         assert_eq!(
             line(0, 8, &t),
@@ -126,9 +126,9 @@ mod tests {
     #[test]
     fn delay_flush_without_explicit_write_falls_back_to_read_leg() {
         let t = Delay {
-            read: Leg::new(DevId::new(252, 1), 0, 500),
+            read: Leg::new(DevId::new(252, 1).unwrap(), 0, 500),
             write: None,
-            flush: Some(Leg::new(DevId::new(252, 3), 0, 50)),
+            flush: Some(Leg::new(DevId::new(252, 3).unwrap(), 0, 50)),
         };
         assert_eq!(
             line(0, 8, &t),

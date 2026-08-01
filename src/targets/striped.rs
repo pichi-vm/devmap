@@ -65,7 +65,13 @@ mod tests {
 
     #[test]
     fn striped_renders_stripe_count_and_pairs() {
-        let t = Striped::new(128, vec![(DevId::new(252, 1), 0), (DevId::new(252, 2), 0)]);
+        let t = Striped::new(
+            128,
+            vec![
+                (DevId::new(252, 1).unwrap(), 0),
+                (DevId::new(252, 2).unwrap(), 0),
+            ],
+        );
         assert_eq!(line(0, 2048, &t), "0 2048 striped 2 128 252:1 0 252:2 0");
     }
 }

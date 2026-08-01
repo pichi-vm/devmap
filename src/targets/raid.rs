@@ -164,8 +164,11 @@ mod tests {
             Type::Raid1,
             128,
             vec![
-                DevicePair::new(None, DevId::new(252, 1)),
-                DevicePair::new(Some(DevId::new(252, 2)), DevId::new(252, 3)),
+                DevicePair::new(None, DevId::new(252, 1).unwrap()),
+                DevicePair::new(
+                    Some(DevId::new(252, 2).unwrap()),
+                    DevId::new(252, 3).unwrap(),
+                ),
             ],
         );
         assert_eq!(
@@ -176,7 +179,7 @@ mod tests {
 
     fn devs(n: u32) -> Vec<DevicePair> {
         (0..n)
-            .map(|i| DevicePair::data_only(DevId::new(252, i)))
+            .map(|i| DevicePair::data_only(DevId::new(252, i).unwrap()))
             .collect()
     }
 
@@ -201,17 +204,20 @@ mod tests {
     #[test]
     fn raid_device_pair_constructors() {
         assert_eq!(
-            DevicePair::data_only(DevId::new(252, 1)),
+            DevicePair::data_only(DevId::new(252, 1).unwrap()),
             DevicePair {
                 metadata: None,
-                data: DevId::new(252, 1)
+                data: DevId::new(252, 1).unwrap()
             }
         );
         assert_eq!(
-            DevicePair::new(Some(DevId::new(252, 2)), DevId::new(252, 3)),
+            DevicePair::new(
+                Some(DevId::new(252, 2).unwrap()),
+                DevId::new(252, 3).unwrap()
+            ),
             DevicePair {
-                metadata: Some(DevId::new(252, 2)),
-                data: DevId::new(252, 3)
+                metadata: Some(DevId::new(252, 2).unwrap()),
+                data: DevId::new(252, 3).unwrap()
             }
         );
     }

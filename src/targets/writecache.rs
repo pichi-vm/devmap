@@ -159,9 +159,14 @@ mod tests {
 
     #[test]
     fn writecache_renders_mode_and_optional_watermarks() {
-        let t = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .high_watermark_percent(90)
-            .build();
+        let t = Writecache::builder(
+            Kind::Ssd,
+            DevId::new(252, 1).unwrap(),
+            DevId::new(252, 2).unwrap(),
+            4096,
+        )
+        .high_watermark_percent(90)
+        .build();
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 2 high_watermark 90"
@@ -172,8 +177,8 @@ mod tests {
     fn writecache_renders_pmem_with_no_optional_args() {
         let t = Writecache::builder(
             Kind::PersistentMemory,
-            DevId::new(252, 1),
-            DevId::new(252, 2),
+            DevId::new(252, 1).unwrap(),
+            DevId::new(252, 2).unwrap(),
             4096,
         )
         .build();
@@ -182,9 +187,14 @@ mod tests {
 
     #[test]
     fn writecache_renders_low_watermark_only() {
-        let t = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .low_watermark_percent(20)
-            .build();
+        let t = Writecache::builder(
+            Kind::Ssd,
+            DevId::new(252, 1).unwrap(),
+            DevId::new(252, 2).unwrap(),
+            4096,
+        )
+        .low_watermark_percent(20)
+        .build();
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 2 low_watermark 20"
@@ -193,10 +203,15 @@ mod tests {
 
     #[test]
     fn writecache_renders_both_watermarks() {
-        let t = Writecache::builder(Kind::Ssd, DevId::new(252, 1), DevId::new(252, 2), 4096)
-            .high_watermark_percent(90)
-            .low_watermark_percent(20)
-            .build();
+        let t = Writecache::builder(
+            Kind::Ssd,
+            DevId::new(252, 1).unwrap(),
+            DevId::new(252, 2).unwrap(),
+            4096,
+        )
+        .high_watermark_percent(90)
+        .low_watermark_percent(20)
+        .build();
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 4 high_watermark 90 low_watermark 20"

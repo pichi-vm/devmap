@@ -191,7 +191,7 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
     let id = removed.id();
     let (major, minor) = (id.major(), id.minor());
 
-    let by_device = control.by_device((major, minor));
+    let by_device = control.by_device((major, minor).try_into().expect("in range"));
     assert_eq!(
         by_device
             .status()

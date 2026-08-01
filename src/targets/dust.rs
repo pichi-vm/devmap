@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn dust_renders_device_offset_and_block_size() {
-        let t = Dust::new(DevId::new(252, 1), 0, 512);
+        let t = Dust::new(DevId::new(252, 1).unwrap(), 0, 512);
         assert_eq!(line(0, 8192, &t), "0 8192 dust 252:1 0 512");
     }
 }

@@ -176,7 +176,7 @@ mod tests {
     fn integrity_renders_dash_for_unset_tag_size() {
         // internal_hash lets the kernel derive the tag size, so tag_size
         // may stay unset (renders `-`).
-        let t = Integrity::builder(DevId::new(252, 1), 0, Mode::Journaled)
+        let t = Integrity::builder(DevId::new(252, 1).unwrap(), 0, Mode::Journaled)
             .internal_hash("sha256")
             .build();
         assert_eq!(
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn integrity_renders_optional_args() {
-        let t = Integrity::builder(DevId::new(252, 1), 0, Mode::Direct)
+        let t = Integrity::builder(DevId::new(252, 1).unwrap(), 0, Mode::Direct)
             .tag_size(32)
             .internal_hash("sha256")
             .allow_discards(true)
@@ -200,15 +200,15 @@ mod tests {
 
     #[test]
     fn integrity_renders_mode_chars() {
-        let bitmap = Integrity::builder(DevId::new(252, 1), 0, Mode::Bitmap)
+        let bitmap = Integrity::builder(DevId::new(252, 1).unwrap(), 0, Mode::Bitmap)
             .internal_hash("sha256")
             .build();
         assert!(line(0, 8192, &bitmap).contains(" B "));
-        let recovery = Integrity::builder(DevId::new(252, 1), 0, Mode::Recovery)
+        let recovery = Integrity::builder(DevId::new(252, 1).unwrap(), 0, Mode::Recovery)
             .internal_hash("sha256")
             .build();
         assert!(line(0, 8192, &recovery).contains(" R "));
-        let inline = Integrity::builder(DevId::new(252, 1), 0, Mode::Inline)
+        let inline = Integrity::builder(DevId::new(252, 1).unwrap(), 0, Mode::Inline)
             .internal_hash("sha256")
             .build();
         assert!(line(0, 8192, &inline).contains(" I "));
