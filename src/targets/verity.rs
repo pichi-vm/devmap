@@ -38,11 +38,10 @@ impl Verity {
     /// and `hash_start_block` to 1 (see the type docs); `digest` and
     /// `salt` are raw bytes, hex-encoded on write.
     ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if `algorithm` is empty or contains ASCII
-    /// whitespace, control characters, or a NUL, or if `digest` or `salt`
-    /// is empty (both are mandatory tokens on the table line).
+    /// Value rules (non-empty `algorithm`/`digest`/`salt`, allowed
+    /// characters, and so on) are enforced by the kernel when the table
+    /// is loaded, which rejects bad values with `EINVAL`.
+    #[must_use]
     pub fn new(
         data_dev: DevId,
         hash_dev: DevId,
@@ -50,33 +49,15 @@ impl Verity {
         algorithm: impl Into<String>,
         digest: Vec<u8>,
         salt: Vec<u8>,
-    ) -> Result<Self, crate::Error> {
-        let algorithm = algorithm.into();
-        if algorithm.is_empty()
-            || algorithm
-                .bytes()
-                .any(|b| b == 0 || b.is_ascii_whitespace() || b.is_ascii_control())
-        {
-            return Err(crate::Error::Usage(format!(
-                "invalid verity algorithm: {algorithm:?}"
-            )));
-        }
-        if digest.is_empty() {
-            return Err(crate::Error::Usage(
-                "verity digest must not be empty".into(),
-            ));
-        }
-        if salt.is_empty() {
-            return Err(crate::Error::Usage("verity salt must not be empty".into()));
-        }
-        Ok(Verity {
+    ) -> Self {
+        Verity {
             data_dev,
             hash_dev,
             num_data_blocks,
-            algorithm,
+            algorithm: algorithm.into(),
             digest,
             salt,
-        })
+        }
     }
 
     /// The data device.
@@ -150,81 +131,11 @@ mod tests {
             "sha256",
             vec![0xBB; 32],
             vec![0xAA; 32],
-        )
-        .expect("valid verity");
+        );
         let rendered = line(0, 80, &t);
         assert!(rendered.contains("verity 1 252:100 252:101 4096 4096 10 1 sha256"));
         let toks: Vec<&str> = rendered.split_whitespace().collect();
         assert_eq!(*toks.last().unwrap(), "aa".repeat(32));
         assert_eq!(toks[toks.len() - 2], "bb".repeat(32));
-    }
-
-    #[test]
-    fn verity_new_rejects_a_whitespace_or_nul_algorithm() {
-        let d = vec![0xBB; 32];
-        let s = vec![0xAA; 32];
-        assert!(matches!(
-            Verity::new(
-                DevId::new(1, 0),
-                DevId::new(1, 1),
-                1,
-                "sha 256",
-                d.clone(),
-                s.clone()
-            ),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(matches!(
-            Verity::new(
-                DevId::new(1, 0),
-                DevId::new(1, 1),
-                1,
-                "sha\x00256",
-                d.clone(),
-                s.clone()
-            ),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(matches!(
-            Verity::new(DevId::new(1, 0), DevId::new(1, 1), 1, "", d, s),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn verity_new_rejects_empty_digest_or_salt() {
-        assert!(matches!(
-            Verity::new(
-                DevId::new(1, 0),
-                DevId::new(1, 1),
-                1,
-                "sha256",
-                vec![],
-                vec![0xAA; 32]
-            ),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(matches!(
-            Verity::new(
-                DevId::new(1, 0),
-                DevId::new(1, 1),
-                1,
-                "sha256",
-                vec![0xBB; 32],
-                vec![]
-            ),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(
-            Verity::new(
-                DevId::new(1, 0),
-                DevId::new(1, 1),
-                1,
-                "sha256",
-                vec![0xBB; 32],
-                vec![0xAA; 32]
-            )
-            .is_ok()
-        );
     }
 }

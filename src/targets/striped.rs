@@ -17,26 +17,12 @@ pub struct Striped {
 }
 impl Striped {
     /// Construct a [`Striped`].
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if `stripes` is empty or
-    /// `chunk_size_sectors` is zero.
-    pub fn new(chunk_size_sectors: u32, stripes: Vec<(DevId, u64)>) -> Result<Self, crate::Error> {
-        if stripes.is_empty() {
-            return Err(crate::Error::Usage(
-                "striped requires at least one stripe".into(),
-            ));
-        }
-        if chunk_size_sectors == 0 {
-            return Err(crate::Error::Usage(
-                "striped chunk_size_sectors must not be zero".into(),
-            ));
-        }
-        Ok(Striped {
+    #[must_use]
+    pub fn new(chunk_size_sectors: u32, stripes: Vec<(DevId, u64)>) -> Self {
+        Striped {
             chunk_size_sectors,
             stripes,
-        })
+        }
     }
 
     /// The chunk size in sectors.
@@ -79,29 +65,7 @@ mod tests {
 
     #[test]
     fn striped_renders_stripe_count_and_pairs() {
-        let t = Striped::new(128, vec![(DevId::new(252, 1), 0), (DevId::new(252, 2), 0)])
-            .expect("valid striped");
+        let t = Striped::new(128, vec![(DevId::new(252, 1), 0), (DevId::new(252, 2), 0)]);
         assert_eq!(line(0, 2048, &t), "0 2048 striped 2 128 252:1 0 252:2 0");
-    }
-
-    #[test]
-    fn striped_rejects_empty_stripes() {
-        assert!(matches!(
-            Striped::new(128, vec![]),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn striped_rejects_zero_chunk_size() {
-        assert!(matches!(
-            Striped::new(0, vec![(DevId::new(252, 1), 0)]),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn striped_accepts_a_valid_stripe() {
-        assert!(Striped::new(128, vec![(DevId::new(252, 1), 0)]).is_ok());
     }
 }

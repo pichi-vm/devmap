@@ -30,9 +30,7 @@ fn writecache_passes_data_through() {
         .add(
             0,
             16 * 1024 * 1024 / 512,
-            Writecache::builder(Kind::Ssd, origin_device.id(), cache_device.id(), 4096)
-                .build()
-                .expect("build writecache"),
+            Writecache::builder(Kind::Ssd, origin_device.id(), cache_device.id(), 4096).build(),
         )
         .expect("add writecache")
         .load()
@@ -78,7 +76,6 @@ fn integrity_first_use_format_then_reload_sequence() {
         Integrity::builder(backing_device.id(), 0, Mode::Journaled)
             .internal_hash("sha256")
             .build()
-            .expect("build integrity")
     };
 
     // First load: 1-sector table lets the kernel format the (all-zero)

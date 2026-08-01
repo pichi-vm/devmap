@@ -22,39 +22,23 @@ pub struct Unstriped {
 impl Unstriped {
     /// Construct an [`Unstriped`].
     ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if `stripes` is zero, `chunk_size_sectors`
-    /// is zero, or `stripe_index >= stripes`.
+    /// Value rules (nonzero `stripes`/`chunk_size_sectors`,
+    /// `stripe_index < stripes`) are enforced by the kernel on table load.
+    #[must_use]
     pub fn new(
         stripes: u32,
         chunk_size_sectors: u32,
         stripe_index: u32,
         device: DevId,
         offset_sectors: u64,
-    ) -> Result<Self, crate::Error> {
-        if stripes == 0 {
-            return Err(crate::Error::Usage(
-                "unstriped requires at least one stripe".into(),
-            ));
-        }
-        if chunk_size_sectors == 0 {
-            return Err(crate::Error::Usage(
-                "unstriped chunk_size_sectors must not be zero".into(),
-            ));
-        }
-        if stripe_index >= stripes {
-            return Err(crate::Error::Usage(format!(
-                "unstriped stripe_index ({stripe_index}) must be less than stripes ({stripes})"
-            )));
-        }
-        Ok(Unstriped {
+    ) -> Self {
+        Unstriped {
             stripes,
             chunk_size_sectors,
             stripe_index,
             device,
             offset_sectors,
-        })
+        }
     }
 
     /// The total number of stripes in the underlying mapping.
@@ -116,36 +100,7 @@ mod tests {
 
     #[test]
     fn unstriped_renders_all_fields() {
-        let t = Unstriped::new(2, 256, 0, DevId::new(252, 1), 0).expect("valid unstriped");
+        let t = Unstriped::new(2, 256, 0, DevId::new(252, 1), 0);
         assert_eq!(line(0, 512, &t), "0 512 unstriped 2 256 0 252:1 0");
-    }
-
-    #[test]
-    fn unstriped_rejects_out_of_range_stripe_index() {
-        assert!(matches!(
-            Unstriped::new(2, 256, 2, DevId::new(252, 1), 0),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn unstriped_rejects_zero_stripes() {
-        assert!(matches!(
-            Unstriped::new(0, 256, 0, DevId::new(252, 1), 0),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn unstriped_rejects_zero_chunk_size() {
-        assert!(matches!(
-            Unstriped::new(2, 0, 0, DevId::new(252, 1), 0),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn unstriped_accepts_valid_stripe_index() {
-        assert!(Unstriped::new(2, 256, 1, DevId::new(252, 1), 0).is_ok());
     }
 }
