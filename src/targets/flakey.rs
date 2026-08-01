@@ -192,14 +192,14 @@ mod tests {
 
     #[test]
     fn flakey_renders_zero_features_when_none_given() {
-        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![]);
+        let t = Flakey::new(DevId::new(252, 1).unwrap(), 0, 60, 5, vec![]);
         assert_eq!(line(0, 8192, &t), "0 8192 flakey 252:1 0 60 5 0");
     }
 
     #[test]
     fn flakey_renders_feature_token_counts_not_feature_counts() {
         let t = Flakey::new(
-            DevId::new(252, 1),
+            DevId::new(252, 1).unwrap(),
             0,
             60,
             5,
@@ -223,7 +223,13 @@ mod tests {
 
     #[test]
     fn flakey_renders_drop_writes_token() {
-        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![Feature::DropWrites]);
+        let t = Flakey::new(
+            DevId::new(252, 1).unwrap(),
+            0,
+            60,
+            5,
+            vec![Feature::DropWrites],
+        );
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 1 drop_writes"
@@ -232,7 +238,13 @@ mod tests {
 
     #[test]
     fn flakey_renders_error_writes_token() {
-        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![Feature::ErrorWrites]);
+        let t = Flakey::new(
+            DevId::new(252, 1).unwrap(),
+            0,
+            60,
+            5,
+            vec![Feature::ErrorWrites],
+        );
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 1 error_writes"
@@ -242,7 +254,7 @@ mod tests {
     #[test]
     fn flakey_renders_random_read_corrupt_token() {
         let t = Flakey::new(
-            DevId::new(252, 1),
+            DevId::new(252, 1).unwrap(),
             0,
             60,
             5,
@@ -259,7 +271,7 @@ mod tests {
     #[test]
     fn flakey_renders_read_direction_token() {
         let t = Flakey::new(
-            DevId::new(252, 1),
+            DevId::new(252, 1).unwrap(),
             0,
             60,
             5,

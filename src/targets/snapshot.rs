@@ -152,21 +152,21 @@ mod tests {
 
     #[test]
     fn snapshot_renders_with_po_persistence() {
-        let t = Snapshot::new(DevId::new(252, 1), DevId::new(252, 2), 8);
+        let t = Snapshot::new(DevId::new(252, 1).unwrap(), DevId::new(252, 2).unwrap(), 8);
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot 252:1 252:2 PO 8");
     }
 
     #[test]
     fn snapshot_origin_renders_device_only() {
         let t = Origin {
-            origin: DevId::new(252, 1),
+            origin: DevId::new(252, 1).unwrap(),
         };
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-origin 252:1");
     }
 
     #[test]
     fn snapshot_merge_renders_like_snapshot_with_po() {
-        let t = Merge::new(DevId::new(252, 1), DevId::new(252, 2), 8);
+        let t = Merge::new(DevId::new(252, 1).unwrap(), DevId::new(252, 2).unwrap(), 8);
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-merge 252:1 252:2 PO 8");
     }
 
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn snapshot_origin_display_from_str_round_trips() {
         let original = Origin {
-            origin: DevId::new(252, 7),
+            origin: DevId::new(252, 7).unwrap(),
         };
         let params = original.to_string();
         assert_eq!(params.parse::<Origin>(), Ok(original));

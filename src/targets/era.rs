@@ -70,7 +70,11 @@ mod tests {
 
     #[test]
     fn era_renders_metadata_origin_and_block_size() {
-        let t = Era::new(DevId::new(252, 1), DevId::new(252, 2), 128);
+        let t = Era::new(
+            DevId::new(252, 1).unwrap(),
+            DevId::new(252, 2).unwrap(),
+            128,
+        );
         assert_eq!(line(0, 8192, &t), "0 8192 era 252:1 252:2 128");
     }
 }

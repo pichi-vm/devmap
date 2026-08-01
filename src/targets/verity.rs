@@ -125,8 +125,8 @@ mod tests {
     #[test]
     fn verity_renders_per_kernel_docs() {
         let t = Verity::new(
-            DevId::new(252, 100),
-            DevId::new(252, 101),
+            DevId::new(252, 100).unwrap(),
+            DevId::new(252, 101).unwrap(),
             10,
             "sha256",
             vec![0xBB; 32],

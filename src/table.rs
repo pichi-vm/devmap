@@ -383,7 +383,7 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
 /// Parse a `major:minor` device token.
 pub(crate) fn parse_device(s: &str) -> Option<DevId> {
     let (maj, min) = s.split_once(':')?;
-    Some(DevId::new(maj.parse().ok()?, min.parse().ok()?))
+    DevId::new(maj.parse().ok()?, min.parse().ok()?)
 }
 
 #[cfg(test)]
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn buf_for_zero_target_has_correct_layout() {
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5))
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
             .add(0, 8, targets::Zero)
             .expect("add zero");
         // header + (40 spec + 0 params + 1 NUL = 41 -> padded to 48).
@@ -415,12 +415,12 @@ mod tests {
 
     #[test]
     fn buf_for_linear_target_has_correct_layout_and_params() {
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
             .add(
                 0,
                 1024,
                 Linear {
-                    device: DevId::new(252, 5),
+                    device: DevId::new(252, 5).unwrap(),
                     offset_sectors: 0,
                 },
             )
@@ -443,14 +443,14 @@ mod tests {
     #[test]
     fn buf_for_verity_target_has_correct_layout_and_params() {
         let t = Verity::new(
-            DevId::new(253, 3),
-            DevId::new(253, 4),
+            DevId::new(253, 3).unwrap(),
+            DevId::new(253, 4).unwrap(),
             7,
             "sha256",
             vec![0xCD; 32],
             vec![0x55; 32],
         );
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
             .add(0, 56, t)
             .expect("add verity");
         let cd_hex = "cd".repeat(32);
@@ -473,14 +473,14 @@ mod tests {
         // the read side). Three lines, not two: with only two, the first
         // spec's `next` can't distinguish "relative to current" from
         // "relative to first".
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9))
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
             .add(0, 8, targets::Zero)
             .and_then(|b| {
                 b.add(
                     8,
                     1024,
                     Linear {
-                        device: DevId::new(252, 5),
+                        device: DevId::new(252, 5).unwrap(),
                         offset_sectors: 5,
                     },
                 )
@@ -571,7 +571,7 @@ mod tests {
         assert_eq!(
             row.parse::<Linear>(),
             Some(Linear {
-                device: DevId::new(252, 5),
+                device: DevId::new(252, 5).unwrap(),
                 offset_sectors: 5
             })
         );
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(
             rows[1].parse::<Linear>(),
             Some(Linear {
-                device: DevId::new(252, 5),
+                device: DevId::new(252, 5).unwrap(),
                 offset_sectors: 5
             })
         );
@@ -693,7 +693,8 @@ mod tests {
 
     #[test]
     fn builder_rejects_an_interior_nul_in_params() {
-        let r = TableBuilder::new(dummy_control(), DevId::new(252, 1)).add(0, 8, NulTarget);
+        let r =
+            TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap()).add(0, 8, NulTarget);
         assert!(matches!(r, Err(Error::Usage(_))));
     }
 
@@ -712,7 +713,11 @@ mod tests {
 
     #[test]
     fn builder_rejects_an_invalid_type_name() {
-        let r = TableBuilder::new(dummy_control(), DevId::new(252, 1)).add(0, 8, BadNameTarget);
+        let r = TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap()).add(
+            0,
+            8,
+            BadNameTarget,
+        );
         assert!(matches!(r, Err(Error::Usage(_))));
     }
 
@@ -746,7 +751,7 @@ mod tests {
     fn an_out_of_tree_target_can_be_added_and_parsed() {
         // Extensibility proof: a user-defined Target renders into the builder
         // and round-trips through a synthetic Spec row.
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 1))
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap())
             .add(0, 8, CustomTarget { value: 3 })
             .expect("add custom target");
         assert_eq!(b.rendered, ["0 8 custom-target 1 2 3"]);
@@ -793,7 +798,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_empty_and_overlong_type_names_but_accepts_15_bytes() {
-        let dev = DevId::new(252, 1);
+        let dev = DevId::new(252, 1).unwrap();
         assert!(matches!(
             TableBuilder::new(dummy_control(), dev).add(0, 8, EmptyName),
             Err(Error::Usage(_))
