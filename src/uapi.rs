@@ -70,6 +70,10 @@ pub(crate) const DM_INACTIVE_PRESENT_FLAG: u32 = 1 << 6;
 /// operation (response-only).
 pub(crate) const DM_UEVENT_GENERATED_FLAG: u32 = 1 << 13;
 
+/// `DM_DEFERRED_REMOVE` — on `DM_DEV_REMOVE`, schedule removal for when the
+/// device is no longer in use instead of failing with `EBUSY`.
+pub(crate) const DM_DEFERRED_REMOVE: u32 = 1 << 17;
+
 /// Request flag for `DM_TABLE_STATUS`: return the table (`STATUSTYPE_TABLE`,
 /// the construction parameters) rather than the default runtime status
 /// (`STATUSTYPE_INFO`).
