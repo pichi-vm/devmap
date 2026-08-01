@@ -206,8 +206,14 @@ impl Device {
         self.suspend_or_resume(false)
     }
 
-    fn remove_now(control: &File, dev_t: DevId) -> Result<(), Error> {
+    fn remove_now(control: &File, dev_t: DevId, deferred: bool) -> Result<(), Error> {
         let mut header = DmHeader::by_dev(dev_t.to_dev_t());
+        // The drop guard defers so a busy device is still reclaimed once it's
+        // released; explicit `remove` asks for immediate removal (and its
+        // error).
+        if deferred {
+            header.set_deferred_remove();
+        }
         DM_DEV_REMOVE
             .ioctl(control, &mut header)
             .map_err(|source| Error::DmIoctl {
@@ -225,7 +231,7 @@ impl Device {
     /// [`Error::DmIoctl`] if the kernel rejects the removal (e.g. the
     /// device is still open).
     pub fn remove(self) -> Result<(), Error> {
-        Self::remove_now(&self.control, self.dev_t)
+        Self::remove_now(&self.control, self.dev_t, false)
     }
 
     /// `DM_DEV_STATUS` using this device's own `dev_t`.
@@ -367,10 +373,11 @@ fn parse_message_reply(buf: &[u8]) -> Option<String> {
 }
 
 /// The auto-removing wrapper [`crate::Control::create`] returns. `Drop`
-/// performs the same removal as [`Device::remove`] but discards errors —
-/// use `Device::from(removed).remove()` for observable-error removal, or
-/// `Device::from(removed)` (`.into()`) alone to opt out of removal
-/// entirely and keep using the device.
+/// removes the device, discarding errors, using `DM_DEFERRED_REMOVE` so a
+/// still-open device is reclaimed once released rather than leaking on
+/// `EBUSY`. Use `Device::from(removed).remove()` for immediate,
+/// observable-error removal, or `Device::from(removed)` (`.into()`) alone to
+/// opt out of removal entirely and keep using the device.
 ///
 /// `#[must_use]`: dropping a `Removed` immediately removes the device, so a
 /// discarded value (`let _ = control.create(name)?;`) would silently tear
@@ -407,7 +414,9 @@ impl std::ops::Deref for Removed {
 impl Drop for Removed {
     fn drop(&mut self) {
         if let Some(device) = self.0.take() {
-            let _ = device.remove();
+            // Deferred so a still-open device is reclaimed once released,
+            // rather than leaking when an immediate remove would hit EBUSY.
+            let _ = Device::remove_now(&device.control, device.dev_t, true);
         }
     }
 }
