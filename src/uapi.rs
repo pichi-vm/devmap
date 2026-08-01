@@ -41,6 +41,15 @@ pub(crate) struct dm_target_spec_raw {
 }
 
 const _: () = assert!(core::mem::size_of::<dm_target_spec_raw>() == 40);
+// Field offsets are load-bearing for the `struct dm_target_spec` ABI.
+const _: () = {
+    use core::mem::offset_of;
+    assert!(offset_of!(dm_target_spec_raw, sector_start) == 0);
+    assert!(offset_of!(dm_target_spec_raw, length) == 8);
+    assert!(offset_of!(dm_target_spec_raw, status) == 16);
+    assert!(offset_of!(dm_target_spec_raw, next) == 20);
+    assert!(offset_of!(dm_target_spec_raw, target_type) == 24);
+};
 
 pub(crate) const DM_TARGET_SPEC_SIZE: usize = core::mem::size_of::<dm_target_spec_raw>();
 
