@@ -40,6 +40,21 @@ pub(crate) struct DmHeader {
 }
 
 const _: () = assert!(core::mem::size_of::<DmHeader>() == 312);
+// Field offsets are load-bearing for the `struct dm_ioctl` ABI; a
+// size-preserving reorder would break it while passing the size assert.
+const _: () = {
+    use core::mem::offset_of;
+    assert!(offset_of!(DmHeader, version) == 0);
+    assert!(offset_of!(DmHeader, data_size) == 12);
+    assert!(offset_of!(DmHeader, data_start) == 16);
+    assert!(offset_of!(DmHeader, target_count) == 20);
+    assert!(offset_of!(DmHeader, flags) == 28);
+    assert!(offset_of!(DmHeader, event_nr) == 32);
+    assert!(offset_of!(DmHeader, dev) == 40);
+    assert!(offset_of!(DmHeader, name) == 48);
+    assert!(offset_of!(DmHeader, uuid) == 176);
+    assert!(offset_of!(DmHeader, data) == 305);
+};
 
 impl DmHeader {
     pub(crate) const SIZE: usize = core::mem::size_of::<DmHeader>();
