@@ -89,20 +89,12 @@ impl Control {
     /// [`Error::Io`] if the control node can't be opened (typically because
     /// the process lacks `CAP_SYS_ADMIN`, or device-mapper isn't loaded).
     pub fn open() -> Result<Self, Error> {
-        // Attach context: a bare `?` yields e.g. "io: Permission denied"
-        // with no hint it's the control node or why (the usual causes are
-        // lacking CAP_SYS_ADMIN or device-mapper not being loaded). The
-        // original `ErrorKind` is preserved.
-        let file = OpenOptions::new().read(true).write(true).open("/dev/mapper/control").map_err(
-            |source| {
-                Error::Io(io::Error::new(
-                    source.kind(),
-                    format!(
-                        "cannot open /dev/mapper/control (need CAP_SYS_ADMIN and dm loaded): {source}"
-                    ),
-                ))
-            },
-        )?;
+        // Propagate the raw io::Error so its errno (and kind) survive; the
+        // likely-cause hint lives in the `# Errors` docs, not the message.
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/mapper/control")?;
         Ok(Self(Arc::new(file)))
     }
 
@@ -146,17 +138,13 @@ impl Control {
     }
 
     /// `stat()` only — resolves a device node path to its [`DevId`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] if the path can't be `stat`ed (its errno and kind are
+    /// preserved).
     pub fn by_node(&self, path: impl AsRef<Path>) -> Result<Device, Error> {
-        let path = path.as_ref();
-        // Attach the path to the failure: a bare `#[from] io::Error` yields
-        // "io: No such file or directory" with no indication it was node
-        // resolution. The original `ErrorKind` is preserved.
-        let meta = std::fs::metadata(path).map_err(|source| {
-            Error::Io(io::Error::new(
-                source.kind(),
-                format!("cannot stat device node {}: {source}", path.display()),
-            ))
-        })?;
+        let meta = std::fs::metadata(path)?;
         Ok(Device::new(
             DevId::from_dev_t(meta.rdev()),
             Arc::clone(&self.0),
