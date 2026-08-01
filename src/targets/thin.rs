@@ -75,13 +75,17 @@ mod tests {
 
     #[test]
     fn thin_renders_without_external_origin() {
-        let t = Thin::new(DevId::new(252, 1), 7, None);
+        let t = Thin::new(DevId::new(252, 1).unwrap(), 7, None);
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7");
     }
 
     #[test]
     fn thin_renders_with_external_origin() {
-        let t = Thin::new(DevId::new(252, 1), 7, Some(DevId::new(252, 9)));
+        let t = Thin::new(
+            DevId::new(252, 1).unwrap(),
+            7,
+            Some(DevId::new(252, 9).unwrap()),
+        );
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7 252:9");
     }
 }

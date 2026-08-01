@@ -137,12 +137,12 @@ impl Control {
         Ok(Removed::from(device))
     }
 
-    /// No syscall — wraps an already-known [`DevId`] (e.g. `(major, minor)`,
-    /// which converts via `Into`). Does no liveness check: a real operation
-    /// on the result fails with the kernel's `ENXIO` if it doesn't
-    /// correspond to an actual dm device.
-    pub fn by_device(&self, id: impl Into<DevId>) -> Device {
-        Device::new(id.into(), Arc::clone(&self.0))
+    /// No syscall — wraps an already-known [`DevId`] (build one with
+    /// [`DevId::new`] or `(major, minor).try_into()`). Does no liveness check:
+    /// a real operation on the result fails with the kernel's `ENXIO` if it
+    /// doesn't correspond to an actual dm device.
+    pub fn by_device(&self, id: DevId) -> Device {
+        Device::new(id, Arc::clone(&self.0))
     }
 
     /// `stat()` only — resolves a device node path to its [`DevId`].
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn list_devices_iter_parses_single_entry() {
         let (buf, start, end) =
-            synthetic_list_devices_response(&[(DevId::new(252, 5).to_dev_t(), "foo")]);
+            synthetic_list_devices_response(&[(DevId::new(252, 5).unwrap().to_dev_t(), "foo")]);
         let iter = ListDevicesIter {
             buf,
             offset: start,
@@ -322,15 +322,15 @@ mod tests {
             control: dummy_control(),
         };
         let entries: Vec<(String, DevId)> = iter.map(|(name, dev)| (name, dev.id())).collect();
-        assert_eq!(entries, [("foo".to_string(), DevId::new(252, 5))]);
+        assert_eq!(entries, [("foo".to_string(), DevId::new(252, 5).unwrap())]);
     }
 
     #[test]
     fn list_devices_iter_follows_next_relative_to_current_entry() {
         let (buf, start, end) = synthetic_list_devices_response(&[
-            (DevId::new(252, 5).to_dev_t(), "first"),
-            (DevId::new(252, 6).to_dev_t(), "second-longer-name"),
-            (DevId::new(252, 7).to_dev_t(), "third"),
+            (DevId::new(252, 5).unwrap().to_dev_t(), "first"),
+            (DevId::new(252, 6).unwrap().to_dev_t(), "second-longer-name"),
+            (DevId::new(252, 7).unwrap().to_dev_t(), "third"),
         ]);
         let iter = ListDevicesIter {
             buf,
@@ -342,9 +342,12 @@ mod tests {
         assert_eq!(
             entries,
             [
-                ("first".to_string(), DevId::new(252, 5)),
-                ("second-longer-name".to_string(), DevId::new(252, 6)),
-                ("third".to_string(), DevId::new(252, 7)),
+                ("first".to_string(), DevId::new(252, 5).unwrap()),
+                (
+                    "second-longer-name".to_string(),
+                    DevId::new(252, 6).unwrap()
+                ),
+                ("third".to_string(), DevId::new(252, 7).unwrap()),
             ]
         );
     }

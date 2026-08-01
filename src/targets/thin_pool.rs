@@ -201,10 +201,15 @@ mod tests {
 
     #[test]
     fn thin_pool_renders_only_set_feature_flags() {
-        let t = ThinPool::builder(DevId::new(252, 1), DevId::new(252, 2), 128, 0)
-            .no_discard_passdown(true)
-            .error_if_no_space(true)
-            .build();
+        let t = ThinPool::builder(
+            DevId::new(252, 1).unwrap(),
+            DevId::new(252, 2).unwrap(),
+            128,
+            0,
+        )
+        .no_discard_passdown(true)
+        .error_if_no_space(true)
+        .build();
         assert_eq!(
             line(0, 1_048_576, &t),
             "0 1048576 thin-pool 252:1 252:2 128 0 2 no_discard_passdown error_if_no_space"

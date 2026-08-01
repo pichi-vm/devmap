@@ -59,14 +59,14 @@ mod tests {
         assert_eq!(
             "252:5 5".parse::<Linear>(),
             Ok(Linear {
-                device: DevId::new(252, 5),
+                device: DevId::new(252, 5).unwrap(),
                 offset_sectors: 5
             })
         );
         assert_eq!(
             "252:1".parse::<snapshot::Origin>(),
             Ok(snapshot::Origin {
-                origin: DevId::new(252, 1)
+                origin: DevId::new(252, 1).unwrap()
             })
         );
     }

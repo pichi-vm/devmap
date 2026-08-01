@@ -17,8 +17,9 @@ use crate::uapi::{
 };
 
 /// A device-mapper device's `(major, minor)` identity — a block device
-/// number (`dev_t`). Constructible from a `(u32, u32)` tuple via `From`,
-/// and renders as the kernel's `major:minor` syntax via [`fmt::Display`].
+/// number (`dev_t`). Construct with [`DevId::new`] or the fallible
+/// `TryFrom<(u32, u32)>`; renders as the kernel's `major:minor` syntax via
+/// [`fmt::Display`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct DevId {
     major: u32,
@@ -26,9 +27,20 @@ pub struct DevId {
 }
 
 impl DevId {
-    /// A `DevId` from an explicit major/minor pair.
-    pub const fn new(major: u32, minor: u32) -> Self {
-        Self { major, minor }
+    /// The classic 32-bit dm `dev_t` field widths: 12-bit major, 20-bit minor.
+    const MAX_MAJOR: u32 = 0xfff;
+    const MAX_MINOR: u32 = 0x000f_ffff;
+
+    /// A `DevId` from an explicit major/minor pair, or `None` if either
+    /// exceeds the classic 32-bit dm `dev_t` field widths (12-bit major,
+    /// 20-bit minor). Values beyond those can't be encoded and would
+    /// otherwise silently alias a different device.
+    pub const fn new(major: u32, minor: u32) -> Option<Self> {
+        if major <= Self::MAX_MAJOR && minor <= Self::MAX_MINOR {
+            Some(Self { major, minor })
+        } else {
+            None
+        }
     }
 
     /// The major number.
@@ -54,10 +66,10 @@ impl DevId {
         Self { major, minor }
     }
 
-    /// Inverse of [`DevId::from_dev_t`].
+    /// Inverse of [`DevId::from_dev_t`]. `major`/`minor` are constrained to
+    /// the field widths by construction, so no masking is needed.
     pub(crate) fn to_dev_t(self) -> u64 {
-        let dev =
-            (self.minor & 0xff) | ((self.major & 0xfff) << 8) | (((self.minor >> 8) & 0xfff) << 20);
+        let dev = (self.minor & 0xff) | (self.major << 8) | ((self.minor >> 8) << 20);
         u64::from(dev)
     }
 }
@@ -68,10 +80,12 @@ impl fmt::Display for DevId {
     }
 }
 
-impl From<(u32, u32)> for DevId {
-    /// `(major, minor)`.
-    fn from((major, minor): (u32, u32)) -> Self {
-        Self { major, minor }
+impl TryFrom<(u32, u32)> for DevId {
+    type Error = Error;
+    /// `(major, minor)`, rejecting out-of-range values with
+    /// [`Error::DevIdRange`].
+    fn try_from((major, minor): (u32, u32)) -> Result<Self, Error> {
+        Self::new(major, minor).ok_or(Error::DevIdRange { major, minor })
     }
 }
 
@@ -480,24 +494,41 @@ mod tests {
 
     #[test]
     fn removed_derefs_to_the_inner_device() {
-        let removed = Removed::from(Device::new(DevId::new(252, 5), dummy_control()));
+        let removed = Removed::from(Device::new(DevId::new(252, 5).unwrap(), dummy_control()));
         // Reached through Deref<Target = Device>.
-        assert_eq!(removed.id(), DevId::new(252, 5));
+        assert_eq!(removed.id(), DevId::new(252, 5).unwrap());
     }
 
     #[test]
     fn converting_removed_into_device_yields_the_inner_device() {
         // From<Removed> for Device takes the inner Device out (disarming the
         // drop-based removal) and hands it back intact.
-        let removed = Removed::from(Device::new(DevId::new(252, 7), dummy_control()));
+        let removed = Removed::from(Device::new(DevId::new(252, 7).unwrap(), dummy_control()));
         let device: Device = removed.into();
-        assert_eq!(device.id(), DevId::new(252, 7));
+        assert_eq!(device.id(), DevId::new(252, 7).unwrap());
+    }
+
+    #[test]
+    fn dev_id_rejects_out_of_range() {
+        assert!(DevId::new(0x1000, 0).is_none(), "major over 12 bits");
+        assert!(DevId::new(0, 0x10_0000).is_none(), "minor over 20 bits");
+        assert!(
+            DevId::new(0xfff, 0xf_ffff).is_some(),
+            "the maxima are in range"
+        );
+        assert!(matches!(
+            DevId::try_from((0x1000, 7)),
+            Err(Error::DevIdRange {
+                major: 0x1000,
+                minor: 7
+            })
+        ));
     }
 
     #[test]
     fn dev_id_round_trips() {
         for (major, minor) in [(0u32, 0u32), (252, 5), (7, 0), (0xfff, 0xf_ffff), (1, 1)] {
-            let id = DevId::new(major, minor);
+            let id = DevId::new(major, minor).unwrap();
             assert_eq!(
                 DevId::from_dev_t(id.to_dev_t()),
                 id,
@@ -511,26 +542,32 @@ mod tests {
         // Pin the packing against concrete constants, not just a round trip
         // (which can't catch an encode/decode pair that share the same bug).
         // 252 = 0xfc, minor 5 -> 0xfc05 in the classic packed encoding.
-        assert_eq!(DevId::new(252, 5).to_dev_t(), 0xfc05);
-        assert_eq!(DevId::from_dev_t(0xfc05), DevId::new(252, 5));
+        assert_eq!(DevId::new(252, 5).unwrap().to_dev_t(), 0xfc05);
+        assert_eq!(DevId::from_dev_t(0xfc05), DevId::new(252, 5).unwrap());
 
         // A minor large enough to spill into the high bits [31:20].
         // major=1 -> [19:8], minor=0x12345 -> low 8 at [7:0], high 12 at [31:20].
-        assert_eq!(DevId::new(1, 0x1_2345).to_dev_t(), 0x1230_0145);
-        assert_eq!(DevId::from_dev_t(0x1230_0145), DevId::new(1, 0x1_2345));
+        assert_eq!(DevId::new(1, 0x1_2345).unwrap().to_dev_t(), 0x1230_0145);
+        assert_eq!(
+            DevId::from_dev_t(0x1230_0145),
+            DevId::new(1, 0x1_2345).unwrap()
+        );
     }
 
     #[test]
     fn from_dev_t_truncates_high_64_bits() {
         // from_dev_t operates on the low 32 bits only; garbage above bit 31
         // in the kernel-returned u64 must not leak into the result.
-        assert_eq!(DevId::from_dev_t(0xffff_ffff_0000_fc05), DevId::new(252, 5));
+        assert_eq!(
+            DevId::from_dev_t(0xffff_ffff_0000_fc05),
+            DevId::new(252, 5).unwrap()
+        );
     }
 
     #[test]
     fn dev_id_display_uses_kernel_syntax() {
-        assert_eq!(DevId::new(252, 5).to_string(), "252:5");
-        assert_eq!(DevId::from((7, 0)).to_string(), "7:0");
+        assert_eq!(DevId::new(252, 5).unwrap().to_string(), "252:5");
+        assert_eq!(DevId::new(7, 0).unwrap().to_string(), "7:0");
     }
 
     /// Hand-builds a synthetic `DM_TARGET_MSG` response buffer, poking
