@@ -74,51 +74,22 @@ pub struct Raid {
 impl Raid {
     /// Construct a [`Raid`].
     ///
-    /// For every level except [`Type::Raid1`], `chunk_size_sectors` must
-    /// be a power of two and at least `8`. For [`Type::Raid1`] the kernel
-    /// ignores the chunk size, so any argument is coerced to `0`.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if `devices` has fewer than the level's
-    /// minimum (raid1/4/5/10 need ≥2, raid6 needs ≥3), or if (for a
-    /// non-raid1 level) `chunk_size_sectors` is not a power of two `>= 8`.
-    pub fn new(
-        raid_type: Type,
-        chunk_size_sectors: u64,
-        devices: Vec<DevicePair>,
-    ) -> Result<Self, crate::Error> {
-        // The kernel's raid_set_alloc requires more total devices than parity
-        // devices: raid4/5 need ≥2, raid6 ≥3; raid1/raid10 need ≥2 to be
-        // meaningful. raid0 (no parity) needs ≥1.
-        let min_devices = match raid_type {
-            Type::Raid0 => 1,
-            Type::Raid1 | Type::Raid4 | Type::Raid5 | Type::Raid10 => 2,
-            Type::Raid6 => 3,
-        };
-        if devices.len() < min_devices {
-            return Err(crate::Error::Usage(format!(
-                "{raid_type:?} requires at least {min_devices} device(s), got {}",
-                devices.len()
-            )));
-        }
+    /// For [`Type::Raid1`] the kernel ignores the chunk size, so any
+    /// argument is coerced to `0`.
+    #[must_use]
+    pub fn new(raid_type: Type, chunk_size_sectors: u64, devices: Vec<DevicePair>) -> Self {
         let chunk_size_sectors = if raid_type == Type::Raid1 {
             // raid1 has no stripes; the kernel ignores (and rejects a
             // non-zero) chunk size, so normalize to 0.
             0
         } else {
-            if !chunk_size_sectors.is_power_of_two() || chunk_size_sectors < 8 {
-                return Err(crate::Error::Usage(format!(
-                    "raid chunk_size must be a power of two >= 8 sectors, got {chunk_size_sectors}"
-                )));
-            }
             chunk_size_sectors
         };
-        Ok(Raid {
+        Raid {
             raid_type,
             chunk_size_sectors,
             devices,
-        })
+        }
     }
 
     /// The raid level.
@@ -196,8 +167,7 @@ mod tests {
                 DevicePair::new(None, DevId::new(252, 1)),
                 DevicePair::new(Some(DevId::new(252, 2)), DevId::new(252, 3)),
             ],
-        )
-        .expect("valid raid");
+        );
         assert_eq!(
             line(0, 1_048_576, &t),
             "0 1048576 raid raid1 1 0 2 - 252:1 252:2 252:3"
@@ -211,38 +181,6 @@ mod tests {
     }
 
     #[test]
-    fn raid_non_power_of_two_or_too_small_chunk_is_rejected() {
-        // Two devices so the chunk-size check (not the device-count check) is
-        // what rejects these.
-        let npot = Raid::new(Type::Raid5, 100, devs(2));
-        assert!(matches!(npot, Err(crate::Error::Usage(_))));
-        let small = Raid::new(Type::Raid5, 4, devs(2));
-        assert!(matches!(small, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn raid_too_few_devices_is_rejected() {
-        assert!(matches!(
-            Raid::new(Type::Raid1, 0, devs(1)),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(matches!(
-            Raid::new(Type::Raid5, 8, devs(1)),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(matches!(
-            Raid::new(Type::Raid6, 8, devs(2)),
-            Err(crate::Error::Usage(_))
-        ));
-        assert!(matches!(
-            Raid::new(Type::Raid0, 8, devs(0)),
-            Err(crate::Error::Usage(_))
-        ));
-        // Minimums accepted.
-        assert!(Raid::new(Type::Raid6, 8, devs(3)).is_ok());
-    }
-
-    #[test]
     fn raid_renders_each_type_token() {
         // raid5/raid6 render the kernel's default layout suffix, not a bare name.
         for (ty, token, n) in [
@@ -252,7 +190,7 @@ mod tests {
             (Type::Raid6, "raid6_zr", 3),
             (Type::Raid10, "raid10", 2),
         ] {
-            let t = Raid::new(ty, 8, devs(n)).expect("valid raid");
+            let t = Raid::new(ty, 8, devs(n));
             assert!(
                 line(0, 1024, &t).contains(&format!("raid {token} 1 8 ")),
                 "{token}"

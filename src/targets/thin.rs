@@ -20,31 +20,14 @@ pub struct Thin {
     external_origin: Option<DevId>,
 }
 impl Thin {
-    /// The largest thin device id the kernel accepts: `(1 << 24) - 1`.
-    const MAX_DEV_ID: u32 = 16_777_215;
-
     /// Construct a [`Thin`].
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if `dev_id` exceeds `16_777_215`
-    /// (the kernel's `MAX_DEV_ID`).
-    pub fn new(
-        pool: DevId,
-        dev_id: u32,
-        external_origin: Option<DevId>,
-    ) -> Result<Self, crate::Error> {
-        if dev_id > Self::MAX_DEV_ID {
-            return Err(crate::Error::Usage(format!(
-                "thin dev_id must be <= {}, got {dev_id}",
-                Self::MAX_DEV_ID
-            )));
-        }
-        Ok(Thin {
+    #[must_use]
+    pub fn new(pool: DevId, dev_id: u32, external_origin: Option<DevId>) -> Self {
+        Thin {
             pool,
             dev_id,
             external_origin,
-        })
+        }
     }
 
     /// The backing thin-pool device.
@@ -92,26 +75,13 @@ mod tests {
 
     #[test]
     fn thin_renders_without_external_origin() {
-        let t = Thin::new(DevId::new(252, 1), 7, None).expect("valid thin");
+        let t = Thin::new(DevId::new(252, 1), 7, None);
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7");
     }
 
     #[test]
     fn thin_renders_with_external_origin() {
-        let t = Thin::new(DevId::new(252, 1), 7, Some(DevId::new(252, 9))).expect("valid thin");
+        let t = Thin::new(DevId::new(252, 1), 7, Some(DevId::new(252, 9)));
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7 252:9");
-    }
-
-    #[test]
-    fn thin_rejects_dev_id_over_max() {
-        assert!(matches!(
-            Thin::new(DevId::new(252, 1), 16_777_216, None),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn thin_accepts_boundary_dev_id() {
-        assert!(Thin::new(DevId::new(252, 1), 16_777_215, None).is_ok());
     }
 }

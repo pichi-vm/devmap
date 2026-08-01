@@ -56,21 +56,6 @@ pub enum Feature {
     },
 }
 
-impl Feature {
-    /// A discriminant identifying the feature *kind*, ignoring payload —
-    /// used to reject duplicate feature kinds.
-    fn kind(&self) -> u8 {
-        match self {
-            Feature::ErrorReads => 0,
-            Feature::DropWrites => 1,
-            Feature::ErrorWrites => 2,
-            Feature::CorruptBioByte { .. } => 3,
-            Feature::RandomReadCorrupt { .. } => 4,
-            Feature::RandomWriteCorrupt { .. } => 5,
-        }
-    }
-}
-
 // Raw *argument-token* count a `Feature` contributes to the table line's
 // `<#num_features>` field: the count is of tokens, not feature groups, so
 // a bare flag is 1 token, `corrupt_bio_byte` is 5 (itself plus 4 args),
@@ -127,112 +112,23 @@ pub struct Flakey {
 impl Flakey {
     /// Construct a [`Flakey`].
     ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if:
-    /// - a [`Feature::CorruptBioByte`] has `nth_byte == 0` (the kernel
-    ///   byte index is 1-based);
-    /// - the same feature *kind* appears more than once;
-    /// - the total (up + down) interval is `0` or overflows `u32`;
-    /// - a [`Feature::RandomReadCorrupt`] or [`Feature::RandomWriteCorrupt`]
-    ///   has a `probability` above `1_000_000_000`;
-    /// - both [`Feature::DropWrites`] and [`Feature::ErrorWrites`] are
-    ///   present (the kernel rejects the combination);
-    /// - a write-dropping/erroring feature ([`Feature::DropWrites`] or
-    ///   [`Feature::ErrorWrites`]) is combined with write-side corruption
-    ///   ([`Feature::RandomWriteCorrupt`] or a [`Feature::CorruptBioByte`]
-    ///   with [`Direction::Write`]);
-    /// - [`Feature::ErrorReads`] is combined with read-side corruption
-    ///   ([`Feature::RandomReadCorrupt`] or a [`Feature::CorruptBioByte`]
-    ///   with [`Direction::Read`]).
+    /// The kernel validates the interval, feature counts, and feature
+    /// combinations on table load, rejecting bad values with `EINVAL`.
+    #[must_use]
     pub fn new(
         device: DevId,
         offset_sectors: u64,
         up_interval_secs: u32,
         down_interval_secs: u32,
         features: Vec<Feature>,
-    ) -> Result<Self, crate::Error> {
-        match up_interval_secs.checked_add(down_interval_secs) {
-            None => {
-                return Err(crate::Error::Usage(
-                    "flakey up+down interval overflows u32".into(),
-                ));
-            }
-            Some(0) => {
-                return Err(crate::Error::Usage(
-                    "flakey requires a nonzero total (up + down) interval".into(),
-                ));
-            }
-            Some(_) => {}
-        }
-        let mut seen_kinds = 0u8;
-        for feature in &features {
-            if let Feature::CorruptBioByte { nth_byte: 0, .. } = feature {
-                return Err(crate::Error::Usage(
-                    "flakey corrupt_bio_byte nth_byte is 1-based; 0 is invalid".into(),
-                ));
-            }
-            if let Feature::RandomReadCorrupt { probability }
-            | Feature::RandomWriteCorrupt { probability } = feature
-                && *probability > 1_000_000_000
-            {
-                return Err(crate::Error::Usage(format!(
-                    "flakey random corrupt probability must be <= 1000000000, got {probability}"
-                )));
-            }
-            let bit = 1u8 << feature.kind();
-            if seen_kinds & bit != 0 {
-                return Err(crate::Error::Usage(
-                    "flakey rejects duplicate feature kinds".into(),
-                ));
-            }
-            seen_kinds |= bit;
-        }
-        let has_drop = features.iter().any(|f| matches!(f, Feature::DropWrites));
-        let has_error = features.iter().any(|f| matches!(f, Feature::ErrorWrites));
-        if has_drop && has_error {
-            return Err(crate::Error::Usage(
-                "flakey cannot combine drop_writes and error_writes".into(),
-            ));
-        }
-        let has_error_reads = features.iter().any(|f| matches!(f, Feature::ErrorReads));
-        let has_write_corrupt = features.iter().any(|f| {
-            matches!(
-                f,
-                Feature::RandomWriteCorrupt { .. }
-                    | Feature::CorruptBioByte {
-                        direction: Direction::Write,
-                        ..
-                    }
-            )
-        });
-        let has_read_corrupt = features.iter().any(|f| {
-            matches!(
-                f,
-                Feature::RandomReadCorrupt { .. }
-                    | Feature::CorruptBioByte {
-                        direction: Direction::Read,
-                        ..
-                    }
-            )
-        });
-        if (has_drop || has_error) && has_write_corrupt {
-            return Err(crate::Error::Usage(
-                "flakey cannot combine drop_writes/error_writes with write-side corruption".into(),
-            ));
-        }
-        if has_error_reads && has_read_corrupt {
-            return Err(crate::Error::Usage(
-                "flakey cannot combine error_reads with read-side corruption".into(),
-            ));
-        }
-        Ok(Flakey {
+    ) -> Self {
+        Flakey {
             device,
             offset_sectors,
             up_interval_secs,
             down_interval_secs,
             features,
-        })
+        }
     }
 
     /// The backing device.
@@ -296,7 +192,7 @@ mod tests {
 
     #[test]
     fn flakey_renders_zero_features_when_none_given() {
-        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![]).expect("valid flakey");
+        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![]);
         assert_eq!(line(0, 8192, &t), "0 8192 flakey 252:1 0 60 5 0");
     }
 
@@ -317,8 +213,7 @@ mod tests {
                 },
                 Feature::RandomWriteCorrupt { probability: 10 },
             ],
-        )
-        .expect("valid flakey");
+        );
         // token count: error_reads(1) + corrupt_bio_byte(5) + random_write_corrupt(2) = 8
         assert_eq!(
             line(0, 8192, &t),
@@ -327,50 +222,8 @@ mod tests {
     }
 
     #[test]
-    fn flakey_rejects_corrupt_bio_byte_zero() {
-        let r = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![Feature::CorruptBioByte {
-                nth_byte: 0,
-                direction: Direction::Read,
-                value: 1,
-                flags: 0,
-            }],
-        );
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn flakey_rejects_duplicate_feature_kind() {
-        let r = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![Feature::ErrorReads, Feature::ErrorReads],
-        );
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn flakey_rejects_drop_and_error_writes_together() {
-        let r = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![Feature::DropWrites, Feature::ErrorWrites],
-        );
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
     fn flakey_renders_drop_writes_token() {
-        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![Feature::DropWrites])
-            .expect("valid flakey");
+        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![Feature::DropWrites]);
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 1 drop_writes"
@@ -379,8 +232,7 @@ mod tests {
 
     #[test]
     fn flakey_renders_error_writes_token() {
-        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![Feature::ErrorWrites])
-            .expect("valid flakey");
+        let t = Flakey::new(DevId::new(252, 1), 0, 60, 5, vec![Feature::ErrorWrites]);
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 1 error_writes"
@@ -397,88 +249,11 @@ mod tests {
             vec![Feature::RandomReadCorrupt {
                 probability: 500_000_000,
             }],
-        )
-        .expect("valid flakey");
+        );
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 2 random_read_corrupt 500000000"
         );
-    }
-
-    #[test]
-    fn flakey_rejects_zero_total_interval() {
-        let r = Flakey::new(DevId::new(252, 1), 0, 0, 0, vec![]);
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn flakey_rejects_probability_over_one_billion() {
-        let r = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![Feature::RandomReadCorrupt {
-                probability: 1_000_000_001,
-            }],
-        );
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn flakey_rejects_drop_writes_with_write_side_corruption() {
-        let r = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![
-                Feature::DropWrites,
-                Feature::RandomWriteCorrupt { probability: 10 },
-            ],
-        );
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn flakey_rejects_error_reads_with_read_side_corruption() {
-        let r = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![
-                Feature::ErrorReads,
-                Feature::RandomReadCorrupt { probability: 10 },
-            ],
-        );
-        assert!(matches!(r, Err(crate::Error::Usage(_))));
-    }
-
-    #[test]
-    fn flakey_accepts_valid_multi_feature() {
-        // drop_writes (write-side) with read-side corruption is a legal
-        // combination — the incompatibility rules only forbid mixing a
-        // side's drop/error flag with corruption on that *same* side.
-        let t = Flakey::new(
-            DevId::new(252, 1),
-            0,
-            60,
-            5,
-            vec![
-                Feature::DropWrites,
-                Feature::RandomReadCorrupt {
-                    probability: 1_000_000_000,
-                },
-                Feature::CorruptBioByte {
-                    nth_byte: 1,
-                    direction: Direction::Read,
-                    value: 7,
-                    flags: 0,
-                },
-            ],
-        );
-        assert!(t.is_ok());
     }
 
     #[test]
@@ -494,8 +269,7 @@ mod tests {
                 value: 7,
                 flags: 0,
             }],
-        )
-        .expect("valid flakey");
+        );
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 5 corrupt_bio_byte 1 r 7 0"

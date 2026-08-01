@@ -20,22 +20,12 @@ pub struct Dust {
 }
 impl Dust {
     /// Construct a [`Dust`].
-    ///
-    /// # Errors
-    ///
-    /// [`crate::Error::Usage`] if `block_size` is not a power of two in
-    /// `512..=1_073_741_824`.
-    pub fn new(device: DevId, offset_sectors: u64, block_size: u32) -> Result<Self, crate::Error> {
-        if !(512..=1_073_741_824).contains(&block_size) || !block_size.is_power_of_two() {
-            return Err(crate::Error::Usage(format!(
-                "dust block_size must be a power of two in 512..=1073741824, got {block_size}"
-            )));
-        }
-        Ok(Dust {
+    pub fn new(device: DevId, offset_sectors: u64, block_size: u32) -> Self {
+        Dust {
             device,
             offset_sectors,
             block_size,
-        })
+        }
     }
 
     /// The backing device.
@@ -83,33 +73,7 @@ mod tests {
 
     #[test]
     fn dust_renders_device_offset_and_block_size() {
-        let t = Dust::new(DevId::new(252, 1), 0, 512).expect("valid dust");
+        let t = Dust::new(DevId::new(252, 1), 0, 512);
         assert_eq!(line(0, 8192, &t), "0 8192 dust 252:1 0 512");
-    }
-
-    #[test]
-    fn dust_rejects_bad_block_size() {
-        // Not a power of two.
-        assert!(matches!(
-            Dust::new(DevId::new(252, 1), 0, 1000),
-            Err(crate::Error::Usage(_))
-        ));
-        // Below 512.
-        assert!(matches!(
-            Dust::new(DevId::new(252, 1), 0, 256),
-            Err(crate::Error::Usage(_))
-        ));
-        // Above the max.
-        assert!(matches!(
-            Dust::new(DevId::new(252, 1), 0, 2_147_483_648),
-            Err(crate::Error::Usage(_))
-        ));
-    }
-
-    #[test]
-    fn dust_accepts_valid_block_size() {
-        assert!(Dust::new(DevId::new(252, 1), 0, 512).is_ok());
-        assert!(Dust::new(DevId::new(252, 1), 0, 4096).is_ok());
-        assert!(Dust::new(DevId::new(252, 1), 0, 1_073_741_824).is_ok());
     }
 }

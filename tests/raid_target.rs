@@ -38,8 +38,7 @@ fn raid1_mirrors_writes_across_two_devices() {
                     DevicePair::data_only(disk0_device.id()),
                     DevicePair::data_only(disk1_device.id()),
                 ],
-            )
-            .expect("valid raid"),
+            ),
         )
         .expect("add raid")
         .load()
