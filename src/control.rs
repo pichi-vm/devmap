@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use zerocopy::IntoBytes;
 
-use crate::Error;
 use crate::device::{DevId, Device, Removed, Status, check_version};
 use crate::header::DmHeader;
 use crate::uapi::{DM_BUFFER_FULL_FLAG, DM_DEV_CREATE, DM_DEV_STATUS, DM_LIST_DEVICES};
@@ -38,12 +37,11 @@ use crate::uapi::{DM_BUFFER_FULL_FLAG, DM_DEV_CREATE, DM_DEV_STATUS, DM_LIST_DEV
 #[allow(clippy::large_types_passed_by_value)]
 pub(crate) fn ioctl_with_growing_buffer(
     control: &File,
-    op: &'static str,
     ioctl: impl Fn(&File, &mut DmHeader) -> std::io::Result<std::os::raw::c_uint>,
     header: DmHeader,
     payload: &[u8],
     initial_cap: usize,
-) -> Result<Vec<u8>, Error> {
+) -> io::Result<Vec<u8>> {
     let mut cap = initial_cap.max(DmHeader::SIZE + payload.len());
     loop {
         let mut buf = vec![0u8; cap];
@@ -58,13 +56,9 @@ pub(crate) fn ioctl_with_growing_buffer(
         let (header_mut, _) = zerocopy::FromBytes::mut_from_prefix(&mut buf)
             .expect("buf is at least DmHeader::SIZE bytes");
         let header_mut: &mut DmHeader = header_mut;
-        ioctl(control, header_mut).map_err(|source| Error::DmIoctl {
-            op,
-            source,
-            table_line: None,
-        })?;
+        ioctl(control, header_mut)?;
 
-        check_version(op, header_mut)?;
+        check_version(header_mut)?;
 
         if header_mut.flags() & DM_BUFFER_FULL_FLAG != 0 {
             cap *= 2;
@@ -86,9 +80,10 @@ impl Control {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] if the control node can't be opened (typically because
-    /// the process lacks `CAP_SYS_ADMIN`, or device-mapper isn't loaded).
-    pub fn open() -> Result<Self, Error> {
+    /// The underlying `io::Error` if the control node can't be opened
+    /// (typically `PermissionDenied` because the process lacks
+    /// `CAP_SYS_ADMIN`, or `NotFound` if device-mapper isn't loaded).
+    pub fn open() -> io::Result<Self> {
         // Propagate the raw io::Error so its errno (and kind) survive; the
         // likely-cause hint lives in the `# Errors` docs, not the message.
         let file = OpenOptions::new()
@@ -98,39 +93,28 @@ impl Control {
         Ok(Self(Arc::new(file)))
     }
 
-    /// `DM_DEV_CREATE`. Fails with [`Error::NameConflict`] if `name` is
-    /// already taken.
+    /// `DM_DEV_CREATE`.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if the create fails: `AlreadyExists`
+    /// (`EEXIST`) or `ResourceBusy` (`EBUSY`) if `name` is already taken,
+    /// `InvalidInput` if `name` has a NUL byte or is too long, or
+    /// `Unsupported` if the kernel dm-ioctl version differs.
     ///
     /// The returned [`Removed`] removes the device when dropped — bind it to
     /// a name; do not discard it with `let _ = ...`.
     #[must_use = "the returned `Removed` removes the device when dropped; bind it to keep the device"]
-    pub fn create(&self, name: &str) -> Result<Removed, Error> {
+    pub fn create(&self, name: &str) -> io::Result<Removed> {
         let mut header = DmHeader::by_name(name)?;
-        match DM_DEV_CREATE.ioctl(&*self.0, &mut header) {
-            Ok(_) => {}
-            Err(source)
-                if matches!(
-                    source.kind(),
-                    io::ErrorKind::AlreadyExists | io::ErrorKind::ResourceBusy
-                ) =>
-            {
-                return Err(Error::NameConflict { name: name.into() });
-            }
-            Err(source) => {
-                return Err(Error::DmIoctl {
-                    op: "DM_DEV_CREATE",
-                    source,
-                    table_line: None,
-                });
-            }
-        }
-        check_version("DM_DEV_CREATE", &header)?;
+        DM_DEV_CREATE.ioctl(&*self.0, &mut header)?;
+        check_version(&header)?;
         let device = Device::new(DevId::from_dev_t(header.dev()), Arc::clone(&self.0));
         Ok(Removed::from(device))
     }
 
     /// No syscall — wraps an already-known [`DevId`] (build one with
-    /// [`DevId::new`] or `(major, minor).try_into()`). Does no liveness check:
+    /// [`DevId::new`]). Does no liveness check:
     /// a real operation on the result fails with the kernel's `ENXIO` if it
     /// doesn't correspond to an actual dm device.
     pub fn by_device(&self, id: DevId) -> Device {
@@ -141,9 +125,9 @@ impl Control {
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] if the path can't be `stat`ed (its errno and kind are
-    /// preserved).
-    pub fn by_node(&self, path: impl AsRef<Path>) -> Result<Device, Error> {
+    /// The underlying `io::Error` if the path can't be `stat`ed (its errno
+    /// and kind are preserved).
+    pub fn by_node(&self, path: impl AsRef<Path>) -> io::Result<Device> {
         let meta = std::fs::metadata(path)?;
         Ok(Device::new(
             DevId::from_dev_t(meta.rdev()),
@@ -152,28 +136,22 @@ impl Control {
     }
 
     #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
-    fn status_lookup(&self, header: DmHeader) -> Result<(Device, Status), Error> {
+    fn status_lookup(&self, header: DmHeader) -> io::Result<(Device, Status)> {
         let mut header = header;
-        DM_DEV_STATUS
-            .ioctl(&*self.0, &mut header)
-            .map_err(|source| Error::DmIoctl {
-                op: "DM_DEV_STATUS",
-                source,
-                table_line: None,
-            })?;
-        check_version("DM_DEV_STATUS", &header)?;
+        DM_DEV_STATUS.ioctl(&*self.0, &mut header)?;
+        check_version(&header)?;
         let device = Device::new(DevId::from_dev_t(header.dev()), Arc::clone(&self.0));
         Ok((device, Status::from_header(&header)))
     }
 
     /// `DM_DEV_STATUS` by name. `Status` comes from the same lookup, not
     /// a second call.
-    pub fn by_name(&self, name: &str) -> Result<(Device, Status), Error> {
+    pub fn by_name(&self, name: &str) -> io::Result<(Device, Status)> {
         self.status_lookup(DmHeader::by_name(name)?)
     }
 
     /// `DM_DEV_STATUS` by uuid.
-    pub fn by_uuid(&self, uuid: &str) -> Result<(Device, Status), Error> {
+    pub fn by_uuid(&self, uuid: &str) -> io::Result<(Device, Status)> {
         self.status_lookup(DmHeader::by_uuid(uuid)?)
     }
 
@@ -185,10 +163,9 @@ impl Control {
     /// Never in practice: panics only if the kernel returned fewer than
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
-    pub fn list(&self) -> Result<impl Iterator<Item = (String, Device)>, Error> {
+    pub fn list(&self) -> io::Result<impl Iterator<Item = (String, Device)>> {
         let buf = ioctl_with_growing_buffer(
             &self.0,
-            "DM_LIST_DEVICES",
             |fd, h| DM_LIST_DEVICES.ioctl(fd, h),
             DmHeader::any(),
             &[],
@@ -379,7 +356,6 @@ mod tests {
         let calls = std::cell::Cell::new(0u32);
         let buf = ioctl_with_growing_buffer(
             &control,
-            "TEST",
             |_fd, h| {
                 let n = calls.get();
                 calls.set(n + 1);
@@ -401,7 +377,6 @@ mod tests {
         let control = null_fd();
         let err = ioctl_with_growing_buffer(
             &control,
-            "TEST",
             |_fd, h| {
                 h.set_major_version(crate::uapi::DM_IOCTL_VERSION_MAJOR + 1);
                 Ok(0)
@@ -411,18 +386,7 @@ mod tests {
             4096,
         )
         .expect_err("version mismatch must error");
-        match err {
-            Error::DmIoctl {
-                op,
-                source,
-                table_line,
-            } => {
-                assert_eq!(op, "TEST");
-                assert_eq!(source.kind(), io::ErrorKind::Unsupported);
-                assert!(table_line.is_none());
-            }
-            other => panic!("expected DmIoctl, got {other:?}"),
-        }
+        assert_eq!(err.kind(), io::ErrorKind::Unsupported);
     }
 
     #[test]
@@ -430,17 +394,13 @@ mod tests {
         let control = null_fd();
         let err = ioctl_with_growing_buffer(
             &control,
-            "TEST",
             |_fd, _h| Err(io::Error::from_raw_os_error(libc_enxio())),
             DmHeader::any(),
             &[],
             4096,
         )
         .expect_err("ioctl failure must propagate");
-        match err {
-            Error::DmIoctl { op, .. } => assert_eq!(op, "TEST"),
-            other => panic!("expected DmIoctl, got {other:?}"),
-        }
+        assert_eq!(err.raw_os_error(), Some(libc_enxio()));
     }
 
     // ENXIO without pulling in the libc crate.

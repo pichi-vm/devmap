@@ -14,13 +14,13 @@
 
 use std::fmt::{self, Write as _};
 use std::fs::File;
+use std::io;
 use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use zerocopy::{FromBytes, IntoBytes};
 
-use crate::Error;
 use crate::device::{DevId, check_version};
 use crate::header::DmHeader;
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TABLE_LOAD, DM_TARGET_SPEC_SIZE, dm_target_spec_raw};
@@ -198,7 +198,7 @@ impl TableBuilder {
     ///
     /// # Errors
     ///
-    /// [`Error::Usage`] if `T::TYPE_NAME` is invalid, or if the target
+    /// `InvalidInput` if `T::TYPE_NAME` is invalid, or if the target
     /// renders an interior NUL into its params (which would truncate the
     /// table line).
     // Table buffers never approach u32::MAX; the kernel's own fields are u32.
@@ -210,25 +210,28 @@ impl TableBuilder {
         start: u64,
         length: u64,
         target: T,
-    ) -> Result<Self, Error> {
+    ) -> io::Result<Self> {
         let name = T::TYPE_NAME.as_bytes();
         if name.is_empty()
             || name.len() >= DM_MAX_TYPE_NAME
             || name.iter().any(|b| *b == 0 || b.is_ascii_whitespace())
         {
-            return Err(Error::Usage(format!(
-                "invalid dm target type name: {:?}",
-                T::TYPE_NAME
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid dm target type name: {:?}", T::TYPE_NAME),
+            ));
         }
 
         let mut params = String::new();
         write!(params, "{target}").expect("Display into String is infallible");
         if params.as_bytes().contains(&0) {
-            return Err(Error::Usage(format!(
-                "target {} rendered an interior NUL in its params",
-                T::TYPE_NAME
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "target {} rendered an interior NUL in its params",
+                    T::TYPE_NAME
+                ),
+            ));
         }
 
         let spec_off = self.buf.len();
@@ -270,12 +273,11 @@ impl TableBuilder {
     ///
     /// # Errors
     ///
-    /// [`Error::DmIoctl`] (with the rendered table attached) if the kernel
-    /// rejects the table.
+    /// The kernel's `io::Error` if it rejects the table.
     // The `mut_from_prefix` expects never fire: the buffer always begins with
     // a `DmHeader` (written in `new`), so this is not a real panic path.
     #[allow(clippy::cast_possible_truncation, clippy::missing_panics_doc)]
-    pub fn load(mut self) -> Result<(), Error> {
+    pub fn load(mut self) -> io::Result<()> {
         let total = self.buf.len() as u32;
         {
             let (header, _) =
@@ -287,16 +289,8 @@ impl TableBuilder {
         let (header, _) =
             DmHeader::mut_from_prefix(&mut self.buf).expect("buf begins with a DmHeader");
         let header: &mut DmHeader = header;
-        DM_TABLE_LOAD
-            .ioctl(&*self.control, header)
-            .map_err(|source| Error::DmIoctl {
-                op: "DM_TABLE_LOAD",
-                source,
-                // ` | `-joined so the whole error stays on one line in loggers;
-                // omitted entirely for an empty table so there's no `(table: )`.
-                table_line: (!self.rendered.is_empty()).then(|| self.rendered.join(" | ")),
-            })?;
-        check_version("DM_TABLE_LOAD", header)
+        DM_TABLE_LOAD.ioctl(&*self.control, header)?;
+        check_version(header)
     }
 }
 
@@ -695,7 +689,7 @@ mod tests {
     fn builder_rejects_an_interior_nul_in_params() {
         let r =
             TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap()).add(0, 8, NulTarget);
-        assert!(matches!(r, Err(Error::Usage(_))));
+        assert!(matches!(r, Err(e) if e.kind() == io::ErrorKind::InvalidInput));
     }
 
     /// A target whose `TYPE_NAME` contains whitespace — invalid per the
@@ -718,7 +712,7 @@ mod tests {
             8,
             BadNameTarget,
         );
-        assert!(matches!(r, Err(Error::Usage(_))));
+        assert!(matches!(r, Err(e) if e.kind() == io::ErrorKind::InvalidInput));
     }
 
     /// A well-formed out-of-tree target for a made-up type name — proving a
@@ -801,11 +795,11 @@ mod tests {
         let dev = DevId::new(252, 1).unwrap();
         assert!(matches!(
             TableBuilder::new(dummy_control(), dev).add(0, 8, EmptyName),
-            Err(Error::Usage(_))
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
         ));
         assert!(matches!(
             TableBuilder::new(dummy_control(), dev).add(0, 8, SixteenByteName),
-            Err(Error::Usage(_))
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
         ));
         assert!(
             TableBuilder::new(dummy_control(), dev)
