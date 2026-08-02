@@ -30,7 +30,7 @@
 //! ```no_run
 //! use devmap::{Control, targets::Zero};
 //!
-//! # fn main() -> Result<(), devmap::Error> {
+//! # fn main() -> std::io::Result<()> {
 //! let control = Control::open()?;               // needs CAP_SYS_ADMIN
 //! let dev = control.create("my-zero")?;         // a `Removed` guard
 //!
@@ -49,7 +49,6 @@
 
 mod control;
 mod device;
-mod error;
 mod header;
 mod table;
 pub mod targets;
@@ -57,7 +56,6 @@ mod uapi;
 
 pub use control::Control;
 pub use device::{DevId, Device, Removed, Status};
-pub use error::Error;
 pub use table::{ParseError, RawInfo, Row, TableBuilder, Target, mode};
 
 /// The primary handles are cheap to clone and safe to share across
