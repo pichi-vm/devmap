@@ -6,9 +6,9 @@
 
 use std::fmt;
 use std::fs::File;
+use std::io;
 use std::sync::Arc;
 
-use crate::Error;
 use crate::header::DmHeader;
 use crate::table::{Row, TableBuilder, mode};
 use crate::uapi::{
@@ -17,9 +17,8 @@ use crate::uapi::{
 };
 
 /// A device-mapper device's `(major, minor)` identity — a block device
-/// number (`dev_t`). Construct with [`DevId::new`] or the fallible
-/// `TryFrom<(u32, u32)>`; renders as the kernel's `major:minor` syntax via
-/// [`fmt::Display`].
+/// number (`dev_t`). Construct with [`DevId::new`]; renders as the kernel's
+/// `major:minor` syntax via [`fmt::Display`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct DevId {
     major: u32,
@@ -80,32 +79,19 @@ impl fmt::Display for DevId {
     }
 }
 
-impl TryFrom<(u32, u32)> for DevId {
-    type Error = Error;
-    /// `(major, minor)`, rejecting out-of-range values with
-    /// [`Error::DevIdRange`].
-    fn try_from((major, minor): (u32, u32)) -> Result<Self, Error> {
-        Self::new(major, minor).ok_or(Error::DevIdRange { major, minor })
-    }
-}
-
 /// Assert the kernel returned the dm-ioctl major version this crate is
 /// built against. Every ioctl call site checks this after the ioctl
 /// succeeds; centralized here so the error text can't drift between paths.
-pub(crate) fn check_version(op: &'static str, header: &DmHeader) -> Result<(), Error> {
+pub(crate) fn check_version(header: &DmHeader) -> io::Result<()> {
     if header.major_version() != DM_IOCTL_VERSION_MAJOR {
-        return Err(Error::DmIoctl {
-            op,
-            source: std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                format!(
-                    "kernel returned dm-ioctl version major {}; require {}",
-                    header.major_version(),
-                    DM_IOCTL_VERSION_MAJOR
-                ),
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "kernel returned dm-ioctl version major {}; require {}",
+                header.major_version(),
+                DM_IOCTL_VERSION_MAJOR
             ),
-            table_line: None,
-        });
+        ));
     }
     Ok(())
 }
@@ -163,7 +149,7 @@ impl Device {
     ///
     /// ```no_run
     /// # use devmap::{Control, targets::Zero};
-    /// # fn f(dev: &devmap::Device) -> Result<(), devmap::Error> {
+    /// # fn f(dev: &devmap::Device) -> std::io::Result<()> {
     /// dev.builder().add(0, 8192, Zero)?.load()?;
     /// # Ok(()) }
     /// ```
@@ -172,17 +158,11 @@ impl Device {
         TableBuilder::new(Arc::clone(&self.control), self.dev_t)
     }
 
-    fn suspend_or_resume(&self, suspend: bool) -> Result<(), Error> {
+    fn suspend_or_resume(&self, suspend: bool) -> io::Result<()> {
         let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
         header.set_suspend(suspend);
-        DM_DEV_SUSPEND
-            .ioctl(&*self.control, &mut header)
-            .map_err(|source| Error::DmIoctl {
-                op: "DM_DEV_SUSPEND",
-                source,
-                table_line: None,
-            })?;
-        check_version("DM_DEV_SUSPEND", &header)
+        DM_DEV_SUSPEND.ioctl(&*self.control, &mut header)?;
+        check_version(&header)
     }
 
     /// `DM_DEV_SUSPEND` with the suspend flag set: flush in-flight I/O and
@@ -190,8 +170,8 @@ impl Device {
     ///
     /// # Errors
     ///
-    /// [`Error::DmIoctl`] if the kernel rejects the suspend.
-    pub fn suspend(&self) -> Result<(), Error> {
+    /// The kernel's `io::Error` if it rejects the suspend.
+    pub fn suspend(&self) -> io::Result<()> {
         self.suspend_or_resume(true)
     }
 
@@ -200,13 +180,13 @@ impl Device {
     ///
     /// # Errors
     ///
-    /// [`Error::DmIoctl`] if the kernel rejects the resume (e.g. a staged
+    /// The kernel's `io::Error` if it rejects the resume (e.g. a staged
     /// table it can't activate).
-    pub fn resume(&self) -> Result<(), Error> {
+    pub fn resume(&self) -> io::Result<()> {
         self.suspend_or_resume(false)
     }
 
-    fn remove_now(control: &File, dev_t: DevId, deferred: bool) -> Result<(), Error> {
+    fn remove_now(control: &File, dev_t: DevId, deferred: bool) -> io::Result<()> {
         let mut header = DmHeader::by_dev(dev_t.to_dev_t());
         // The drop guard defers so a busy device is still reclaimed once it's
         // released; explicit `remove` asks for immediate removal (and its
@@ -214,23 +194,17 @@ impl Device {
         if deferred {
             header.set_deferred_remove();
         }
-        DM_DEV_REMOVE
-            .ioctl(control, &mut header)
-            .map_err(|source| Error::DmIoctl {
-                op: "DM_DEV_REMOVE",
-                source,
-                table_line: None,
-            })?;
-        check_version("DM_DEV_REMOVE", &header)
+        DM_DEV_REMOVE.ioctl(control, &mut header)?;
+        check_version(&header)
     }
 
     /// `DM_DEV_REMOVE`. Explicit, observable-error removal.
     ///
     /// # Errors
     ///
-    /// [`Error::DmIoctl`] if the kernel rejects the removal (e.g. the
+    /// The kernel's `io::Error` if it rejects the removal (e.g. the
     /// device is still open).
-    pub fn remove(self) -> Result<(), Error> {
+    pub fn remove(self) -> io::Result<()> {
         Self::remove_now(&self.control, self.dev_t, false)
     }
 
@@ -238,18 +212,12 @@ impl Device {
     ///
     /// # Errors
     ///
-    /// [`Error::DmIoctl`] if the kernel rejects the query (e.g. the device
-    /// doesn't exist — `ENXIO`).
-    pub fn status(&self) -> Result<Status, Error> {
+    /// The kernel's `io::Error` if it rejects the query (e.g. the device
+    /// doesn't exist — `NotFound`/`ENXIO`).
+    pub fn status(&self) -> io::Result<Status> {
         let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
-        DM_DEV_STATUS
-            .ioctl(&*self.control, &mut header)
-            .map_err(|source| Error::DmIoctl {
-                op: "DM_DEV_STATUS",
-                source,
-                table_line: None,
-            })?;
-        check_version("DM_DEV_STATUS", &header)?;
+        DM_DEV_STATUS.ioctl(&*self.control, &mut header)?;
+        check_version(&header)?;
         Ok(Status::from_header(&header))
     }
 
@@ -262,7 +230,7 @@ impl Device {
     /// Never in practice: panics only if the kernel returned fewer than
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
-    pub fn table(&self) -> Result<impl Iterator<Item = Row<mode::Spec>>, Error> {
+    pub fn table(&self) -> io::Result<impl Iterator<Item = Row<mode::Spec>>> {
         let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
         header.set_status_table();
         self.table_status_iter(header)
@@ -277,7 +245,7 @@ impl Device {
     /// Never in practice: panics only if the kernel returned fewer than
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
-    pub fn info(&self) -> Result<impl Iterator<Item = Row<mode::Info>>, Error> {
+    pub fn info(&self) -> io::Result<impl Iterator<Item = Row<mode::Info>>> {
         let header = DmHeader::by_dev(self.dev_t.to_dev_t());
         self.table_status_iter(header)
     }
@@ -286,10 +254,9 @@ impl Device {
     fn table_status_iter<M: mode::Mode>(
         &self,
         header: DmHeader,
-    ) -> Result<crate::table::TableStatusIter<M>, Error> {
+    ) -> io::Result<crate::table::TableStatusIter<M>> {
         let buf = crate::control::ioctl_with_growing_buffer(
             &self.control,
-            "DM_TABLE_STATUS",
             |fd, h| crate::uapi::DM_TABLE_STATUS.ioctl(fd, h),
             header,
             &[],
@@ -312,21 +279,24 @@ impl Device {
     ///
     /// # Errors
     ///
-    /// [`Error::Usage`] if `message` contains a NUL byte; otherwise
-    /// [`Error::DmIoctl`] if the kernel rejects the message.
+    /// `InvalidInput` if `message` contains a NUL byte; otherwise the
+    /// kernel's `io::Error` if it rejects the message.
     ///
     /// # Panics
     ///
     /// Never in practice: panics only if the kernel returned fewer than
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
-    pub fn message(&self, sector: u64, message: &str) -> Result<Option<String>, Error> {
+    pub fn message(&self, sector: u64, message: &str) -> io::Result<Option<String>> {
         // The message is a NUL-terminated string; an interior NUL would
         // silently truncate the command the target sees. Reject it (as the
         // table builder and name/uuid paths do). Whitespace is legitimate —
         // messages are space-separated commands.
         if message.as_bytes().contains(&0) {
-            return Err(Error::Usage("dm target message contains a NUL byte".into()));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "dm target message contains a NUL byte",
+            ));
         }
         let header = DmHeader::by_dev(self.dev_t.to_dev_t());
         let mut payload = Vec::with_capacity(8 + message.len() + 1);
@@ -336,7 +306,6 @@ impl Device {
 
         let buf = crate::control::ioctl_with_growing_buffer(
             &self.control,
-            "DM_TARGET_MSG",
             |fd, h| crate::uapi::DM_TARGET_MSG.ioctl(fd, h),
             header,
             &payload,
@@ -525,13 +494,6 @@ mod tests {
             DevId::new(0xfff, 0xf_ffff).is_some(),
             "the maxima are in range"
         );
-        assert!(matches!(
-            DevId::try_from((0x1000, 7)),
-            Err(Error::DevIdRange {
-                major: 0x1000,
-                minor: 7
-            })
-        ));
     }
 
     #[test]

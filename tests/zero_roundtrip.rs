@@ -17,7 +17,7 @@
 
 use std::io::Read as _;
 
-use devmap::{Control, targets::Zero};
+use devmap::{Control, DevId, targets::Zero};
 
 /// Returns `None` (and prints a skip notice) if this process can't open
 /// `/dev/mapper/control` — i.e. isn't root / doesn't have `CAP_SYS_ADMIN`.
@@ -191,7 +191,7 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
     let id = removed.id();
     let (major, minor) = (id.major(), id.minor());
 
-    let by_device = control.by_device((major, minor).try_into().expect("in range"));
+    let by_device = control.by_device(DevId::new(major, minor).expect("in range"));
     assert_eq!(
         by_device
             .status()
@@ -270,7 +270,10 @@ fn create_rejects_a_duplicate_name() {
         .create(&name)
         .expect_err("creating the same name twice must fail");
     assert!(
-        matches!(err, devmap::Error::NameConflict { .. }),
-        "expected NameConflict, got {err:?}"
+        matches!(
+            err.kind(),
+            std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::ResourceBusy
+        ),
+        "expected AlreadyExists/ResourceBusy, got {err:?}"
     );
 }

@@ -10,7 +10,8 @@
 //! `dev` — mutually exclusive, matching the kernel's own lookup priority
 //! (name, then uuid, then dev).
 
-use crate::Error;
+use std::io;
+
 use crate::uapi::{
     DM_DEFERRED_REMOVE, DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_STATUS_TABLE_FLAG, DM_SUSPEND_FLAG,
     DM_UUID_LEN,
@@ -88,36 +89,48 @@ impl DmHeader {
 
     /// A header identifying a device by name (used both for `DM_DEV_CREATE`
     /// and for looking up an existing device).
-    pub(crate) fn by_name(name: &str) -> Result<Self, Error> {
+    pub(crate) fn by_name(name: &str) -> io::Result<Self> {
         let mut header = Self::blank();
         let bytes = name.as_bytes();
         if bytes.len() >= DM_NAME_LEN {
-            return Err(Error::Usage(format!(
-                "dm device name too long: {} bytes (max {})",
-                bytes.len(),
-                DM_NAME_LEN - 1
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "dm device name too long: {} bytes (max {})",
+                    bytes.len(),
+                    DM_NAME_LEN - 1
+                ),
+            ));
         }
         if bytes.contains(&0) {
-            return Err(Error::Usage("dm device name contains NUL byte".into()));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "dm device name contains NUL byte",
+            ));
         }
         header.name[..bytes.len()].copy_from_slice(bytes);
         Ok(header)
     }
 
     /// A header identifying a device by uuid.
-    pub(crate) fn by_uuid(uuid: &str) -> Result<Self, Error> {
+    pub(crate) fn by_uuid(uuid: &str) -> io::Result<Self> {
         let mut header = Self::blank();
         let bytes = uuid.as_bytes();
         if bytes.len() >= DM_UUID_LEN {
-            return Err(Error::Usage(format!(
-                "dm uuid too long: {} bytes (max {})",
-                bytes.len(),
-                DM_UUID_LEN - 1
-            )));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "dm uuid too long: {} bytes (max {})",
+                    bytes.len(),
+                    DM_UUID_LEN - 1
+                ),
+            ));
         }
         if bytes.contains(&0) {
-            return Err(Error::Usage("dm uuid contains NUL byte".into()));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "dm uuid contains NUL byte",
+            ));
         }
         header.uuid[..bytes.len()].copy_from_slice(bytes);
         Ok(header)
@@ -238,10 +251,13 @@ mod tests {
     fn by_name_rejects_nul_and_overlong() {
         assert!(matches!(
             DmHeader::by_name("foo\0bar"),
-            Err(Error::Usage(_))
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
         ));
         let long = "a".repeat(200);
-        assert!(matches!(DmHeader::by_name(&long), Err(Error::Usage(_))));
+        assert!(matches!(
+            DmHeader::by_name(&long),
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput
+        ));
     }
 
     #[test]

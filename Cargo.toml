@@ -13,7 +13,6 @@ categories = ["os::unix-apis", "api-bindings"]
 [dependencies]
 iocuddle = "0.3"
 zerocopy = { version = "0.8", features = ["derive"] }
-thiserror = "2"
 
 [lints.rust]
 unsafe_code = "deny"
