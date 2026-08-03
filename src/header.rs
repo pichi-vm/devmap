@@ -13,8 +13,8 @@
 use std::io;
 
 use crate::uapi::{
-    DM_DEFERRED_REMOVE, DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_STATUS_TABLE_FLAG, DM_SUSPEND_FLAG,
-    DM_UUID_LEN,
+    DM_DEFERRED_REMOVE, DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_READONLY_FLAG, DM_STATUS_TABLE_FLAG,
+    DM_SUSPEND_FLAG, DM_UUID_LEN,
 };
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -163,6 +163,13 @@ impl DmHeader {
     /// longer in use rather than failing with `EBUSY`.
     pub(crate) fn set_deferred_remove(&mut self) {
         self.flags |= DM_DEFERRED_REMOVE;
+    }
+
+    /// Set `DM_READONLY_FLAG` — load the table read-only. dm-verity refuses a
+    /// writable table (`-EINVAL` "Device must be readonly"); read-only
+    /// dm-snapshot composition wants it too.
+    pub(crate) fn set_readonly(&mut self) {
+        self.flags |= DM_READONLY_FLAG;
     }
 
     /// Set total buffer size (for variable-length `DM_TABLE_LOAD`,
