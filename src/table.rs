@@ -194,6 +194,23 @@ impl TableBuilder {
         }
     }
 
+    /// Load the table **read-only** (sets `DM_READONLY_FLAG` on the
+    /// `DM_TABLE_LOAD` header, which sets the table's mode). Required for
+    /// dm-verity — it refuses a writable table with `-EINVAL` "Device must be
+    /// readonly" — and used for read-only dm-snapshot composition. Call any
+    /// time before [`load`](Self::load).
+    // The `mut_from_prefix` expect never fires: the buffer always begins with
+    // a `DmHeader` (written in `new`).
+    #[allow(clippy::missing_panics_doc)]
+    #[must_use]
+    pub fn read_only(mut self) -> Self {
+        let (header, _) =
+            DmHeader::mut_from_prefix(&mut self.buf).expect("buf begins with a DmHeader");
+        let header: &mut DmHeader = header;
+        header.set_readonly();
+        self
+    }
+
     /// Append a target mapping sectors `[start, start + length)`.
     ///
     /// # Errors
@@ -405,6 +422,33 @@ mod tests {
             .expect("add zero");
         // header + (40 spec + 0 params + 1 NUL = 41 -> padded to 48).
         assert_eq!(b.buf.len(), DmHeader::SIZE + 48);
+    }
+
+    #[test]
+    fn read_only_sets_the_readonly_flag_on_the_header() {
+        use zerocopy::FromBytes as _;
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
+            .read_only()
+            .add(0, 8, targets::Zero)
+            .expect("add zero");
+        let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
+        let header: &DmHeader = header;
+        assert_eq!(
+            header.flags() & crate::uapi::DM_READONLY_FLAG,
+            crate::uapi::DM_READONLY_FLAG,
+            "read_only() must set DM_READONLY_FLAG"
+        );
+    }
+
+    #[test]
+    fn default_builder_does_not_set_readonly() {
+        use zerocopy::FromBytes as _;
+        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
+            .add(0, 8, targets::Zero)
+            .expect("add zero");
+        let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
+        let header: &DmHeader = header;
+        assert_eq!(header.flags() & crate::uapi::DM_READONLY_FLAG, 0);
     }
 
     #[test]
