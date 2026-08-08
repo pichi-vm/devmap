@@ -47,7 +47,7 @@ pub struct Delay {
     pub flush: Option<Leg>,
 }
 impl Target for Delay {
-    const TYPE_NAME: &'static str = "delay";
+    const NAME: &'static str = "delay";
     type Info = RawInfo;
 }
 impl fmt::Display for Delay {
@@ -79,9 +79,9 @@ mod tests {
     fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
         let params = target.to_string();
         if params.is_empty() {
-            format!("{start} {length} {}", T::TYPE_NAME)
+            format!("{start} {length} {}", T::NAME)
         } else {
-            format!("{start} {length} {} {params}", T::TYPE_NAME)
+            format!("{start} {length} {} {params}", T::NAME)
         }
     }
 

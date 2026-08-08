@@ -100,7 +100,7 @@ use devmap::{Target, RawInfo};
 
 struct MyTarget { /* … */ }
 impl Target for MyTarget {
-    const TYPE_NAME: &'static str = "my-target";
+    const NAME: &'static str = "my-target";
     type Info = RawInfo;
 }
 impl fmt::Display for MyTarget {

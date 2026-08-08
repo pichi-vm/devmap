@@ -79,7 +79,7 @@ impl Writecache {
     }
 }
 impl Target for Writecache {
-    const TYPE_NAME: &'static str = "writecache";
+    const NAME: &'static str = "writecache";
     type Info = RawInfo;
 }
 impl fmt::Display for Writecache {
@@ -151,9 +151,9 @@ mod tests {
     fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
         let params = target.to_string();
         if params.is_empty() {
-            format!("{start} {length} {}", T::TYPE_NAME)
+            format!("{start} {length} {}", T::NAME)
         } else {
-            format!("{start} {length} {} {params}", T::TYPE_NAME)
+            format!("{start} {length} {} {params}", T::NAME)
         }
     }
 

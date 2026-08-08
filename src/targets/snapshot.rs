@@ -16,7 +16,7 @@ pub struct Origin {
     pub origin: DevId,
 }
 impl Target for Origin {
-    const TYPE_NAME: &'static str = "snapshot-origin";
+    const NAME: &'static str = "snapshot-origin";
     type Info = RawInfo;
 }
 impl fmt::Display for Origin {
@@ -73,7 +73,7 @@ impl Snapshot {
     }
 }
 impl Target for Snapshot {
-    const TYPE_NAME: &'static str = "snapshot";
+    const NAME: &'static str = "snapshot";
     type Info = RawInfo;
 }
 impl fmt::Display for Snapshot {
@@ -124,7 +124,7 @@ impl Merge {
     }
 }
 impl Target for Merge {
-    const TYPE_NAME: &'static str = "snapshot-merge";
+    const NAME: &'static str = "snapshot-merge";
     type Info = RawInfo;
 }
 impl fmt::Display for Merge {
@@ -144,9 +144,9 @@ mod tests {
     fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
         let params = target.to_string();
         if params.is_empty() {
-            format!("{start} {length} {}", T::TYPE_NAME)
+            format!("{start} {length} {}", T::NAME)
         } else {
-            format!("{start} {length} {} {params}", T::TYPE_NAME)
+            format!("{start} {length} {} {params}", T::NAME)
         }
     }
 
