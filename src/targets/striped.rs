@@ -10,31 +10,11 @@ use crate::table::{RawInfo, Target};
 
 /// Concatenates several devices into one striped range.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Striped {
-    chunk_size_sectors: u32,
-    stripes: Vec<(DevId, u64)>,
-}
-impl Striped {
-    /// Construct a [`Striped`].
-    #[must_use]
-    pub fn new(chunk_size_sectors: u32, stripes: Vec<(DevId, u64)>) -> Self {
-        Striped {
-            chunk_size_sectors,
-            stripes,
-        }
-    }
-
     /// The chunk size in sectors.
-    #[must_use]
-    pub fn chunk_size_sectors(&self) -> u32 {
-        self.chunk_size_sectors
-    }
+    pub chunk_size_sectors: u32,
     /// The `(device, offset)` stripe pairs.
-    #[must_use]
-    pub fn stripes(&self) -> &[(DevId, u64)] {
-        &self.stripes
-    }
+    pub stripes: Vec<(DevId, u64)>,
 }
 impl Target for Striped {
     const NAME: &'static str = "striped";
@@ -65,13 +45,13 @@ mod tests {
 
     #[test]
     fn striped_renders_stripe_count_and_pairs() {
-        let t = Striped::new(
-            128,
-            vec![
+        let t = Striped {
+            chunk_size_sectors: 128,
+            stripes: vec![
                 (DevId::new(252, 1).unwrap(), 0),
                 (DevId::new(252, 2).unwrap(), 0),
             ],
-        );
+        };
         assert_eq!(line(0, 2048, &t), "0 2048 striped 2 128 252:1 0 252:2 0");
     }
 }

@@ -52,7 +52,11 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .add(
             0,
             16 * 1024 * 1024 / 512,
-            Thin::new(pool_removed.id(), 0, None),
+            Thin {
+                pool: pool_removed.id(),
+                dev_id: 0,
+                external_origin: None,
+            },
         )
         .expect("add thin")
         .load()

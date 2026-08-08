@@ -477,14 +477,14 @@ mod tests {
 
     #[test]
     fn buf_for_verity_target_has_correct_layout_and_params() {
-        let t = Verity::new(
-            DevId::new(253, 3).unwrap(),
-            DevId::new(253, 4).unwrap(),
-            7,
-            "sha256",
-            vec![0xCD; 32],
-            vec![0x55; 32],
-        );
+        let t = Verity {
+            data_dev: DevId::new(253, 3).unwrap(),
+            hash_dev: DevId::new(253, 4).unwrap(),
+            num_data_blocks: 7,
+            algorithm: "sha256".to_owned(),
+            digest: vec![0xCD; 32],
+            salt: vec![0x55; 32],
+        };
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
             .add(0, 56, t)
             .expect("add verity");

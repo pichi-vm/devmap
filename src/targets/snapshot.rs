@@ -39,38 +39,13 @@ impl FromStr for Origin {
 /// A copy-on-write snapshot of an origin device. Always persistent with
 /// overflow support ("PO").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Snapshot {
-    origin: DevId,
-    cow: DevId,
-    chunk_size_sectors: u32,
-}
-impl Snapshot {
-    /// Construct a [`Snapshot`].
-    #[must_use]
-    pub fn new(origin: DevId, cow: DevId, chunk_size_sectors: u32) -> Self {
-        Snapshot {
-            origin,
-            cow,
-            chunk_size_sectors,
-        }
-    }
-
     /// The device being snapshotted.
-    #[must_use]
-    pub fn origin(&self) -> DevId {
-        self.origin
-    }
+    pub origin: DevId,
     /// The copy-on-write store holding changed chunks.
-    #[must_use]
-    pub fn cow(&self) -> DevId {
-        self.cow
-    }
+    pub cow: DevId,
     /// Copy-on-write chunk size, in 512-byte sectors.
-    #[must_use]
-    pub fn chunk_size_sectors(&self) -> u32 {
-        self.chunk_size_sectors
-    }
+    pub chunk_size_sectors: u32,
 }
 impl Target for Snapshot {
     const NAME: &'static str = "snapshot";
@@ -87,53 +62,17 @@ impl fmt::Display for Snapshot {
 }
 
 /// Merges an existing persistent [`Snapshot`]'s copy-on-write data back
-/// into its origin. Takes the same fields as [`Snapshot`] and is always
-/// persistent with overflow support ("PO").
+/// into its origin. The mapping is identical to [`Snapshot`]'s; only the
+/// kernel target name differs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct Merge {
-    origin: DevId,
-    cow: DevId,
-    chunk_size_sectors: u32,
-}
-impl Merge {
-    /// Construct a [`Merge`].
-    #[must_use]
-    pub fn new(origin: DevId, cow: DevId, chunk_size_sectors: u32) -> Self {
-        Merge {
-            origin,
-            cow,
-            chunk_size_sectors,
-        }
-    }
-
-    /// The origin device to merge back into.
-    #[must_use]
-    pub fn origin(&self) -> DevId {
-        self.origin
-    }
-    /// The copy-on-write store to merge from.
-    #[must_use]
-    pub fn cow(&self) -> DevId {
-        self.cow
-    }
-    /// Copy-on-write chunk size, in 512-byte sectors.
-    #[must_use]
-    pub fn chunk_size_sectors(&self) -> u32 {
-        self.chunk_size_sectors
-    }
-}
+pub struct Merge(pub Snapshot);
 impl Target for Merge {
     const NAME: &'static str = "snapshot-merge";
     type Info = RawInfo;
 }
 impl fmt::Display for Merge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {} PO {}",
-            self.origin, self.cow, self.chunk_size_sectors
-        )
+        self.0.fmt(f)
     }
 }
 
@@ -150,9 +89,17 @@ mod tests {
         }
     }
 
+    fn snapshot(chunk_size_sectors: u32) -> Snapshot {
+        Snapshot {
+            origin: DevId::new(252, 1).unwrap(),
+            cow: DevId::new(252, 2).unwrap(),
+            chunk_size_sectors,
+        }
+    }
+
     #[test]
     fn snapshot_renders_with_po_persistence() {
-        let t = Snapshot::new(DevId::new(252, 1).unwrap(), DevId::new(252, 2).unwrap(), 8);
+        let t = snapshot(8);
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot 252:1 252:2 PO 8");
     }
 
@@ -166,7 +113,7 @@ mod tests {
 
     #[test]
     fn snapshot_merge_renders_like_snapshot_with_po() {
-        let t = Merge::new(DevId::new(252, 1).unwrap(), DevId::new(252, 2).unwrap(), 8);
+        let t = Merge(snapshot(8));
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-merge 252:1 252:2 PO 8");
     }
 
