@@ -24,72 +24,23 @@ fn write_hex_lower<W: fmt::Write + ?Sized>(w: &mut W, bytes: &[u8]) -> fmt::Resu
 /// write. The data and hash block sizes are locked to 4096 bytes and
 /// `hash_start_block` to 1.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Verity {
-    data_dev: DevId,
-    hash_dev: DevId,
-    num_data_blocks: u64,
-    algorithm: String,
-    digest: Vec<u8>,
-    salt: Vec<u8>,
-}
-impl Verity {
-    /// Construct a [`Verity`]. Data/hash block size is locked to 4096
-    /// and `hash_start_block` to 1 (see the type docs); `digest` and
-    /// `salt` are raw bytes, hex-encoded on write.
-    ///
-    /// Value rules (non-empty `algorithm`/`digest`/`salt`, allowed
-    /// characters, and so on) are enforced by the kernel when the table
-    /// is loaded, which rejects bad values with `EINVAL`.
-    #[must_use]
-    pub fn new(
-        data_dev: DevId,
-        hash_dev: DevId,
-        num_data_blocks: u64,
-        algorithm: impl Into<String>,
-        digest: Vec<u8>,
-        salt: Vec<u8>,
-    ) -> Self {
-        Verity {
-            data_dev,
-            hash_dev,
-            num_data_blocks,
-            algorithm: algorithm.into(),
-            digest,
-            salt,
-        }
-    }
-
     /// The data device.
-    #[must_use]
-    pub fn data_dev(&self) -> DevId {
-        self.data_dev
-    }
+    pub data_dev: DevId,
     /// The hash device.
-    #[must_use]
-    pub fn hash_dev(&self) -> DevId {
-        self.hash_dev
-    }
+    pub hash_dev: DevId,
     /// Number of data blocks.
-    #[must_use]
-    pub fn num_data_blocks(&self) -> u64 {
-        self.num_data_blocks
-    }
+    pub num_data_blocks: u64,
     /// The hash algorithm name.
-    #[must_use]
-    pub fn algorithm(&self) -> &str {
-        &self.algorithm
-    }
+    ///
+    /// Value rules (non-empty algorithm/digest/salt, allowed characters,
+    /// and so on) are enforced by the kernel on table load, which rejects
+    /// bad values with `EINVAL`.
+    pub algorithm: String,
     /// The root digest (raw bytes).
-    #[must_use]
-    pub fn digest(&self) -> &[u8] {
-        &self.digest
-    }
+    pub digest: Vec<u8>,
     /// The salt (raw bytes).
-    #[must_use]
-    pub fn salt(&self) -> &[u8] {
-        &self.salt
-    }
+    pub salt: Vec<u8>,
 }
 impl Target for Verity {
     const NAME: &'static str = "verity";
@@ -124,14 +75,14 @@ mod tests {
 
     #[test]
     fn verity_renders_per_kernel_docs() {
-        let t = Verity::new(
-            DevId::new(252, 100).unwrap(),
-            DevId::new(252, 101).unwrap(),
-            10,
-            "sha256",
-            vec![0xBB; 32],
-            vec![0xAA; 32],
-        );
+        let t = Verity {
+            data_dev: DevId::new(252, 100).unwrap(),
+            hash_dev: DevId::new(252, 101).unwrap(),
+            num_data_blocks: 10,
+            algorithm: "sha256".to_owned(),
+            digest: vec![0xBB; 32],
+            salt: vec![0xAA; 32],
+        };
         let rendered = line(0, 80, &t);
         assert!(rendered.contains("verity 1 252:100 252:101 4096 4096 10 1 sha256"));
         let toks: Vec<&str> = rendered.split_whitespace().collect();

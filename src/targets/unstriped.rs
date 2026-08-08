@@ -11,61 +11,21 @@ use crate::table::{RawInfo, Target};
 /// Exposes one stripe of an existing striped/RAID0 mapping as its own
 /// device, for per-stripe `QoS` isolation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Unstriped {
-    stripes: u32,
-    chunk_size_sectors: u32,
-    stripe_index: u32,
-    device: DevId,
-    offset_sectors: u64,
-}
-impl Unstriped {
-    /// Construct an [`Unstriped`].
-    ///
-    /// Value rules (nonzero `stripes`/`chunk_size_sectors`,
-    /// `stripe_index < stripes`) are enforced by the kernel on table load.
-    #[must_use]
-    pub fn new(
-        stripes: u32,
-        chunk_size_sectors: u32,
-        stripe_index: u32,
-        device: DevId,
-        offset_sectors: u64,
-    ) -> Self {
-        Unstriped {
-            stripes,
-            chunk_size_sectors,
-            stripe_index,
-            device,
-            offset_sectors,
-        }
-    }
-
     /// The total number of stripes in the underlying mapping.
-    #[must_use]
-    pub fn stripes(&self) -> u32 {
-        self.stripes
-    }
+    ///
+    /// The kernel enforces the value rules on table load: `stripes` and
+    /// `chunk_size_sectors` must be nonzero, and `stripe_index` must be
+    /// less than `stripes`.
+    pub stripes: u32,
     /// The chunk size in sectors.
-    #[must_use]
-    pub fn chunk_size_sectors(&self) -> u32 {
-        self.chunk_size_sectors
-    }
+    pub chunk_size_sectors: u32,
     /// The index of the exposed stripe.
-    #[must_use]
-    pub fn stripe_index(&self) -> u32 {
-        self.stripe_index
-    }
+    pub stripe_index: u32,
     /// The backing device.
-    #[must_use]
-    pub fn device(&self) -> DevId {
-        self.device
-    }
+    pub device: DevId,
     /// The starting offset in sectors.
-    #[must_use]
-    pub fn offset_sectors(&self) -> u64 {
-        self.offset_sectors
-    }
+    pub offset_sectors: u64,
 }
 impl Target for Unstriped {
     const NAME: &'static str = "unstriped";
@@ -100,7 +60,13 @@ mod tests {
 
     #[test]
     fn unstriped_renders_all_fields() {
-        let t = Unstriped::new(2, 256, 0, DevId::new(252, 1).unwrap(), 0);
+        let t = Unstriped {
+            stripes: 2,
+            chunk_size_sectors: 256,
+            stripe_index: 0,
+            device: DevId::new(252, 1).unwrap(),
+            offset_sectors: 0,
+        };
         assert_eq!(line(0, 512, &t), "0 512 unstriped 2 256 0 252:1 0");
     }
 }

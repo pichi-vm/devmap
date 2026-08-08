@@ -111,7 +111,15 @@ fn dust_bypass_mode_passes_data_through_and_message_interface_works() {
     let removed = control.create(&name).expect("DM_DEV_CREATE");
     removed
         .builder()
-        .add(0, 16384, Dust::new(backing_device.id(), 0, 512))
+        .add(
+            0,
+            16384,
+            Dust {
+                device: backing_device.id(),
+                offset_sectors: 0,
+                block_size: 512,
+            },
+        )
         .expect("add dust")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -149,7 +157,13 @@ fn unstriped_with_a_single_stripe_is_a_pure_passthrough() {
         .add(
             0,
             16384,
-            Unstriped::new(1, 16384, 0, backing_device.id(), 0),
+            Unstriped {
+                stripes: 1,
+                chunk_size_sectors: 16384,
+                stripe_index: 0,
+                device: backing_device.id(),
+                offset_sectors: 0,
+            },
         )
         .expect("add unstriped")
         .load()

@@ -12,37 +12,13 @@ use crate::table::{RawInfo, Target};
 /// testing. Bad-block management is message-driven — see
 /// [`crate::Device::message`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Dust {
-    device: DevId,
-    offset_sectors: u64,
-    block_size: u32,
-}
-impl Dust {
-    /// Construct a [`Dust`].
-    pub fn new(device: DevId, offset_sectors: u64, block_size: u32) -> Self {
-        Dust {
-            device,
-            offset_sectors,
-            block_size,
-        }
-    }
-
     /// The backing device.
-    #[must_use]
-    pub fn device(&self) -> DevId {
-        self.device
-    }
+    pub device: DevId,
     /// The starting offset in sectors.
-    #[must_use]
-    pub fn offset_sectors(&self) -> u64 {
-        self.offset_sectors
-    }
+    pub offset_sectors: u64,
     /// The block size in bytes.
-    #[must_use]
-    pub fn block_size(&self) -> u32 {
-        self.block_size
-    }
+    pub block_size: u32,
 }
 impl Target for Dust {
     const NAME: &'static str = "dust";
@@ -73,7 +49,11 @@ mod tests {
 
     #[test]
     fn dust_renders_device_offset_and_block_size() {
-        let t = Dust::new(DevId::new(252, 1).unwrap(), 0, 512);
+        let t = Dust {
+            device: DevId::new(252, 1).unwrap(),
+            offset_sectors: 0,
+            block_size: 512,
+        };
         assert_eq!(line(0, 8192, &t), "0 8192 dust 252:1 0 512");
     }
 }

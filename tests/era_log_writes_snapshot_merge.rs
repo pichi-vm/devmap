@@ -32,7 +32,11 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
         .add(
             0,
             16384,
-            Era::new(metadata_device.id(), origin_device.id(), 128),
+            Era {
+                metadata: metadata_device.id(),
+                origin: origin_device.id(),
+                block_size: 128,
+            },
         )
         .expect("add era")
         .load()
@@ -157,7 +161,11 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            Snapshot::new(origin_backing_device.id(), cow_device.id(), 8),
+            Snapshot {
+                origin: origin_backing_device.id(),
+                cow: cow_device.id(),
+                chunk_size_sectors: 8,
+            },
         )
         .expect("add snapshot")
         .load()
@@ -182,7 +190,11 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            snapshot::Merge::new(origin_backing_device.id(), cow_device.id(), 8),
+            snapshot::Merge(Snapshot {
+                origin: origin_backing_device.id(),
+                cow: cow_device.id(),
+                chunk_size_sectors: 8,
+            }),
         )
         .expect("add snapshot-merge")
         .load()

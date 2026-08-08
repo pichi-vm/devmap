@@ -12,38 +12,13 @@ use crate::table::{RawInfo, Target};
 /// incremental backup. Era rollover/snapshot control is message-driven
 /// — see [`crate::Device::message`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Era {
-    metadata: DevId,
-    origin: DevId,
-    block_size: u32,
-}
-impl Era {
-    /// Construct an [`Era`].
-    #[must_use]
-    pub fn new(metadata: DevId, origin: DevId, block_size: u32) -> Self {
-        Era {
-            metadata,
-            origin,
-            block_size,
-        }
-    }
-
     /// Device holding the era metadata (the change map).
-    #[must_use]
-    pub fn metadata(&self) -> DevId {
-        self.metadata
-    }
+    pub metadata: DevId,
     /// The origin device whose changes are tracked.
-    #[must_use]
-    pub fn origin(&self) -> DevId {
-        self.origin
-    }
+    pub origin: DevId,
     /// Tracking granularity, in 512-byte sectors per block.
-    #[must_use]
-    pub fn block_size(&self) -> u32 {
-        self.block_size
-    }
+    pub block_size: u32,
 }
 impl Target for Era {
     const NAME: &'static str = "era";
@@ -70,11 +45,11 @@ mod tests {
 
     #[test]
     fn era_renders_metadata_origin_and_block_size() {
-        let t = Era::new(
-            DevId::new(252, 1).unwrap(),
-            DevId::new(252, 2).unwrap(),
-            128,
-        );
+        let t = Era {
+            metadata: DevId::new(252, 1).unwrap(),
+            origin: DevId::new(252, 2).unwrap(),
+            block_size: 128,
+        };
         assert_eq!(line(0, 8192, &t), "0 8192 era 252:1 252:2 128");
     }
 }

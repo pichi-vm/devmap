@@ -13,38 +13,13 @@ use crate::table::{RawInfo, Target};
 /// message — see [`crate::Device::message`]) before this table line can
 /// be loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Thin {
-    pool: DevId,
-    dev_id: u32,
-    external_origin: Option<DevId>,
-}
-impl Thin {
-    /// Construct a [`Thin`].
-    #[must_use]
-    pub fn new(pool: DevId, dev_id: u32, external_origin: Option<DevId>) -> Self {
-        Thin {
-            pool,
-            dev_id,
-            external_origin,
-        }
-    }
-
     /// The backing thin-pool device.
-    #[must_use]
-    pub fn pool(&self) -> DevId {
-        self.pool
-    }
+    pub pool: DevId,
     /// The thin device id within the pool.
-    #[must_use]
-    pub fn dev_id(&self) -> u32 {
-        self.dev_id
-    }
+    pub dev_id: u32,
     /// The external origin device, if any.
-    #[must_use]
-    pub fn external_origin(&self) -> Option<DevId> {
-        self.external_origin
-    }
+    pub external_origin: Option<DevId>,
 }
 impl Target for Thin {
     const NAME: &'static str = "thin";
@@ -75,17 +50,21 @@ mod tests {
 
     #[test]
     fn thin_renders_without_external_origin() {
-        let t = Thin::new(DevId::new(252, 1).unwrap(), 7, None);
+        let t = Thin {
+            pool: DevId::new(252, 1).unwrap(),
+            dev_id: 7,
+            external_origin: None,
+        };
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7");
     }
 
     #[test]
     fn thin_renders_with_external_origin() {
-        let t = Thin::new(
-            DevId::new(252, 1).unwrap(),
-            7,
-            Some(DevId::new(252, 9).unwrap()),
-        );
+        let t = Thin {
+            pool: DevId::new(252, 1).unwrap(),
+            dev_id: 7,
+            external_origin: Some(DevId::new(252, 9).unwrap()),
+        };
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7 252:9");
     }
 }
