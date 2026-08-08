@@ -106,4 +106,33 @@ fn integrity_first_use_format_then_reload_sequence() {
 
     let status = removed.status().expect("DM_DEV_STATUS");
     assert_eq!(status.target_count(), 1);
+
+    // dm-integrity reports the full effective configuration, not the four
+    // arguments devmap wrote. `Integrity` renders
+    //
+    //     7:0 0 - J 1 internal_hash:sha256
+    //
+    // and the kernel answers with a concrete tag size in place of `-` and
+    // the journal/buffer geometry it chose for itself:
+    //
+    //     7:0 0 32 J 6 interleave_sectors:32768 buffer_sectors:128 \
+    //     journal_sectors:440 journal_watermark:50 commit_time:10000 \
+    //     internal_hash:sha256
+    //
+    // Those values depend on the device size, so assert on the keys rather
+    // than the numbers. This asymmetry is why the table read shape is a
+    // type of its own rather than `Integrity` itself.
+    let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].type_name(), "integrity");
+    let line = rows[0].to_string();
+    for key in [
+        "buffer_sectors:",
+        "journal_sectors:",
+        "journal_watermark:",
+        "commit_time:",
+        "internal_hash:sha256",
+    ] {
+        assert!(line.contains(key), "expected {key:?} in {line:?}");
+    }
 }
