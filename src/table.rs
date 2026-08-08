@@ -36,7 +36,7 @@ use crate::uapi::{DM_MAX_TYPE_NAME, DM_TABLE_LOAD, DM_TARGET_SPEC_SIZE, dm_targe
 pub trait Target: Sized {
     /// The kernel `target_type` name, e.g. `"linear"`. Must be non-empty,
     /// shorter than 16 bytes, and free of NUL/whitespace.
-    const TYPE_NAME: &'static str;
+    const NAME: &'static str;
 
     /// This target's `STATUSTYPE_INFO` runtime-status type. Targets whose
     /// status this crate doesn't model set `type Info = RawInfo`.
@@ -135,7 +135,7 @@ impl Row<mode::Spec> {
     /// Reconstruct the target `T` from this table row, or `None` if the
     /// row is a different target type or the params don't parse.
     pub fn parse<T: Target + FromStr>(&self) -> Option<T> {
-        if self.type_name == T::TYPE_NAME {
+        if self.type_name == T::NAME {
             self.params.parse::<T>().ok()
         } else {
             None
@@ -147,7 +147,7 @@ impl Row<mode::Info> {
     /// Parse this status row as target `T`'s runtime status
     /// ([`Target::Info`]), or `None` on a type-name or parse mismatch.
     pub fn parse<T: Target>(&self) -> Option<T::Info> {
-        if self.type_name == T::TYPE_NAME {
+        if self.type_name == T::NAME {
             self.params.parse::<T::Info>().ok()
         } else {
             None
@@ -215,7 +215,7 @@ impl TableBuilder {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` if `T::TYPE_NAME` is invalid, or if the target
+    /// `InvalidInput` if `T::NAME` is invalid, or if the target
     /// renders an interior NUL into its params (which would truncate the
     /// table line).
     // Table buffers never approach u32::MAX; the kernel's own fields are u32.
@@ -228,14 +228,14 @@ impl TableBuilder {
         length: u64,
         target: T,
     ) -> io::Result<Self> {
-        let name = T::TYPE_NAME.as_bytes();
+        let name = T::NAME.as_bytes();
         if name.is_empty()
             || name.len() >= DM_MAX_TYPE_NAME
             || name.iter().any(|b| *b == 0 || b.is_ascii_whitespace())
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("invalid dm target type name: {:?}", T::TYPE_NAME),
+                format!("invalid dm target type name: {:?}", T::NAME),
             ));
         }
 
@@ -244,10 +244,7 @@ impl TableBuilder {
         if params.as_bytes().contains(&0) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "target {} rendered an interior NUL in its params",
-                    T::TYPE_NAME
-                ),
+                format!("target {} rendered an interior NUL in its params", T::NAME),
             ));
         }
 
@@ -276,9 +273,9 @@ impl TableBuilder {
         self.buf.resize(spec_off + block.next_multiple_of(8), 0);
 
         self.rendered.push(if params.is_empty() {
-            format!("{start} {length} {}", T::TYPE_NAME)
+            format!("{start} {length} {}", T::NAME)
         } else {
-            format!("{start} {length} {} {params}", T::TYPE_NAME)
+            format!("{start} {length} {} {params}", T::NAME)
         });
         self.last_spec_off = Some(spec_off);
         self.count += 1;
@@ -720,7 +717,7 @@ mod tests {
     /// the builder must reject it rather than truncate the table line.
     struct NulTarget;
     impl Target for NulTarget {
-        const TYPE_NAME: &'static str = "nul-target";
+        const NAME: &'static str = "nul-target";
         type Info = RawInfo;
     }
     impl fmt::Display for NulTarget {
@@ -736,11 +733,11 @@ mod tests {
         assert!(matches!(r, Err(e) if e.kind() == io::ErrorKind::InvalidInput));
     }
 
-    /// A target whose `TYPE_NAME` contains whitespace — invalid per the
+    /// A target whose `NAME` contains whitespace — invalid per the
     /// `Target` contract; the builder must reject it.
     struct BadNameTarget;
     impl Target for BadNameTarget {
-        const TYPE_NAME: &'static str = "bad name";
+        const NAME: &'static str = "bad name";
         type Info = RawInfo;
     }
     impl fmt::Display for BadNameTarget {
@@ -765,7 +762,7 @@ mod tests {
         value: u32,
     }
     impl Target for CustomTarget {
-        const TYPE_NAME: &'static str = "custom-target";
+        const NAME: &'static str = "custom-target";
         type Info = RawInfo;
     }
     impl fmt::Display for CustomTarget {
@@ -803,7 +800,7 @@ mod tests {
 
     struct EmptyName;
     impl Target for EmptyName {
-        const TYPE_NAME: &'static str = "";
+        const NAME: &'static str = "";
         type Info = RawInfo;
     }
     impl fmt::Display for EmptyName {
@@ -814,7 +811,7 @@ mod tests {
     // 16 bytes == DM_MAX_TYPE_NAME: no room for the NUL terminator, so rejected.
     struct SixteenByteName;
     impl Target for SixteenByteName {
-        const TYPE_NAME: &'static str = "0123456789abcdef";
+        const NAME: &'static str = "0123456789abcdef";
         type Info = RawInfo;
     }
     impl fmt::Display for SixteenByteName {
@@ -825,7 +822,7 @@ mod tests {
     // 15 bytes: the longest name that fits with a NUL terminator.
     struct FifteenByteName;
     impl Target for FifteenByteName {
-        const TYPE_NAME: &'static str = "0123456789abcde";
+        const NAME: &'static str = "0123456789abcde";
         type Info = RawInfo;
     }
     impl fmt::Display for FifteenByteName {

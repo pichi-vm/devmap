@@ -18,7 +18,7 @@ pub struct Linear {
     pub offset_sectors: u64,
 }
 impl Target for Linear {
-    const TYPE_NAME: &'static str = "linear";
+    const NAME: &'static str = "linear";
     type Info = RawInfo;
 }
 impl fmt::Display for Linear {
@@ -53,9 +53,9 @@ mod tests {
     fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
         let params = target.to_string();
         if params.is_empty() {
-            format!("{start} {length} {}", T::TYPE_NAME)
+            format!("{start} {length} {}", T::NAME)
         } else {
-            format!("{start} {length} {} {params}", T::TYPE_NAME)
+            format!("{start} {length} {} {params}", T::NAME)
         }
     }
 
