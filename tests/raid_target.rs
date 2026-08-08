@@ -26,20 +26,19 @@ fn raid1_mirrors_writes_across_two_devices() {
 
     let name = format!("devmap-test-raid1-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let length = 16 * 1024 * 1024 / 512;
+    let target = Raid::new(
+        Type::Raid1,
+        128,
+        vec![
+            DevicePair::data_only(disk0_device.id()),
+            DevicePair::data_only(disk1_device.id()),
+        ],
+    );
+    let written = target.to_string();
     removed
         .builder()
-        .add(
-            0,
-            16 * 1024 * 1024 / 512,
-            Raid::new(
-                Type::Raid1,
-                128,
-                vec![
-                    DevicePair::data_only(disk0_device.id()),
-                    DevicePair::data_only(disk1_device.id()),
-                ],
-            ),
-        )
+        .add(0, length, target)
         .expect("add raid")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -74,4 +73,14 @@ fn raid1_mirrors_writes_across_two_devices() {
     let mut readback = [0u8; 4096];
     file.read_exact(&mut readback).expect("read back");
     assert_eq!(readback, pattern);
+
+    // An idle raid1 echoes its table back byte for byte. dm-raid rebuilds
+    // the parameter list from live array state rather than replaying the
+    // constructor tokens, so this holds only while nothing is reshaping or
+    // rebuilding — which devmap cannot initiate, since sync control and
+    // rebuild indices are not exposed.
+    let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].type_name(), "raid");
+    assert_eq!(rows[0].to_string(), format!("0 {length} raid {written}"));
 }
