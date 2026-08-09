@@ -19,6 +19,16 @@
 //! [`Row::parse`]. Each target type is a struct implementing [`Target`],
 //! so callers can define their own out-of-tree targets.
 //!
+//! [`Target`] is symmetric about the wire: it names one type per kernel
+//! status grammar, [`Target::Table`] for the mapping and [`Target::Info`]
+//! for runtime status, and `Row::parse` returns whichever the row's mode
+//! calls for. `Table` is the target itself for all but `integrity`, which
+//! reports a configuration it derived rather than the arguments it was
+//! given. Reading a row is not guaranteed to return the value that wrote
+//! it — the kernel normalizes some tables — only a value that renders back
+//! to what the kernel said. For a target [`targets`] has no type for,
+//! [`Row::params`] hands back the raw string.
+//!
 //! Not covered here: `DM_DEV_RENAME`, `DM_DEV_WAIT`/event polling,
 //! `DM_TABLE_DEPS`, and clearing a staged inactive table.
 //!
