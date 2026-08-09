@@ -4,9 +4,10 @@
 //! configurable delay, optionally using separate legs per I/O class.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 /// One `<device, offset, delay>` leg of a [`Delay`] mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,6 +70,37 @@ impl fmt::Display for Delay {
             write!(f, " {} {} {}", fl.device, fl.offset_sectors, fl.delay_ms)?;
         }
         Ok(())
+    }
+}
+impl FromStr for Delay {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        fn leg(p: &mut Params<'_>) -> Result<Leg, ParseError> {
+            Ok(Leg {
+                device: p.device()?,
+                offset_sectors: p.value()?,
+                delay_ms: p.value()?,
+            })
+        }
+
+        let mut p = Params::new(s);
+        let tokens = p.remaining();
+        let read = leg(&mut p)?;
+        let (write, flush) = match tokens {
+            3 => (None, None),
+            // The kernel's 6-argument form binds flush to the write leg.
+            // `Display` never emits it — it widens to 9 — but a device
+            // configured elsewhere can, so record the implied flush leg
+            // explicitly rather than losing it to the `read` fallback.
+            6 => {
+                let w = leg(&mut p)?;
+                (Some(w), Some(w))
+            }
+            9 => (Some(leg(&mut p)?), Some(leg(&mut p)?)),
+            _ => return Err(ParseError),
+        };
+        p.end()?;
+        Ok(Delay { read, write, flush })
     }
 }
 
@@ -134,5 +166,35 @@ mod tests {
             line(0, 8, &t),
             "0 8 delay 252:1 0 500 252:1 0 500 252:3 0 50"
         );
+    }
+
+    #[test]
+    fn delay_display_from_str_round_trips() {
+        let read = Leg::new(DevId::new(252, 1).unwrap(), 0, 500);
+        for (write, flush) in [
+            (None, None),
+            (
+                Some(Leg::new(DevId::new(252, 2).unwrap(), 0, 100)),
+                Some(Leg::new(DevId::new(252, 3).unwrap(), 0, 50)),
+            ),
+        ] {
+            let original = Delay { read, write, flush };
+            assert_eq!(original.to_string().parse::<Delay>(), Ok(original));
+        }
+    }
+
+    #[test]
+    fn delay_from_str_reads_the_kernel_six_argument_form() {
+        let parsed: Delay = "252:1 0 500 252:2 0 100".parse().expect("six-arg form");
+        let write = Leg::new(DevId::new(252, 2).unwrap(), 0, 100);
+        assert_eq!(parsed.write, Some(write));
+        assert_eq!(parsed.flush, Some(write));
+    }
+
+    #[test]
+    fn delay_from_str_rejects_other_token_counts() {
+        for params in ["252:1 0", "252:1 0 500 252:2", ""] {
+            assert!(params.parse::<Delay>().is_err(), "should reject {params:?}");
+        }
     }
 }

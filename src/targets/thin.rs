@@ -4,9 +4,10 @@
 //! thin-pool.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target, parse_device};
 
 /// One provisioned volume inside a [`crate::targets::ThinPool`]. `dev_id` must already
 /// exist in the pool (created via a `create_thin`/`create_snap`
@@ -32,6 +33,24 @@ impl fmt::Display for Thin {
             write!(f, " {external_origin}")?;
         }
         Ok(())
+    }
+}
+impl FromStr for Thin {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let pool = p.device()?;
+        let dev_id = p.value()?;
+        let external_origin = match p.optional() {
+            Some(token) => Some(parse_device(token).ok_or(ParseError)?),
+            None => None,
+        };
+        p.end()?;
+        Ok(Thin {
+            pool,
+            dev_id,
+            external_origin,
+        })
     }
 }
 
@@ -66,5 +85,17 @@ mod tests {
             external_origin: Some(DevId::new(252, 9).unwrap()),
         };
         assert_eq!(line(0, 1024, &t), "0 1024 thin 252:1 7 252:9");
+    }
+
+    #[test]
+    fn thin_display_from_str_round_trips_both_forms() {
+        for external_origin in [None, Some(DevId::new(252, 9).unwrap())] {
+            let original = Thin {
+                pool: DevId::new(252, 1).unwrap(),
+                dev_id: 7,
+                external_origin,
+            };
+            assert_eq!(original.to_string().parse::<Thin>(), Ok(original));
+        }
     }
 }
