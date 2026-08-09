@@ -21,6 +21,19 @@ fn write_hex_lower<W: fmt::Write + ?Sized>(w: &mut W, bytes: &[u8]) -> fmt::Resu
     Ok(())
 }
 
+/// Write a salt as lowercase hex, or `-` when it is empty.
+///
+/// dm-verity documents `<salt>` as "Hex string or `-` if no salt" and its
+/// status emits `-` for a zero-length salt. Rendering nothing would leave
+/// the table one argument short, which the kernel rejects.
+fn write_salt<W: fmt::Write + ?Sized>(w: &mut W, salt: &[u8]) -> fmt::Result {
+    if salt.is_empty() {
+        w.write_str("-")
+    } else {
+        write_hex_lower(w, salt)
+    }
+}
+
 /// Decode a lowercase-hex token. The kernel writes `-` for an empty salt.
 fn parse_hex(s: &str) -> Result<Vec<u8>, ParseError> {
     if s == "-" {
@@ -54,7 +67,7 @@ pub struct Verity {
     pub algorithm: String,
     /// The root digest (raw bytes).
     pub digest: Vec<u8>,
-    /// The salt (raw bytes).
+    /// The salt (raw bytes). Empty renders as the kernel's `-` sentinel.
     pub salt: Vec<u8>,
 }
 impl Target for Verity {
@@ -72,7 +85,7 @@ impl fmt::Display for Verity {
         )?;
         write_hex_lower(f, &self.digest)?;
         f.write_char(' ')?;
-        write_hex_lower(f, &self.salt)
+        write_salt(f, &self.salt)
     }
 }
 impl FromStr for Verity {
@@ -164,18 +177,17 @@ mod tests {
     }
 
     #[test]
-    fn verity_from_str_reads_an_empty_salt() {
+    fn verity_renders_an_empty_salt_as_the_kernel_sentinel() {
         let original = Verity {
             salt: Vec::new(),
             ..verity()
         };
-        // The kernel writes "-" for a zero-length salt. `Display` instead
-        // renders nothing at all, leaving a trailing space and a table the
-        // kernel would reject for having too few arguments — so this reads
-        // the kernel's form directly rather than round-tripping.
-        assert!(original.to_string().ends_with(' '));
-        let line = format!("{original}-");
-        assert_eq!(line.parse::<Verity>().as_ref(), Ok(&original));
+        // Ten arguments, the last of them "-". Rendering the empty salt as
+        // nothing would leave nine and the kernel would reject the table.
+        let rendered = original.to_string();
+        assert_eq!(rendered.split_whitespace().count(), 10);
+        assert!(rendered.ends_with(" -"));
+        assert_eq!(rendered.parse::<Verity>().as_ref(), Ok(&original));
     }
 
     #[test]
