@@ -115,9 +115,10 @@ pub mod mode {
 }
 
 /// One `<start> <length> <target>` row of a `DM_TABLE_STATUS` response,
-/// tagged by its [`mode`]. The params string is private: reach it through
-/// the mode-checked [`Row::parse`], which returns the reconstructed target
-/// ([`mode::Spec`]) or its runtime status ([`mode::Info`]).
+/// tagged by its [`mode`]. Read it with the mode-checked [`Row::parse`],
+/// which returns the row's table type ([`mode::Spec`]) or its runtime
+/// status ([`mode::Info`]); [`Row::params`] is the untyped fallback for
+/// targets this crate doesn't model.
 ///
 /// The mode tag is load-bearing: a [`mode::Info`] row exposes only
 /// `parse::<T>() -> Option<T::Info>` (runtime status), never a
@@ -154,6 +155,16 @@ impl<M: mode::Mode> Row<M> {
     /// The kernel target type name for this row.
     pub fn type_name(&self) -> &str {
         &self.type_name
+    }
+    /// The raw params string, exactly as the kernel wrote it.
+    ///
+    /// [`parse`](Row::parse) is the typed path and should be preferred:
+    /// it checks the target type name and hands back a modelled value. This
+    /// is the fallback for a row [`crate::targets`] has no type for — a
+    /// `cache` or `crypt` mapping, or a target from a newer kernel — where
+    /// the alternative is no access at all.
+    pub fn params(&self) -> &str {
+        &self.params
     }
 }
 
@@ -694,6 +705,34 @@ mod tests {
         // snapshot::Origin — a different type name that would parse "252:5 5"
         // as garbage if the type-name guard weren't checked first.)
         assert_eq!(row.parse::<targets::snapshot::Origin>(), None);
+    }
+
+    #[test]
+    fn params_reaches_a_target_this_crate_does_not_model() {
+        // dm-cache has no type in `targets`, so `parse` can't name it and
+        // the raw string is the only way in.
+        let line = "252:1 252:2 252:3 512 1 writeback default 0";
+        let (bytes, count) = synthetic_table_status_response(&[(b"cache", line)]);
+        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
+        assert_eq!(row.type_name(), "cache");
+        assert_eq!(row.params(), line);
+        // Available on info rows too, where the status grammar differs.
+        let (bytes, count) = synthetic_table_status_response(&[(b"cache", line)]);
+        let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
+        assert_eq!(row.params(), line);
+    }
+
+    #[test]
+    fn params_is_empty_for_a_target_that_renders_none() {
+        let (bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
+        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .expect("one row");
+        assert_eq!(row.params(), "");
     }
 
     #[test]
