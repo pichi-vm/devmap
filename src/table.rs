@@ -394,6 +394,53 @@ pub(crate) fn parse_device(s: &str) -> Option<DevId> {
     DevId::new(maj.parse().ok()?, min.parse().ok()?)
 }
 
+/// A cursor over a table row's whitespace-separated parameters, used by
+/// the targets' [`FromStr`] impls. Every accessor fails with
+/// [`ParseError`] rather than returning an `Option`, so a parser reads as
+/// a straight sequence of `?`s.
+pub(crate) struct Params<'a>(std::str::SplitWhitespace<'a>);
+
+impl<'a> Params<'a> {
+    pub(crate) fn new(s: &'a str) -> Self {
+        Params(s.split_whitespace())
+    }
+
+    /// The next token as a `major:minor` device.
+    pub(crate) fn device(&mut self) -> Result<DevId, ParseError> {
+        self.0.next().and_then(parse_device).ok_or(ParseError)
+    }
+
+    /// The next token parsed as `T`.
+    pub(crate) fn value<T: FromStr>(&mut self) -> Result<T, ParseError> {
+        self.0
+            .next()
+            .ok_or(ParseError)?
+            .parse()
+            .map_err(|_| ParseError)
+    }
+
+    /// The next token, if any, without consuming a failure.
+    pub(crate) fn optional(&mut self) -> Option<&'a str> {
+        self.0.next()
+    }
+
+    /// How many tokens remain.
+    pub(crate) fn remaining(&self) -> usize {
+        self.0.clone().count()
+    }
+
+    /// Assert the row is fully consumed. A trailing token means the line
+    /// carries something this target cannot represent, which is a parse
+    /// failure rather than something to drop silently.
+    pub(crate) fn end(mut self) -> Result<(), ParseError> {
+        if self.0.next().is_some() {
+            Err(ParseError)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::cast_possible_truncation)] // test fixtures: sizes are tiny, never near u32::MAX
 mod tests {

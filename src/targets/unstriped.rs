@@ -4,9 +4,10 @@
 //! striped/RAID0 mapping as its own device.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 /// Exposes one stripe of an existing striped/RAID0 mapping as its own
 /// device, for per-stripe `QoS` isolation.
@@ -44,6 +45,21 @@ impl fmt::Display for Unstriped {
         )
     }
 }
+impl FromStr for Unstriped {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let target = Unstriped {
+            stripes: p.value()?,
+            chunk_size_sectors: p.value()?,
+            stripe_index: p.value()?,
+            device: p.device()?,
+            offset_sectors: p.value()?,
+        };
+        p.end()?;
+        Ok(target)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -68,5 +84,17 @@ mod tests {
             offset_sectors: 0,
         };
         assert_eq!(line(0, 512, &t), "0 512 unstriped 2 256 0 252:1 0");
+    }
+
+    #[test]
+    fn unstriped_display_from_str_round_trips() {
+        let original = Unstriped {
+            stripes: 2,
+            chunk_size_sectors: 256,
+            stripe_index: 1,
+            device: DevId::new(252, 1).unwrap(),
+            offset_sectors: 8,
+        };
+        assert_eq!(original.to_string().parse::<Unstriped>(), Ok(original));
     }
 }

@@ -4,9 +4,10 @@
 //! fault-injection testing.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 /// Injects read/write errors at specific blocks, for fault-injection
 /// testing. Bad-block management is message-driven — see
@@ -33,6 +34,19 @@ impl fmt::Display for Dust {
         )
     }
 }
+impl FromStr for Dust {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let target = Dust {
+            device: p.device()?,
+            offset_sectors: p.value()?,
+            block_size: p.value()?,
+        };
+        p.end()?;
+        Ok(target)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -55,5 +69,22 @@ mod tests {
             block_size: 512,
         };
         assert_eq!(line(0, 8192, &t), "0 8192 dust 252:1 0 512");
+    }
+
+    #[test]
+    fn dust_display_from_str_round_trips() {
+        let original = Dust {
+            device: DevId::new(252, 1).unwrap(),
+            offset_sectors: 64,
+            block_size: 512,
+        };
+        assert_eq!(original.to_string().parse::<Dust>(), Ok(original));
+    }
+
+    #[test]
+    fn dust_from_str_rejects_malformed_params() {
+        for params in ["252:1 0", "252:1 0 512 9", "garbage 0 512", ""] {
+            assert!(params.parse::<Dust>().is_err(), "should reject {params:?}");
+        }
     }
 }
