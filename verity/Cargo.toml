@@ -1,0 +1,21 @@
+[package]
+name = "devmap-verity"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Builder for the dm-verity v1 on-disk hash tree and cryptsetup-compatible superblock."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+keywords = ["dm-verity", "verity", "device-mapper", "hash-tree", "cryptsetup"]
+categories = ["filesystem", "cryptography"]
+
+[dependencies]
+sha2 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+hex = "0.4"
+tempfile = "3"
+
+[lints]
+workspace = true
