@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{Params, ParseError, Target};
 
 /// Tracks which blocks of `origin` have changed since which "era", for
 /// incremental backup. Era rollover/snapshot control is message-driven
@@ -24,7 +24,7 @@ pub struct Era {
 impl Target for Era {
     const NAME: &'static str = "era";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Era {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -42,6 +42,64 @@ impl FromStr for Era {
         };
         p.end()?;
         Ok(target)
+    }
+}
+
+/// [`Era`]'s runtime status: metadata usage, and which era writes are
+/// currently being stamped with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Info {
+    /// The metadata block size in 512-byte sectors. The kernel fixes its
+    /// metadata block size at 4 KiB, so this is always 8.
+    pub metadata_block_size_sectors: u32,
+    /// Metadata blocks in use.
+    pub used_metadata_blocks: u64,
+    /// Metadata blocks in total.
+    pub total_metadata_blocks: u64,
+    /// The era writes are currently stamped with, advanced by the
+    /// `checkpoint` message.
+    pub current_era: u32,
+    /// The block holding a metadata snapshot taken with
+    /// `take_metadata_snap`, or `None` when none is held.
+    pub held_metadata_root: Option<u64>,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {}/{} {}",
+            self.metadata_block_size_sectors,
+            self.used_metadata_blocks,
+            self.total_metadata_blocks,
+            self.current_era
+        )?;
+        match self.held_metadata_root {
+            Some(block) => write!(f, " {block}"),
+            None => f.write_str(" -"),
+        }
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let metadata_block_size_sectors = p.value()?;
+        let (used_metadata_blocks, total_metadata_blocks) = p.fraction()?;
+        let current_era = p.value()?;
+        let held_metadata_root = match p.token()? {
+            "-" => None,
+            block => Some(block.parse().map_err(|_| ParseError)?),
+        };
+        p.end()?;
+        Ok(Info {
+            metadata_block_size_sectors,
+            used_metadata_blocks,
+            total_metadata_blocks,
+            current_era,
+            held_metadata_root,
+        })
     }
 }
 

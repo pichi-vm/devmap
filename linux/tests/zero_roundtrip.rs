@@ -57,6 +57,14 @@ fn create_load_resume_read_zeros_remove() {
         "dm-zero must read back as all zeros"
     );
 
+    // dm-zero has no `.status` callback at all, so the kernel emits an
+    // empty params field for it — which is exactly what `NoInfo` accepts
+    // and nothing else.
+    let info: Vec<_> = removed.info().expect("DM_TABLE_STATUS (info)").collect();
+    assert_eq!(info.len(), 1);
+    assert_eq!(info[0].params(), "");
+    assert_eq!(info[0].parse::<Zero>(), Some(devmap_linux::NoInfo));
+
     // `removed` drops here: best-effort DM_DEV_REMOVE.
 }
 

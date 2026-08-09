@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{NoInfo, Params, ParseError, Target};
 
 /// Exposes one stripe of an existing striped/RAID0 mapping as its own
 /// device, for per-stripe `QoS` isolation.
@@ -31,7 +31,7 @@ pub struct Unstriped {
 impl Target for Unstriped {
     const NAME: &'static str = "unstriped";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = NoInfo;
 }
 impl fmt::Display for Unstriped {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

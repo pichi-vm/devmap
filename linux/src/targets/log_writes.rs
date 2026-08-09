@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{Params, ParseError, Target};
 
 /// Logs every write to `device` into `log_device`, for crash-consistency
 /// testing with an external replay tool. Marking points in the log is
@@ -22,7 +22,7 @@ pub struct LogWrites {
 impl Target for LogWrites {
     const NAME: &'static str = "log-writes";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for LogWrites {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -39,6 +39,51 @@ impl FromStr for LogWrites {
         };
         p.end()?;
         Ok(target)
+    }
+}
+
+/// [`LogWrites`]'s runtime status: how much has been logged, and whether
+/// logging is still running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Info {
+    /// Entries written to the log so far.
+    pub logged_entries: u64,
+    /// The highest log-device sector allocated — one below the next.
+    pub highest_sector: u64,
+    /// Whether logging has been turned off (via the `mark` message
+    /// sequence). The kernel renders this as a trailing
+    /// `logging_disabled` keyword and omits it entirely when logging is
+    /// live.
+    pub logging_disabled: bool,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.logged_entries, self.highest_sector)?;
+        if self.logging_disabled {
+            f.write_str(" logging_disabled")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let logged_entries = p.value()?;
+        let highest_sector = p.value()?;
+        let logging_disabled = match p.optional() {
+            Some("logging_disabled") => true,
+            Some(_) => return Err(ParseError),
+            None => false,
+        };
+        p.end()?;
+        Ok(Info {
+            logged_entries,
+            highest_sector,
+            logging_disabled,
+        })
     }
 }
 

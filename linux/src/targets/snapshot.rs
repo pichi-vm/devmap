@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target, parse_device};
+use crate::table::{NoInfo, Params, ParseError, Target, parse_device};
 
 /// Marks a device as the origin of a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,7 +18,7 @@ pub struct Origin {
 impl Target for Origin {
     const NAME: &'static str = "snapshot-origin";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = NoInfo;
 }
 impl fmt::Display for Origin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -51,7 +51,7 @@ pub struct Snapshot {
 impl Target for Snapshot {
     const NAME: &'static str = "snapshot";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Snapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -93,7 +93,7 @@ pub struct Merge(pub Snapshot);
 impl Target for Merge {
     const NAME: &'static str = "snapshot-merge";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Merge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -104,6 +104,82 @@ impl FromStr for Merge {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse().map(Merge)
+    }
+}
+
+/// The runtime status of a [`Snapshot`] or [`Merge`] — both share the
+/// kernel's status callback, so both report this.
+///
+/// An enum rather than a struct because the kernel does not pair usage
+/// with a health flag: when the snapshot is unusable it emits a bare
+/// keyword *instead of* every numeric field. A struct would have to
+/// invent numbers for those states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Info {
+    /// The snapshot is live, with copy-on-write store usage.
+    Usage {
+        /// Sectors of the store allocated to exceptions.
+        allocated_sectors: u64,
+        /// Sectors in the store in total. When `allocated` reaches this
+        /// the snapshot overflows and is invalidated.
+        total_sectors: u64,
+        /// Sectors of the store spent on its own metadata, counted within
+        /// `allocated_sectors`.
+        metadata_sectors: u64,
+    },
+
+    /// The snapshot is invalid and cannot be recovered.
+    Invalid,
+
+    /// A [`Merge`] back into the origin failed partway.
+    MergeFailed,
+
+    /// The store filled and the snapshot was dropped.
+    Overflow,
+
+    /// The exception store does not report usage, so the kernel has
+    /// nothing to say about it.
+    Unknown,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Info::Usage {
+                allocated_sectors,
+                total_sectors,
+                metadata_sectors,
+            } => write!(f, "{allocated_sectors}/{total_sectors} {metadata_sectors}"),
+            Info::Invalid => f.write_str("Invalid"),
+            Info::MergeFailed => f.write_str("Merge failed"),
+            Info::Overflow => f.write_str("Overflow"),
+            Info::Unknown => f.write_str("Unknown"),
+        }
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // The sentinels replace the entire line, and "Merge failed" is two
+        // tokens, so match the trimmed line before tokenizing at all.
+        match s.trim() {
+            "Invalid" => return Ok(Info::Invalid),
+            "Merge failed" => return Ok(Info::MergeFailed),
+            "Overflow" => return Ok(Info::Overflow),
+            "Unknown" => return Ok(Info::Unknown),
+            _ => {}
+        }
+        let mut p = Params::new(s);
+        let (allocated_sectors, total_sectors) = p.fraction()?;
+        let metadata_sectors = p.value()?;
+        p.end()?;
+        Ok(Info::Usage {
+            allocated_sectors,
+            total_sectors,
+            metadata_sectors,
+        })
     }
 }
 

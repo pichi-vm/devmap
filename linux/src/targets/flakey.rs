@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{NoInfo, Params, ParseError, Target};
 
 /// Which I/O direction a [`Feature::CorruptBioByte`] targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -161,7 +161,7 @@ impl Flakey {
 impl Target for Flakey {
     const NAME: &'static str = "flakey";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = NoInfo;
 }
 impl fmt::Display for Flakey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

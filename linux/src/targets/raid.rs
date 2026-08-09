@@ -3,11 +3,11 @@
 //! The `raid` target: software RAID over a set of devices, bridging to the
 //! kernel's MD raid personalities.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target, parse_device};
+use crate::table::{Params, ParseError, Target, parse_device};
 
 /// One `(metadata device, data device)` pair of a [`Raid`] mapping.
 /// `metadata` of `None` renders as `-` (no dedicated metadata device
@@ -112,7 +112,7 @@ impl Raid {
 impl Target for Raid {
     const NAME: &'static str = "raid";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Raid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -188,6 +188,187 @@ impl FromStr for Raid {
             raid_type,
             chunk_size_sectors,
             devices,
+        })
+    }
+}
+
+/// The state of one slot in a [`Raid`] array, as the status line's
+/// per-device health characters report it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DeviceHealth {
+    /// Alive and in sync (`A`).
+    InSync,
+    /// Alive but not yet in sync — rebuilding or newly added (`a`).
+    OutOfSync,
+    /// Failed (`D`).
+    Dead,
+    /// No device in this slot (`-`).
+    Missing,
+}
+
+impl DeviceHealth {
+    fn as_char(self) -> char {
+        match self {
+            DeviceHealth::InSync => 'A',
+            DeviceHealth::OutOfSync => 'a',
+            DeviceHealth::Dead => 'D',
+            DeviceHealth::Missing => '-',
+        }
+    }
+
+    fn from_char(c: char) -> Result<Self, ParseError> {
+        match c {
+            'A' => Ok(DeviceHealth::InSync),
+            'a' => Ok(DeviceHealth::OutOfSync),
+            'D' => Ok(DeviceHealth::Dead),
+            '-' => Ok(DeviceHealth::Missing),
+            _ => Err(ParseError),
+        }
+    }
+}
+
+/// What a [`Raid`] array's sync thread is currently doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SyncAction {
+    /// Sync is frozen by request.
+    Frozen,
+    /// Reshaping to a new layout, device count, or chunk size.
+    Reshape,
+    /// Resynchronizing redundancy after an unclean shutdown.
+    Resync,
+    /// Reading everything to count mismatches, without fixing them.
+    Check,
+    /// Reading everything and repairing mismatches.
+    Repair,
+    /// Rebuilding a replaced or re-added device.
+    Recover,
+    /// Nothing in progress.
+    Idle,
+    /// The kernel could not determine the state.
+    Undef,
+}
+
+impl SyncAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            SyncAction::Frozen => "frozen",
+            SyncAction::Reshape => "reshape",
+            SyncAction::Resync => "resync",
+            SyncAction::Check => "check",
+            SyncAction::Repair => "repair",
+            SyncAction::Recover => "recover",
+            SyncAction::Idle => "idle",
+            SyncAction::Undef => "undef",
+        }
+    }
+
+    fn from_token(token: &str) -> Result<Self, ParseError> {
+        match token {
+            "frozen" => Ok(SyncAction::Frozen),
+            "reshape" => Ok(SyncAction::Reshape),
+            "resync" => Ok(SyncAction::Resync),
+            "check" => Ok(SyncAction::Check),
+            "repair" => Ok(SyncAction::Repair),
+            "recover" => Ok(SyncAction::Recover),
+            "idle" => Ok(SyncAction::Idle),
+            "undef" => Ok(SyncAction::Undef),
+            _ => Err(ParseError),
+        }
+    }
+}
+
+/// [`Raid`]'s runtime status: per-device health, sync progress, and the
+/// integrity-check result.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Info {
+    /// The kernel's raid personality name, e.g. `raid1` or `raid6_zr`.
+    /// A string rather than [`Type`] because the kernel reports every
+    /// layout it supports, including ones [`Type`] cannot express.
+    pub raid_type: String,
+    /// Health of each slot, in array order.
+    pub devices: Vec<DeviceHealth>,
+    /// Sectors of `sync_total` already synced.
+    pub sync_progress: u64,
+    /// Sectors that a full sync covers.
+    pub sync_total: u64,
+    /// What the sync thread is doing.
+    pub sync_action: SyncAction,
+    /// Mismatched sectors found by the last `check`. Only meaningful
+    /// after one has run.
+    pub mismatches: u64,
+    /// The data offset on each member device, which a reshape moves.
+    pub data_offset: u64,
+    /// The write-journal device's health, or `None` when the array has no
+    /// journal — which the kernel renders as `-`.
+    pub journal: Option<DeviceHealth>,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.raid_type, self.devices.len())?;
+        f.write_char(' ')?;
+        for health in &self.devices {
+            f.write_char(health.as_char())?;
+        }
+        write!(
+            f,
+            " {}/{} {} {} {} ",
+            self.sync_progress,
+            self.sync_total,
+            self.sync_action.as_str(),
+            self.mismatches,
+            self.data_offset
+        )?;
+        match self.journal {
+            Some(health) => f.write_char(health.as_char()),
+            None => f.write_char('-'),
+        }
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let raid_type = p.token()?.to_owned();
+        let count: usize = p.value()?;
+        // One health character per slot, concatenated into a single
+        // token, so its length must match the count read above.
+        let health = p.token()?;
+        if health.chars().count() != count {
+            return Err(ParseError);
+        }
+        let devices = health
+            .chars()
+            .map(DeviceHealth::from_char)
+            .collect::<Result<Vec<_>, _>>()?;
+        let (sync_progress, sync_total) = p.fraction()?;
+        let sync_action = SyncAction::from_token(p.token()?)?;
+        let mismatches = p.value()?;
+        let data_offset = p.value()?;
+        let journal = match p.token()? {
+            "-" => None,
+            other => {
+                let mut chars = other.chars();
+                let c = chars.next().ok_or(ParseError)?;
+                if chars.next().is_some() {
+                    return Err(ParseError);
+                }
+                Some(DeviceHealth::from_char(c)?)
+            }
+        };
+        p.end()?;
+        Ok(Info {
+            raid_type,
+            devices,
+            sync_progress,
+            sync_total,
+            sync_action,
+            mismatches,
+            data_offset,
+            journal,
         })
     }
 }
