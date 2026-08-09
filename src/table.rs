@@ -215,7 +215,6 @@ pub struct TableBuilder {
     buf: Vec<u8>,
     count: u32,
     last_spec_off: Option<usize>,
-    rendered: Vec<String>,
 }
 
 impl TableBuilder {
@@ -227,7 +226,6 @@ impl TableBuilder {
             buf,
             count: 0,
             last_spec_off: None,
-            rendered: Vec::new(),
         }
     }
 
@@ -309,11 +307,6 @@ impl TableBuilder {
         let block = DM_TARGET_SPEC_SIZE + params.len() + 1;
         self.buf.resize(spec_off + block.next_multiple_of(8), 0);
 
-        self.rendered.push(if params.is_empty() {
-            format!("{start} {length} {}", T::NAME)
-        } else {
-            format!("{start} {length} {} {params}", T::NAME)
-        });
         self.last_spec_off = Some(spec_off);
         self.count += 1;
         Ok(self)
@@ -925,7 +918,18 @@ mod tests {
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap())
             .add(0, 8, CustomTarget { value: 3 })
             .expect("add custom target");
-        assert_eq!(b.rendered, ["0 8 custom-target 1 2 3"]);
+        // Assert on the bytes bound for the kernel: the type name lands in
+        // the spec's target_type field and the params follow it, NUL-
+        // terminated.
+        let params = "1 2 3";
+        let type_field = &b.buf[DmHeader::SIZE + 24..DmHeader::SIZE + 24 + DM_MAX_TYPE_NAME];
+        assert_eq!(&type_field[..CustomTarget::NAME.len()], b"custom-target");
+        let param_start = DmHeader::SIZE + DM_TARGET_SPEC_SIZE;
+        assert_eq!(
+            &b.buf[param_start..param_start + params.len()],
+            params.as_bytes()
+        );
+        assert_eq!(b.buf[param_start + params.len()], 0);
 
         let (bytes, count) = synthetic_table_status_response(&[(b"custom-target", "1 2 3")]);
         let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
