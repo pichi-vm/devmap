@@ -125,3 +125,5 @@ pub(crate) const DM_DEV_RENAME: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(5) };
 pub(crate) const DM_LIST_VERSIONS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(13) };
+pub(crate) const DM_DEV_ARM_POLL: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(16) };

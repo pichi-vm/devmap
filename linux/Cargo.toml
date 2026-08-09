@@ -14,5 +14,10 @@ categories = ["os::unix-apis", "api-bindings"]
 iocuddle = "0.3"
 zerocopy = { version = "0.8", features = ["derive"] }
 
+# Tests only: a safe `poll()` wrapper, so the DM_DEV_ARM_POLL coverage can
+# wait on the control fd without this crate or its tests writing unsafe.
+[dev-dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "event"] }
+
 [lints]
 workspace = true
