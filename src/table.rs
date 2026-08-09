@@ -65,6 +65,21 @@ pub trait Target: Sized {
     type Info: FromStr;
 }
 
+/// Render the full `<start> <length> <type> [params]` table line for a
+/// target, the way [`TableBuilder::add`] would.
+///
+/// Shared by the target modules' tests, which assert against the exact
+/// line the kernel would be handed.
+#[cfg(test)]
+pub(crate) fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
+    let params = target.to_string();
+    if params.is_empty() {
+        format!("{start} {length} {}", T::NAME)
+    } else {
+        format!("{start} {length} {} {params}", T::NAME)
+    }
+}
+
 /// The uninterpreted params of a target whose typed status this crate
 /// doesn't model. Its [`FromStr`] never fails.
 ///
