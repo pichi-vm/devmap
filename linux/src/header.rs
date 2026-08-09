@@ -14,7 +14,7 @@ use std::io;
 
 use crate::uapi::{
     DM_DEFERRED_REMOVE, DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_READONLY_FLAG,
-    DM_STATUS_TABLE_FLAG, DM_SUSPEND_FLAG, DM_UUID_LEN,
+    DM_STATUS_TABLE_FLAG, DM_SUSPEND_FLAG, DM_UUID_FLAG, DM_UUID_LEN,
 };
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -157,6 +157,12 @@ impl DmHeader {
         } else {
             self.flags &= !DM_SUSPEND_FLAG;
         }
+    }
+
+    /// Set `DM_UUID_FLAG` — for `DM_DEV_RENAME`, the string in the data
+    /// area is a new uuid rather than a new name.
+    pub(crate) fn set_uuid_flag(&mut self) {
+        self.flags |= DM_UUID_FLAG;
     }
 
     /// Set `DM_DEFERRED_REMOVE` — schedule removal for when the device is no

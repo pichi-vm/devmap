@@ -87,6 +87,10 @@ pub(crate) const DM_BUFFER_FULL_FLAG: u32 = 1 << 8;
 /// data area (not every message produces one).
 pub(crate) const DM_DATA_OUT_FLAG: u32 = 1 << 16;
 
+/// Request flag for `DM_DEV_RENAME`: the string in the data area is a new
+/// uuid rather than a new name.
+pub(crate) const DM_UUID_FLAG: u32 = 1 << 14;
+
 const DM_IOCTL_GROUP: Group = Group::new(0xfd);
 
 // SAFETY: every dm ioctl is `_IOWR(0xfd, N, struct dm_ioctl)` per
@@ -117,3 +121,7 @@ pub(crate) const DM_TABLE_CLEAR: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(10) };
 pub(crate) const DM_TABLE_DEPS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(11) };
+pub(crate) const DM_DEV_RENAME: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(5) };
+pub(crate) const DM_LIST_VERSIONS: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(13) };

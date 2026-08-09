@@ -9,11 +9,9 @@
 //! writing — skips gracefully otherwise, matching the pattern this
 //! project's other ioctl-touching tests already use.
 //!
-//! `by_uuid()` is deliberately not exercised here: `Control::create`
-//! never assigns a uuid, and `DM_DEV_RENAME` (the only ioctl that could
-//! attach one after the fact) isn't implemented by this crate, so there
-//! is no way to get a real device into a state where `by_uuid` would
-//! find it.
+//! `by_uuid()` is not exercised here because `Control::create` never
+//! assigns a uuid; `lifecycle_ioctls.rs` covers it, attaching one first
+//! with `Control::set_uuid`.
 
 use std::io::Read as _;
 

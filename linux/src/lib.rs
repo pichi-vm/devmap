@@ -29,8 +29,16 @@
 //! to what the kernel said. For a target [`targets`] has no type for,
 //! [`Row::params`] hands back the raw string.
 //!
-//! Not covered here: `DM_DEV_RENAME`, `DM_DEV_WAIT`/event polling,
-//! `DM_TABLE_DEPS`, and clearing a staged inactive table.
+//! Beyond the create/load/resume/remove core: [`Device::wait_event`]
+//! sleeps until the kernel raises a device event, [`Device::deps`] reports
+//! the devices a table opens, [`Device::clear_inactive_table`] discards a
+//! staged table, [`Control::rename`]/[`Control::set_uuid`] re-identify a
+//! device, and [`Control::list_versions`] reports the targets the kernel
+//! has registered.
+//!
+//! Not covered here: `DM_DEV_ARM_POLL` (`poll()`-based event readiness,
+//! as opposed to the blocking [`Device::wait_event`]), `DM_DEV_SET_GEOMETRY`,
+//! and `DM_REMOVE_ALL`.
 //!
 //! # Example
 //!
@@ -64,7 +72,7 @@ mod table;
 pub mod targets;
 mod uapi;
 
-pub use control::Control;
+pub use control::{Control, TargetVersion};
 pub use device::{DevId, Device, Removed, Status};
 pub use table::{ParseError, RawInfo, Row, TableBuilder, Target, mode};
 
