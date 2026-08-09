@@ -17,7 +17,7 @@
 
 use std::io::Read as _;
 
-use devmap::{Control, DevId, targets::Zero};
+use devmap_linux::{Control, DevId, targets::Zero};
 
 /// Returns `None` (and prints a skip notice) if this process can't open
 /// `/dev/mapper/control` — i.e. isn't root / doesn't have `CAP_SYS_ADMIN`.

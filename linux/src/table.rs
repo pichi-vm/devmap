@@ -142,7 +142,7 @@ pub mod mode {
 /// will not compile:
 ///
 /// ```compile_fail
-/// # use devmap::{Row, mode, targets::Linear};
+/// # use devmap_linux::{Row, mode, targets::Linear};
 /// fn wrong(row: Row<mode::Info>) {
 ///     // `parse::<Linear>()` on an Info row yields `Option<Linear::Info>`,
 ///     // and annotating it `Option<Linear>` demands the table type that

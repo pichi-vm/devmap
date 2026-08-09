@@ -9,8 +9,8 @@
 mod common;
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::targets::delay::Leg;
-use devmap::targets::{Delay, Dust, Flakey, Unstriped};
+use devmap_linux::targets::delay::Leg;
+use devmap_linux::targets::{Delay, Dust, Flakey, Unstriped};
 
 fn write_then_read_back(path: &str) {
     use std::io::{Read, Seek, SeekFrom, Write};

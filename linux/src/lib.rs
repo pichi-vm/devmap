@@ -38,7 +38,7 @@
 //! let the [`Removed`] guard remove it on drop:
 //!
 //! ```no_run
-//! use devmap::{Control, targets::Zero};
+//! use devmap_linux::{Control, targets::Zero};
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let control = Control::open()?;               // needs CAP_SYS_ADMIN

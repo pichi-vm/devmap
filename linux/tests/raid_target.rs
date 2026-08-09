@@ -9,8 +9,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::time::{Duration, Instant};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::targets::Raid;
-use devmap::targets::raid::{DevicePair, Type};
+use devmap_linux::targets::Raid;
+use devmap_linux::targets::raid::{DevicePair, Type};
 
 #[test]
 fn raid1_mirrors_writes_across_two_devices() {

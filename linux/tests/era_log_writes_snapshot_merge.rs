@@ -9,9 +9,9 @@ mod common;
 use std::io::Write;
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::RawInfo;
-use devmap::targets::snapshot::{self, Snapshot};
-use devmap::targets::{Era, LogWrites};
+use devmap_linux::RawInfo;
+use devmap_linux::targets::snapshot::{self, Snapshot};
+use devmap_linux::targets::{Era, LogWrites};
 
 #[test]
 fn era_tracks_writes_and_responds_to_checkpoint_message() {
@@ -245,7 +245,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     // access to it once merging has started) — remove it explicitly
     // rather than relying on `Removed`'s best-effort drop, so a failure
     // here is visible instead of silently swallowed.
-    devmap::Device::from(snap_removed)
+    devmap_linux::Device::from(snap_removed)
         .remove()
         .expect("remove handed-over snapshot device");
 }

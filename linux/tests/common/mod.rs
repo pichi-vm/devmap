@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use devmap::Control;
+use devmap_linux::Control;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 

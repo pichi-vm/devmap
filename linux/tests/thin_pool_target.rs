@@ -9,7 +9,7 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::targets::{Thin, ThinPool};
+use devmap_linux::targets::{Thin, ThinPool};
 
 #[test]
 fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
@@ -79,7 +79,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     drop(file); // DM_DEV_REMOVE fails with EBUSY while the device node is open
 
     // Thin devices must be removed before their pool.
-    devmap::Device::from(thin_removed)
+    devmap_linux::Device::from(thin_removed)
         .remove()
         .expect("remove thin device");
 }
