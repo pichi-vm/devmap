@@ -4,9 +4,10 @@
 //! kernel's MD raid personalities.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target, parse_device};
 
 /// One `(metadata device, data device)` pair of a [`Raid`] mapping.
 /// `metadata` of `None` renders as `-` (no dedicated metadata device
@@ -143,6 +144,52 @@ impl fmt::Display for Raid {
         Ok(())
     }
 }
+impl FromStr for Raid {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let raid_type = match p.token()? {
+            "raid0" => Type::Raid0,
+            "raid1" => Type::Raid1,
+            "raid4" => Type::Raid4,
+            "raid5_ls" => Type::Raid5,
+            "raid6_zr" => Type::Raid6,
+            "raid10" => Type::Raid10,
+            // Every other MD personality and parity layout the kernel
+            // accepts — raid5_ra, raid6_nc, and the rest — is outside
+            // `Type`.
+            _ => return Err(ParseError),
+        };
+        // `Raid` renders exactly one raid parameter, the chunk size. A
+        // larger count means the table carries sync control, rebuild
+        // indices, or a journal device, none of which this type holds.
+        if p.value::<usize>()? != 1 {
+            return Err(ParseError);
+        }
+        // Built field-by-field rather than through `Raid::new`, which
+        // coerces raid1's chunk size to 0 — a read must report what the
+        // kernel said, not what a constructor would have normalized.
+        let chunk_size_sectors = p.value()?;
+        let count: usize = p.value()?;
+        let mut devices = Vec::new();
+        for _ in 0..count {
+            let metadata = match p.token()? {
+                "-" => None,
+                token => Some(parse_device(token).ok_or(ParseError)?),
+            };
+            devices.push(DevicePair {
+                metadata,
+                data: p.device()?,
+            });
+        }
+        p.end()?;
+        Ok(Raid {
+            raid_type,
+            chunk_size_sectors,
+            devices,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -199,6 +246,70 @@ mod tests {
                 "{token}"
             );
         }
+    }
+
+    #[test]
+    fn raid_display_from_str_round_trips_each_type() {
+        for (ty, n) in [
+            (Type::Raid0, 1),
+            (Type::Raid1, 2),
+            (Type::Raid4, 2),
+            (Type::Raid5, 2),
+            (Type::Raid6, 3),
+            (Type::Raid10, 2),
+        ] {
+            let original = Raid::new(ty, 8, devs(n));
+            assert_eq!(original.to_string().parse::<Raid>().as_ref(), Ok(&original));
+        }
+    }
+
+    #[test]
+    fn raid_display_from_str_round_trips_metadata_pairs() {
+        let original = Raid::new(
+            Type::Raid1,
+            0,
+            vec![
+                DevicePair::data_only(DevId::new(252, 1).unwrap()),
+                DevicePair::new(
+                    Some(DevId::new(252, 2).unwrap()),
+                    DevId::new(252, 3).unwrap(),
+                ),
+            ],
+        );
+        assert_eq!(original.to_string().parse::<Raid>().as_ref(), Ok(&original));
+    }
+
+    #[test]
+    fn raid_from_str_rejects_extra_raid_params() {
+        // `sync` and `rebuild <n>` are real dm-raid parameters this type
+        // doesn't render.
+        assert!("raid1 2 sync 0 1 - 252:1".parse::<Raid>().is_err());
+        assert!("raid1 0 1 - 252:1".parse::<Raid>().is_err());
+    }
+
+    #[test]
+    fn raid_from_str_rejects_layouts_outside_the_type_enum() {
+        assert!("raid5_ra 1 8 2 - 252:1 - 252:2".parse::<Raid>().is_err());
+        assert!(
+            "raid6_nc 1 8 3 - 252:1 - 252:2 - 252:3"
+                .parse::<Raid>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn raid_from_str_rejects_a_count_disagreeing_with_the_pairs() {
+        assert!("raid1 1 0 3 - 252:1 - 252:2".parse::<Raid>().is_err());
+        assert!("raid1 1 0 1 - 252:1 - 252:2".parse::<Raid>().is_err());
+    }
+
+    #[test]
+    fn raid_from_str_reports_a_raid1_chunk_size_the_kernel_gave() {
+        // `Raid::new` normalizes raid1's chunk size to 0; a read must not
+        // apply that same coercion, or it would misreport the table.
+        let parsed: Raid = "raid1 1 8 1 - 252:1".parse().unwrap();
+        assert_eq!(parsed.chunk_size_sectors(), 8);
+        assert_eq!(parsed.to_string(), "raid1 1 8 1 - 252:1");
     }
 
     #[test]

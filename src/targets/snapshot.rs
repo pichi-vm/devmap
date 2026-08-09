@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{ParseError, RawInfo, Target, parse_device};
+use crate::table::{Params, ParseError, RawInfo, Target, parse_device};
 
 /// Marks a device as the origin of a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,6 +61,28 @@ impl fmt::Display for Snapshot {
     }
 }
 
+impl FromStr for Snapshot {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let origin = p.device()?;
+        let cow = p.device()?;
+        // This type is always persistent-with-overflow. The kernel's other
+        // persistence modes ("P" and the transient "N") are real tables it
+        // cannot hold, so reject rather than misreport them as "PO".
+        if p.token()? != "PO" {
+            return Err(ParseError);
+        }
+        let chunk_size_sectors = p.value()?;
+        p.end()?;
+        Ok(Snapshot {
+            origin,
+            cow,
+            chunk_size_sectors,
+        })
+    }
+}
+
 /// Merges an existing persistent [`Snapshot`]'s copy-on-write data back
 /// into its origin. The mapping is identical to [`Snapshot`]'s; only the
 /// kernel target name differs.
@@ -73,6 +95,12 @@ impl Target for Merge {
 impl fmt::Display for Merge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+impl FromStr for Merge {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(Merge)
     }
 }
 
@@ -115,6 +143,22 @@ mod tests {
     fn snapshot_merge_renders_like_snapshot_with_po() {
         let t = Merge(snapshot(8));
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-merge 252:1 252:2 PO 8");
+    }
+
+    #[test]
+    fn snapshot_and_merge_display_from_str_round_trip() {
+        let original = snapshot(16);
+        assert_eq!(original.to_string().parse::<Snapshot>(), Ok(original));
+        let original = Merge(original);
+        assert_eq!(original.to_string().parse::<Merge>(), Ok(original));
+    }
+
+    #[test]
+    fn snapshot_from_str_rejects_other_persistence_modes() {
+        // "P" (persistent, no overflow) and "N" (transient) are real
+        // dm-snapshot tables this type cannot hold.
+        assert!("252:1 252:2 P 8".parse::<Snapshot>().is_err());
+        assert!("252:1 252:2 N 8".parse::<Snapshot>().is_err());
     }
 
     #[test]
