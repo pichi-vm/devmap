@@ -3,6 +3,10 @@
 //! Real-kernel coverage for the device lifecycle ioctls beyond
 //! create/load/resume/remove: `DM_TABLE_DEPS`, `DM_TABLE_CLEAR`,
 //! `DM_DEV_WAIT`, `DM_DEV_RENAME`, and `DM_LIST_VERSIONS`.
+//!
+//! `DM_DEV_ARM_POLL` is covered in `arm_poll.rs` instead — it watches a
+//! subsystem-wide counter, so it cannot share a test binary with tests
+//! that create devices concurrently.
 
 mod common;
 

@@ -36,9 +36,12 @@
 //! device, and [`Control::list_versions`] reports the targets the kernel
 //! has registered.
 //!
-//! Not covered here: `DM_DEV_ARM_POLL` (`poll()`-based event readiness,
-//! as opposed to the blocking [`Device::wait_event`]), `DM_DEV_SET_GEOMETRY`,
-//! and `DM_REMOVE_ALL`.
+//! Events come two ways: [`Device::wait_event`] blocks on one device, and
+//! [`Control::arm_poll`] arms the control fd so a `poll`/`epoll` reactor
+//! is woken by any change in the subsystem — the async integration point,
+//! paired with `Control`'s [`AsFd`](std::os::fd::AsFd) impl.
+//!
+//! Not covered here: `DM_DEV_SET_GEOMETRY` and `DM_REMOVE_ALL`.
 //!
 //! # Example
 //!

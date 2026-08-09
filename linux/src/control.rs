@@ -155,6 +155,46 @@ impl Control {
         self.status_lookup(DmHeader::by_uuid(uuid)?)
     }
 
+    /// `DM_DEV_ARM_POLL` — arm this control fd so that `poll()`/`epoll()`
+    /// reports it readable once the device-mapper subsystem next changes.
+    ///
+    /// This is the non-blocking counterpart to [`Device::wait_event`], and
+    /// it differs from it in three ways worth knowing before wiring it into
+    /// a reactor:
+    ///
+    /// - **It is global, not per-device.** The kernel arms against one
+    ///   subsystem-wide counter, bumped by `DM_DEV_CREATE`, `DM_DEV_REMOVE`,
+    ///   `DM_DEV_RENAME`, `DM_REMOVE_ALL`, a table swap, and any target
+    ///   raising a device event. Readiness means "something in dm changed",
+    ///   so after waking, compare [`Status::event_nr`] on the devices you
+    ///   care about to find out what.
+    /// - **The armed state belongs to this fd**, not to a device. A
+    ///   [`Control`] clone shares it, since clones share the underlying
+    ///   file.
+    /// - **It is level-triggered until re-armed.** Once an event has fired,
+    ///   `poll()` keeps reporting readiness; call this again to re-arm and
+    ///   clear it. Arming also discards any readiness outstanding at the
+    ///   time of the call, so arm *before* the work whose completion you
+    ///   intend to wait for, or you may consume its wakeup.
+    ///
+    /// Register the fd with a reactor via the [`AsFd`]/[`AsRawFd`] impls.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if it rejects the ioctl — notably
+    /// `Unsupported` on a kernel predating `DM_DEV_ARM_POLL` (dm-ioctl
+    /// 4.37, Linux 4.15).
+    ///
+    /// [`Device::wait_event`]: crate::Device::wait_event
+    /// [`Status::event_nr`]: crate::Status::event_nr
+    /// [`AsFd`]: std::os::fd::AsFd
+    /// [`AsRawFd`]: std::os::fd::AsRawFd
+    pub fn arm_poll(&self) -> io::Result<()> {
+        let mut header = DmHeader::any();
+        crate::uapi::DM_DEV_ARM_POLL.ioctl(&*self.0, &mut header)?;
+        check_version(&header)
+    }
+
     /// Shared body of [`Control::rename`] and [`Control::set_uuid`]:
     /// `DM_DEV_RENAME` identifies the device by its *current name* (the
     /// kernel looks it up in the name hash), and carries the replacement
@@ -304,6 +344,22 @@ impl Control {
             end,
             control: Arc::clone(&self.0),
         })
+    }
+}
+
+/// Borrow the control fd, so it can be registered with a `poll`/`epoll`
+/// reactor after [`Control::arm_poll`]. The fd stays owned by the
+/// `Control`.
+impl std::os::fd::AsFd for Control {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+impl std::os::fd::AsRawFd for Control {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        use std::os::fd::AsFd as _;
+        self.0.as_fd().as_raw_fd()
     }
 }
 
