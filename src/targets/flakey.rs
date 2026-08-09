@@ -4,9 +4,10 @@
 //! fail or silently corrupt I/O, for fault-injection testing.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 /// Which I/O direction a [`Feature::CorruptBioByte`] targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -176,6 +177,65 @@ impl fmt::Display for Flakey {
         Ok(())
     }
 }
+impl FromStr for Flakey {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let device = p.device()?;
+        let offset_sectors = p.value()?;
+        let up_interval_secs = p.value()?;
+        let down_interval_secs = p.value()?;
+
+        // Counted in tokens, not features, so the loop tracks how many
+        // tokens each feature consumed rather than iterating `count`
+        // times. A count landing mid-feature leaves `consumed > count`.
+        let count: u32 = p.value()?;
+        let mut features = Vec::new();
+        let mut consumed = 0;
+        while consumed < count {
+            let feature = match p.token()? {
+                "error_reads" => Feature::ErrorReads,
+                "drop_writes" => Feature::DropWrites,
+                "error_writes" => Feature::ErrorWrites,
+                "corrupt_bio_byte" => {
+                    let nth_byte = p.value()?;
+                    let direction = match p.token()? {
+                        "r" => Direction::Read,
+                        "w" => Direction::Write,
+                        _ => return Err(ParseError),
+                    };
+                    Feature::CorruptBioByte {
+                        nth_byte,
+                        direction,
+                        value: p.value()?,
+                        flags: p.value()?,
+                    }
+                }
+                "random_read_corrupt" => Feature::RandomReadCorrupt {
+                    probability: p.value()?,
+                },
+                "random_write_corrupt" => Feature::RandomWriteCorrupt {
+                    probability: p.value()?,
+                },
+                _ => return Err(ParseError),
+            };
+            consumed += flakey_feature_token_count(&feature);
+            features.push(feature);
+        }
+        if consumed != count {
+            return Err(ParseError);
+        }
+        p.end()?;
+
+        Ok(Flakey {
+            device,
+            offset_sectors,
+            up_interval_secs,
+            down_interval_secs,
+            features,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -285,6 +345,78 @@ mod tests {
         assert_eq!(
             line(0, 8192, &t),
             "0 8192 flakey 252:1 0 60 5 5 corrupt_bio_byte 1 r 7 0"
+        );
+    }
+
+    #[test]
+    fn flakey_display_from_str_round_trips_every_feature() {
+        let features = [
+            vec![],
+            vec![Feature::ErrorReads],
+            vec![Feature::DropWrites],
+            vec![Feature::ErrorWrites],
+            vec![Feature::RandomReadCorrupt {
+                probability: 500_000_000,
+            }],
+            vec![Feature::RandomWriteCorrupt { probability: 10 }],
+            vec![Feature::CorruptBioByte {
+                nth_byte: 32,
+                direction: Direction::Write,
+                value: 1,
+                flags: 0,
+            }],
+            vec![
+                Feature::ErrorReads,
+                Feature::CorruptBioByte {
+                    nth_byte: 1,
+                    direction: Direction::Read,
+                    value: 7,
+                    flags: 3,
+                },
+                Feature::RandomWriteCorrupt { probability: 10 },
+            ],
+        ];
+        for features in features {
+            let original = Flakey::new(DevId::new(252, 1).unwrap(), 8, 60, 5, features);
+            assert_eq!(
+                original.to_string().parse::<Flakey>().as_ref(),
+                Ok(&original)
+            );
+        }
+    }
+
+    #[test]
+    fn flakey_parses_the_kernels_default_feature_substitution() {
+        // A table loaded with zero features reads back as an explicit
+        // `error_reads error_writes` pair — the kernel names its default
+        // rather than echoing what was written. The row is still exactly
+        // representable, so it parses; it just isn't the value that was
+        // written.
+        let written = Flakey::new(DevId::new(7, 0).unwrap(), 0, 60, 5, vec![]);
+        assert_eq!(written.to_string(), "7:0 0 60 5 0");
+        let read: Flakey = "7:0 0 60 5 2 error_reads error_writes".parse().unwrap();
+        assert_eq!(read.features(), [Feature::ErrorReads, Feature::ErrorWrites]);
+        assert_ne!(read, written);
+    }
+
+    #[test]
+    fn flakey_from_str_rejects_a_count_landing_mid_feature() {
+        // `corrupt_bio_byte` is five tokens; a count of 3 would slice it.
+        assert!(
+            "252:1 0 60 5 3 corrupt_bio_byte 1 r 7 0"
+                .parse::<Flakey>()
+                .is_err()
+        );
+        assert!("252:1 0 60 5 2 error_reads".parse::<Flakey>().is_err());
+    }
+
+    #[test]
+    fn flakey_from_str_rejects_unknown_features_and_directions() {
+        assert!("252:1 0 60 5 1 no_such_feature".parse::<Flakey>().is_err());
+        assert!(
+            "252:1 0 60 5 5 corrupt_bio_byte 1 x 7 0"
+                .parse::<Flakey>()
+                .is_err()
         );
     }
 }

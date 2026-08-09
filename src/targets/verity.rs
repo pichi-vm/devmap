@@ -4,9 +4,10 @@
 //! checking of a device against a Merkle tree of hashes.
 
 use std::fmt::{self, Write as _};
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 // Data/hash block size for `Verity`, locked to 4096 rather than exposing
 // every value the kernel target supports.
@@ -18,6 +19,20 @@ fn write_hex_lower<W: fmt::Write + ?Sized>(w: &mut W, bytes: &[u8]) -> fmt::Resu
         write!(w, "{b:02x}")?;
     }
     Ok(())
+}
+
+/// Decode a lowercase-hex token. The kernel writes `-` for an empty salt.
+fn parse_hex(s: &str) -> Result<Vec<u8>, ParseError> {
+    if s == "-" {
+        return Ok(Vec::new());
+    }
+    if !s.len().is_multiple_of(2) {
+        return Err(ParseError);
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| ParseError))
+        .collect()
 }
 
 /// A dm-verity mapping. `digest` and `salt` are raw bytes, hex-encoded on
@@ -59,6 +74,43 @@ impl fmt::Display for Verity {
         write_hex_lower(f, &self.salt)
     }
 }
+impl FromStr for Verity {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        // This type locks the version, both block sizes, and the hash
+        // start block. A row carrying anything else is a valid dm-verity
+        // table it cannot hold, so check rather than assume: silently
+        // reporting a 512-byte-block mapping as 4096 would be a misread.
+        if p.value::<u32>()? != 1 {
+            return Err(ParseError);
+        }
+        let data_dev = p.device()?;
+        let hash_dev = p.device()?;
+        if p.value::<u32>()? != VERITY_BLOCK_SIZE || p.value::<u32>()? != VERITY_BLOCK_SIZE {
+            return Err(ParseError);
+        }
+        let num_data_blocks = p.value()?;
+        if p.value::<u64>()? != 1 {
+            return Err(ParseError);
+        }
+        let algorithm = p.token()?.to_owned();
+        let digest = parse_hex(p.token()?)?;
+        let salt = parse_hex(p.token()?)?;
+        // Trailing tokens are dm-verity's optional arguments (error
+        // handling mode, FEC, signature key), none of which this type
+        // renders.
+        p.end()?;
+        Ok(Verity {
+            data_dev,
+            hash_dev,
+            num_data_blocks,
+            algorithm,
+            digest,
+            salt,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -88,5 +140,69 @@ mod tests {
         let toks: Vec<&str> = rendered.split_whitespace().collect();
         assert_eq!(*toks.last().unwrap(), "aa".repeat(32));
         assert_eq!(toks[toks.len() - 2], "bb".repeat(32));
+    }
+
+    fn verity() -> Verity {
+        Verity {
+            data_dev: DevId::new(252, 100).unwrap(),
+            hash_dev: DevId::new(252, 101).unwrap(),
+            num_data_blocks: 4096,
+            algorithm: "sha256".to_owned(),
+            digest: vec![0xBB; 32],
+            salt: vec![0xAA; 32],
+        }
+    }
+
+    #[test]
+    fn verity_display_from_str_round_trips() {
+        let original = verity();
+        assert_eq!(
+            original.to_string().parse::<Verity>().as_ref(),
+            Ok(&original)
+        );
+    }
+
+    #[test]
+    fn verity_from_str_reads_an_empty_salt() {
+        let original = Verity {
+            salt: Vec::new(),
+            ..verity()
+        };
+        // The kernel writes "-" for a zero-length salt. `Display` instead
+        // renders nothing at all, leaving a trailing space and a table the
+        // kernel would reject for having too few arguments — so this reads
+        // the kernel's form directly rather than round-tripping.
+        assert!(original.to_string().ends_with(' '));
+        let line = format!("{original}-");
+        assert_eq!(line.parse::<Verity>().as_ref(), Ok(&original));
+    }
+
+    #[test]
+    fn verity_from_str_rejects_rows_outside_its_locked_fields() {
+        let good = verity().to_string();
+        let field = |i: usize, v: &str| {
+            let mut toks: Vec<&str> = good.split_whitespace().collect();
+            toks[i] = v;
+            toks.join(" ")
+        };
+        // version, data block size, hash block size, hash start block
+        for (i, v) in [(0, "0"), (3, "512"), (4, "512"), (6, "0")] {
+            let line = field(i, v);
+            assert!(line.parse::<Verity>().is_err(), "{line}");
+        }
+        // dm-verity's optional-argument tail
+        let line = format!("{good} 2 restart_on_corruption ignore_zero_blocks");
+        assert!(line.parse::<Verity>().is_err());
+    }
+
+    #[test]
+    fn verity_from_str_rejects_malformed_hex() {
+        let good = verity().to_string();
+        assert!(good.replace("bb", "zz").parse::<Verity>().is_err());
+        assert!(
+            good.replacen(&"bb".repeat(32), "abc", 1)
+                .parse::<Verity>()
+                .is_err()
+        );
     }
 }

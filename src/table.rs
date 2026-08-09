@@ -419,6 +419,12 @@ impl<'a> Params<'a> {
             .map_err(|_| ParseError)
     }
 
+    /// The next token verbatim, for keywords and other tokens with no
+    /// useful [`FromStr`].
+    pub(crate) fn token(&mut self) -> Result<&'a str, ParseError> {
+        self.0.next().ok_or(ParseError)
+    }
+
     /// The next token, if any, without consuming a failure.
     pub(crate) fn optional(&mut self) -> Option<&'a str> {
         self.0.next()

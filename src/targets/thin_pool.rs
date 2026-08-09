@@ -4,9 +4,10 @@
 //! thin-provisioned volumes.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 /// A thin-provisioning pool backing zero or more [`crate::targets::Thin`] devices.
 /// Provisioning (`create_thin`/`create_snap`/`delete`) is
@@ -123,6 +124,38 @@ impl fmt::Display for ThinPool {
         Ok(())
     }
 }
+impl FromStr for ThinPool {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let mut pool = ThinPool {
+            metadata: p.device()?,
+            data: p.device()?,
+            data_block_size_sectors: p.value()?,
+            low_water_mark_blocks: p.value()?,
+            skip_block_zeroing: false,
+            ignore_discard: false,
+            no_discard_passdown: false,
+            read_only: false,
+            error_if_no_space: false,
+        };
+        // Every dm-thin feature is a bare flag, so the count is both a
+        // token count and a feature count.
+        let count: usize = p.value()?;
+        for _ in 0..count {
+            match p.token()? {
+                "skip_block_zeroing" => pool.skip_block_zeroing = true,
+                "ignore_discard" => pool.ignore_discard = true,
+                "no_discard_passdown" => pool.no_discard_passdown = true,
+                "read_only" => pool.read_only = true,
+                "error_if_no_space" => pool.error_if_no_space = true,
+                _ => return Err(ParseError),
+            }
+        }
+        p.end()?;
+        Ok(pool)
+    }
+}
 
 /// Builder for [`ThinPool`] — see [`ThinPool::builder`].
 #[derive(Debug, Clone)]
@@ -213,6 +246,54 @@ mod tests {
         assert_eq!(
             line(0, 1_048_576, &t),
             "0 1048576 thin-pool 252:1 252:2 128 0 2 no_discard_passdown error_if_no_space"
+        );
+    }
+
+    #[test]
+    fn thin_pool_display_from_str_round_trips_every_flag() {
+        let base = || {
+            ThinPool::builder(
+                DevId::new(252, 1).unwrap(),
+                DevId::new(252, 2).unwrap(),
+                128,
+                64,
+            )
+        };
+        let cases = [
+            base().build(),
+            base().skip_block_zeroing(true).build(),
+            base().ignore_discard(true).build(),
+            base().no_discard_passdown(true).build(),
+            base().read_only(true).build(),
+            base().error_if_no_space(true).build(),
+            base()
+                .skip_block_zeroing(true)
+                .ignore_discard(true)
+                .no_discard_passdown(true)
+                .read_only(true)
+                .error_if_no_space(true)
+                .build(),
+        ];
+        for original in cases {
+            assert_eq!(
+                original.to_string().parse::<ThinPool>().as_ref(),
+                Ok(&original)
+            );
+        }
+    }
+
+    #[test]
+    fn thin_pool_from_str_rejects_a_count_disagreeing_with_the_flags() {
+        assert!("252:1 252:2 128 0 2 read_only".parse::<ThinPool>().is_err());
+        assert!("252:1 252:2 128 0 0 read_only".parse::<ThinPool>().is_err());
+    }
+
+    #[test]
+    fn thin_pool_from_str_rejects_an_unknown_flag() {
+        assert!(
+            "252:1 252:2 128 0 1 no_such_flag"
+                .parse::<ThinPool>()
+                .is_err()
         );
     }
 }

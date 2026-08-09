@@ -4,9 +4,10 @@
 //! persistent memory) in front of a slower origin device.
 
 use std::fmt;
+use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{RawInfo, Target};
+use crate::table::{Params, ParseError, RawInfo, Target};
 
 /// Backing store kind for a [`Writecache`] cache device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -104,6 +105,49 @@ impl fmt::Display for Writecache {
             write!(f, " low_watermark {lw}")?;
         }
         Ok(())
+    }
+}
+impl FromStr for Writecache {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let kind = match p.token()? {
+            "s" => Kind::Ssd,
+            "p" => Kind::PersistentMemory,
+            _ => return Err(ParseError),
+        };
+        let origin = p.device()?;
+        let cache = p.device()?;
+        let block_size = p.value()?;
+
+        // The count is of tokens, and every option this type models is a
+        // `<key> <value>` pair, so an odd count can only mean an option it
+        // doesn't model.
+        let count: usize = p.value()?;
+        let mut high_watermark_percent = None;
+        let mut low_watermark_percent = None;
+        let mut consumed = 0;
+        while consumed < count {
+            match p.token()? {
+                "high_watermark" => high_watermark_percent = Some(p.value()?),
+                "low_watermark" => low_watermark_percent = Some(p.value()?),
+                _ => return Err(ParseError),
+            }
+            consumed += 2;
+        }
+        if consumed != count {
+            return Err(ParseError);
+        }
+        p.end()?;
+
+        Ok(Writecache {
+            kind,
+            origin,
+            cache,
+            block_size,
+            high_watermark_percent,
+            low_watermark_percent,
+        })
     }
 }
 
@@ -216,5 +260,60 @@ mod tests {
             line(0, 8192, &t),
             "0 8192 writecache s 252:1 252:2 4096 4 high_watermark 90 low_watermark 20"
         );
+    }
+
+    #[test]
+    fn writecache_display_from_str_round_trips_each_option_shape() {
+        for kind in [Kind::Ssd, Kind::PersistentMemory] {
+            let base = || {
+                Writecache::builder(
+                    kind,
+                    DevId::new(252, 1).unwrap(),
+                    DevId::new(252, 2).unwrap(),
+                    4096,
+                )
+            };
+            let cases = [
+                base().build(),
+                base().high_watermark_percent(90).build(),
+                base().low_watermark_percent(20).build(),
+                base()
+                    .high_watermark_percent(90)
+                    .low_watermark_percent(20)
+                    .build(),
+            ];
+            for original in cases {
+                assert_eq!(
+                    original.to_string().parse::<Writecache>().as_ref(),
+                    Ok(&original)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn writecache_from_str_rejects_a_count_disagreeing_with_the_options() {
+        assert!(
+            "s 252:1 252:2 4096 4 high_watermark 90"
+                .parse::<Writecache>()
+                .is_err()
+        );
+        assert!(
+            "s 252:1 252:2 4096 1 high_watermark 90"
+                .parse::<Writecache>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn writecache_from_str_rejects_unmodelled_options_and_modes() {
+        // `writeback_jobs` is a real dm-writecache option this type
+        // doesn't render.
+        assert!(
+            "s 252:1 252:2 4096 2 writeback_jobs 1024"
+                .parse::<Writecache>()
+                .is_err()
+        );
+        assert!("x 252:1 252:2 4096 0".parse::<Writecache>().is_err());
     }
 }
