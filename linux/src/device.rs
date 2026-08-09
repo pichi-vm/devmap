@@ -148,8 +148,8 @@ impl Device {
     /// staged table activates on the next [`Device::resume`].
     ///
     /// ```no_run
-    /// # use devmap::{Control, targets::Zero};
-    /// # fn f(dev: &devmap::Device) -> std::io::Result<()> {
+    /// # use devmap_linux::{Control, targets::Zero};
+    /// # fn f(dev: &devmap_linux::Device) -> std::io::Result<()> {
     /// dev.builder().add(0, 8192, Zero)?.load()?;
     /// # Ok(()) }
     /// ```

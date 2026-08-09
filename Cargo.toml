@@ -1,26 +1,34 @@
+# The devmap repo root is the `devmap` CLI. The workspace members are the
+# libraries it drives, each in a directory named without the `devmap-`
+# prefix (the prefix is implied here and only carried in the published
+# crate name): `linux/` is `devmap-linux` (the kernel API), and the
+# portable per-target on-disk format crates (`devmap-<target>`) join as
+# they are written.
 [package]
 name = "devmap"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "High-level, iocuddle-based Linux device-mapper ioctl layer."
+description = "Command-line front-end for the Linux device-mapper."
 repository = "https://github.com/pichi-vm/devmap"
 homepage = "https://github.com/pichi-vm/devmap"
-readme = "README.md"
-keywords = ["linux", "device-mapper", "dm", "ioctl", "block-device"]
-categories = ["os::unix-apis", "api-bindings"]
 
-[dependencies]
-iocuddle = "0.3"
-zerocopy = { version = "0.8", features = ["derive"] }
+[lints]
+workspace = true
 
-[lints.rust]
+[workspace]
+resolver = "3"
+members = ["linux"]
+
+# Shared lints for every member. Kept here so a new member picks them up
+# with `[lints] workspace = true` rather than duplicating the block.
+[workspace.lints.rust]
 unsafe_code = "deny"
 missing_debug_implementations = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 unreachable_pub = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"

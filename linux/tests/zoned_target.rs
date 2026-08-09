@@ -18,7 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::process::Command;
 
 use common::{ensure_module_loaded, open_control};
-use devmap::targets::Zoned;
+use devmap_linux::targets::Zoned;
 
 /// Whether `name` resolves on `$PATH`. Used to skip if `dmzadm` isn't
 /// installed, the same way `common::open_control` skips for missing root.

@@ -5,6 +5,10 @@ version = 4
 [[package]]
 name = "devmap"
 version = "0.1.0"
+
+[[package]]
+name = "devmap-linux"
+version = "0.1.0"
 dependencies = [
  "iocuddle",
  "zerocopy",

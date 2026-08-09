@@ -7,9 +7,9 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap::targets::integrity::Mode;
-use devmap::targets::writecache::Kind;
-use devmap::targets::{Integrity, Writecache};
+use devmap_linux::targets::integrity::Mode;
+use devmap_linux::targets::writecache::Kind;
+use devmap_linux::targets::{Integrity, Writecache};
 
 #[test]
 fn writecache_passes_data_through() {
