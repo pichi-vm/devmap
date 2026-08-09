@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The "trivial" real Linux device-mapper target types. Each is a struct
+//! The in-tree Linux device-mapper target types. Each is a struct
 //! implementing [`crate::Target`]; construct one and hand it to
-//! [`crate::Device::builder`]'s [`add`](crate::TableBuilder::add).
+//! [`crate::Device::builder`]'s [`add`](crate::TableBuilder::add), or read
+//! one back from a table row with [`crate::Row::parse`].
+//!
+//! These model the subset of each kernel target this crate supports, not
+//! the whole of it. A type rejects a row it cannot hold exactly rather
+//! than dropping the parts it doesn't model, so a parse failure means the
+//! mapping is outside the modelled subset — reach for
+//! [`crate::Row::params`] there.
+//!
+//! Targets this crate has no type for at all (`cache`, `crypt`, `mirror`,
+//! and the rest) can still be enumerated and read as raw params.
 
 pub mod delay;
 pub mod dust;

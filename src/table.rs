@@ -110,7 +110,8 @@ impl std::error::Error for ParseError {}
 
 /// Mode markers distinguishing the two `DM_TABLE_STATUS` payloads.
 pub mod mode {
-    /// `STATUSTYPE_TABLE`: the construction parameters (reconstruct a target).
+    /// `STATUSTYPE_TABLE`: the mapping's parameters, read as
+    /// [`Target::Table`](super::Target::Table).
     #[derive(Debug)]
     pub enum Spec {}
     /// `STATUSTYPE_INFO`: per-target runtime status.
@@ -135,18 +136,18 @@ pub mod mode {
 /// status ([`mode::Info`]); [`Row::params`] is the untyped fallback for
 /// targets this crate doesn't model.
 ///
-/// The mode tag is load-bearing: a [`mode::Info`] row exposes only
-/// `parse::<T>() -> Option<T::Info>` (runtime status), never a
-/// reconstructed target — the target-returning `parse` is defined solely
-/// on `Row<mode::Spec>`. This will not compile:
+/// The mode tag is load-bearing: the kernel answers the two status
+/// requests in two different grammars, so a [`mode::Info`] row exposes
+/// only `parse::<T>() -> Option<T::Info>` and never the table type. This
+/// will not compile:
 ///
 /// ```compile_fail
 /// # use devmap::{Row, mode, targets::Linear};
 /// fn wrong(row: Row<mode::Info>) {
-///     // `parse::<Linear>()` on an Info row would return `Option<Linear::Info>`,
-///     // and `let _: Option<Linear>` forces the target interpretation the
-///     // Info mode never provides — a type error.
-///     let _target: Option<Linear> = row.parse::<Linear>();
+///     // `parse::<Linear>()` on an Info row yields `Option<Linear::Info>`,
+///     // and annotating it `Option<Linear>` demands the table type that
+///     // the Info mode never provides — a type error.
+///     let _table: Option<Linear> = row.parse::<Linear>();
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
