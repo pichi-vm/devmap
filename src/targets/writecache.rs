@@ -81,6 +81,7 @@ impl Writecache {
 }
 impl Target for Writecache {
     const NAME: &'static str = "writecache";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Writecache {

@@ -21,6 +21,7 @@ pub struct LogWrites {
 }
 impl Target for LogWrites {
     const NAME: &'static str = "log-writes";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for LogWrites {

@@ -19,6 +19,7 @@ pub struct Linear {
 }
 impl Target for Linear {
     const NAME: &'static str = "linear";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Linear {

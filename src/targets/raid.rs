@@ -111,6 +111,7 @@ impl Raid {
 }
 impl Target for Raid {
     const NAME: &'static str = "raid";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Raid {

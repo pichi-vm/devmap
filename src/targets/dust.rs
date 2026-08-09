@@ -23,6 +23,7 @@ pub struct Dust {
 }
 impl Target for Dust {
     const NAME: &'static str = "dust";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Dust {

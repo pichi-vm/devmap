@@ -119,20 +119,31 @@ fn integrity_first_use_format_then_reload_sequence() {
     //     journal_sectors:440 journal_watermark:50 commit_time:10000 \
     //     internal_hash:sha256
     //
-    // Those values depend on the device size, so assert on the keys rather
-    // than the numbers. This asymmetry is why the table read shape is a
-    // type of its own rather than `Integrity` itself.
+    // Those values depend on the device size, so assert that each field is
+    // present rather than on the numbers. This asymmetry is why the table
+    // read shape is a type of its own rather than `Integrity` itself.
     let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].type_name(), "integrity");
-    let line = rows[0].to_string();
-    for key in [
-        "buffer_sectors:",
-        "journal_sectors:",
-        "journal_watermark:",
-        "commit_time:",
-        "internal_hash:sha256",
-    ] {
-        assert!(line.contains(key), "expected {key:?} in {line:?}");
-    }
+
+    let table = rows[0]
+        .parse::<Integrity>()
+        .expect("read the row as integrity's table type");
+    assert_eq!(table.device, backing_device.id());
+    assert_eq!(table.mode, Mode::Journaled);
+    assert_eq!(table.internal_hash.as_deref(), Some("sha256"));
+    // The kernel answers the `-` devmap wrote with a concrete tag size,
+    // and fills in the journal geometry it chose for itself.
+    assert!(table.tag_size > 0);
+    assert!(table.buffer_sectors > 0);
+    assert!(table.journal_sectors.is_some());
+    assert!(table.journal_watermark_percent.is_some());
+    assert!(table.commit_time_ms.is_some());
+
+    // Reading is faithful: the parsed value renders back to the exact line
+    // the kernel gave.
+    assert_eq!(
+        rows[0].to_string(),
+        format!("0 {real_length} integrity {table}")
+    );
 }

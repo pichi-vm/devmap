@@ -17,6 +17,7 @@ pub struct Origin {
 }
 impl Target for Origin {
     const NAME: &'static str = "snapshot-origin";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Origin {
@@ -49,6 +50,7 @@ pub struct Snapshot {
 }
 impl Target for Snapshot {
     const NAME: &'static str = "snapshot";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Snapshot {
@@ -90,6 +92,7 @@ impl FromStr for Snapshot {
 pub struct Merge(pub Snapshot);
 impl Target for Merge {
     const NAME: &'static str = "snapshot-merge";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Merge {

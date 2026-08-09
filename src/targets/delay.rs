@@ -49,6 +49,7 @@ pub struct Delay {
 }
 impl Target for Delay {
     const NAME: &'static str = "delay";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Delay {

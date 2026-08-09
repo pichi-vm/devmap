@@ -30,6 +30,7 @@ pub struct Unstriped {
 }
 impl Target for Unstriped {
     const NAME: &'static str = "unstriped";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Unstriped {

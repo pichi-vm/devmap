@@ -111,6 +111,8 @@ impl Integrity {
 }
 impl Target for Integrity {
     const NAME: &'static str = "integrity";
+    // The one target whose read shape isn't its write shape — see `Table`.
+    type Table = Table;
     type Info = RawInfo;
 }
 impl fmt::Display for Integrity {

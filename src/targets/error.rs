@@ -13,6 +13,7 @@ use crate::table::{ParseError, RawInfo, Target};
 pub struct Error;
 impl Target for Error {
     const NAME: &'static str = "error";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Error {

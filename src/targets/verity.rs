@@ -59,6 +59,7 @@ pub struct Verity {
 }
 impl Target for Verity {
     const NAME: &'static str = "verity";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Verity {

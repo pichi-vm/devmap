@@ -19,6 +19,7 @@ pub struct Zoned {
 }
 impl Target for Zoned {
     const NAME: &'static str = "zoned";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Zoned {

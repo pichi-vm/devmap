@@ -23,6 +23,7 @@ pub struct Era {
 }
 impl Target for Era {
     const NAME: &'static str = "era";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Era {
