@@ -36,17 +36,9 @@ impl FromStr for Zero {
 mod tests {
     use super::*;
     use crate::DevId;
+    use crate::table::line;
     use crate::targets::snapshot;
     use crate::targets::{Error, Linear};
-
-    fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
-        let params = target.to_string();
-        if params.is_empty() {
-            format!("{start} {length} {}", T::NAME)
-        } else {
-            format!("{start} {length} {} {params}", T::NAME)
-        }
-    }
 
     #[test]
     fn zero_kernel_abi_is_empty() {

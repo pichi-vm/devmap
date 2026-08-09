@@ -58,15 +58,7 @@ impl FromStr for Thin {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
-        let params = target.to_string();
-        if params.is_empty() {
-            format!("{start} {length} {}", T::NAME)
-        } else {
-            format!("{start} {length} {} {params}", T::NAME)
-        }
-    }
+    use crate::table::line;
 
     #[test]
     fn thin_renders_without_external_origin() {
