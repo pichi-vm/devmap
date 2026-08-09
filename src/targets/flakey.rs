@@ -160,6 +160,7 @@ impl Flakey {
 }
 impl Target for Flakey {
     const NAME: &'static str = "flakey";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Flakey {

@@ -13,6 +13,7 @@ use crate::table::{ParseError, RawInfo, Target};
 pub struct Zero;
 impl Target for Zero {
     const NAME: &'static str = "zero";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Zero {

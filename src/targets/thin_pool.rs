@@ -98,6 +98,7 @@ impl ThinPool {
 }
 impl Target for ThinPool {
     const NAME: &'static str = "thin-pool";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for ThinPool {

@@ -19,6 +19,7 @@ pub struct Striped {
 }
 impl Target for Striped {
     const NAME: &'static str = "striped";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Striped {

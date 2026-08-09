@@ -24,6 +24,7 @@ pub struct Thin {
 }
 impl Target for Thin {
     const NAME: &'static str = "thin";
+    type Table = Self;
     type Info = RawInfo;
 }
 impl fmt::Display for Thin {

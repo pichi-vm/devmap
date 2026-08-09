@@ -2,10 +2,11 @@
 
 //! The trait-based dm target model.
 //!
-//! [`Target`] names a kernel target type and its runtime-status type; each
-//! concrete target (in [`crate::targets`]) is a struct implementing it, with
-//! [`std::fmt::Display`] as the param encoder and [`std::str::FromStr`] as
-//! the decoder (both required only where used, never as supertraits).
+//! [`Target`] names a kernel target type and the two types its status can
+//! be read as — [`Target::Table`] and [`Target::Info`], one per kernel
+//! status grammar. Each concrete target (in [`crate::targets`]) is a struct
+//! implementing it, with [`std::fmt::Display`] as the param encoder
+//! (required only where used, never as a supertrait).
 //!
 //! [`TableBuilder`] streams targets into a single `DM_TABLE_LOAD` buffer.
 //! [`Row`] is one row of a `DM_TABLE_STATUS` response, tagged by [`mode`]
@@ -25,11 +26,16 @@ use crate::device::{DevId, check_version};
 use crate::header::DmHeader;
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TABLE_LOAD, DM_TARGET_SPEC_SIZE, dm_target_spec_raw};
 
-/// A device-mapper target type: its kernel name and its runtime-status type.
+/// A device-mapper target type: its kernel name, and the type each of its
+/// two status grammars reads back as.
 ///
-/// The param codec lives on std traits applied at the use site, not here:
-/// writing a table needs `Self: Display` (the params), and reconstructing a
-/// target from a `DM_TABLE_STATUS` (table) row needs `Self: FromStr`.
+/// The trait is symmetric about the wire. Writing a table needs
+/// `Self: Display`, applied at the use site rather than as a supertrait.
+/// Reading one goes through [`Table`](Target::Table) for
+/// `STATUSTYPE_TABLE` and [`Info`](Target::Info) for `STATUSTYPE_INFO` —
+/// two associated types because the kernel answers those two requests in
+/// two different grammars.
+///
 /// Implementors must render NUL-free, whitespace-correct params — the
 /// builder rejects an interior NUL, but field-level correctness is the
 /// target's own responsibility (validate in its constructor).
@@ -38,13 +44,33 @@ pub trait Target: Sized {
     /// shorter than 16 bytes, and free of NUL/whitespace.
     const NAME: &'static str;
 
+    /// This target's `STATUSTYPE_TABLE` read type — what
+    /// [`Row<mode::Spec>::parse`] returns.
+    ///
+    /// Usually `Self`: the kernel echoes back the table it was given, so
+    /// the type that wrote the row can read it. It differs when the kernel
+    /// reports more than the loaded arguments — see
+    /// [`targets::integrity::Table`](crate::targets::integrity::Table),
+    /// the only such target here.
+    ///
+    /// A `Table` of `Self` does not promise a round-trip. dm-flakey
+    /// normalizes an empty feature list into an explicit
+    /// `error_reads error_writes` pair, which reads back as a different
+    /// value describing the same device. The requirement is only that the
+    /// type can hold whatever the kernel reports.
+    type Table: FromStr;
+
     /// This target's `STATUSTYPE_INFO` runtime-status type. Targets whose
     /// status this crate doesn't model set `type Info = RawInfo`.
     type Info: FromStr;
 }
 
-/// The uninterpreted status string of a target whose typed status this
-/// crate doesn't model. Its [`FromStr`] never fails.
+/// The uninterpreted params of a target whose typed status this crate
+/// doesn't model. Its [`FromStr`] never fails.
+///
+/// This is what every in-tree target sets [`Target::Info`] to: none of
+/// their `STATUSTYPE_INFO` grammars are modelled yet, so [`Row::parse`] on
+/// an info row hands back the raw string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RawInfo(pub String);
 
@@ -132,11 +158,11 @@ impl<M: mode::Mode> Row<M> {
 }
 
 impl Row<mode::Spec> {
-    /// Reconstruct the target `T` from this table row, or `None` if the
-    /// row is a different target type or the params don't parse.
-    pub fn parse<T: Target + FromStr>(&self) -> Option<T> {
+    /// Read this table row as target `T`'s table type
+    /// ([`Target::Table`]), or `None` on a type-name or parse mismatch.
+    pub fn parse<T: Target>(&self) -> Option<T::Table> {
         if self.type_name == T::NAME {
-            self.params.parse::<T>().ok()
+            self.params.parse::<T::Table>().ok()
         } else {
             None
         }
@@ -766,11 +792,27 @@ mod tests {
 
     // --- Builder NUL / type-name guards, and extensibility ---------------
 
+    /// The table type of a fixture that is never read back. These exist to
+    /// prove the builder rejects malformed targets, so all but one are
+    /// turned away by `add` before any ioctl and none reaches a kernel —
+    /// there is no status string for them to interpret. Parsing one means
+    /// a test asked for something that can't happen, so this always fails
+    /// rather than inventing a value.
+    #[derive(Debug)]
+    struct Unreadable;
+    impl FromStr for Unreadable {
+        type Err = ParseError;
+        fn from_str(_: &str) -> Result<Self, Self::Err> {
+            Err(ParseError)
+        }
+    }
+
     /// A local out-of-tree target whose `Display` writes an interior NUL —
     /// the builder must reject it rather than truncate the table line.
     struct NulTarget;
     impl Target for NulTarget {
         const NAME: &'static str = "nul-target";
+        type Table = Unreadable;
         type Info = RawInfo;
     }
     impl fmt::Display for NulTarget {
@@ -791,6 +833,7 @@ mod tests {
     struct BadNameTarget;
     impl Target for BadNameTarget {
         const NAME: &'static str = "bad name";
+        type Table = Unreadable;
         type Info = RawInfo;
     }
     impl fmt::Display for BadNameTarget {
@@ -816,6 +859,7 @@ mod tests {
     }
     impl Target for CustomTarget {
         const NAME: &'static str = "custom-target";
+        type Table = Self;
         type Info = RawInfo;
     }
     impl fmt::Display for CustomTarget {
@@ -854,6 +898,7 @@ mod tests {
     struct EmptyName;
     impl Target for EmptyName {
         const NAME: &'static str = "";
+        type Table = Unreadable;
         type Info = RawInfo;
     }
     impl fmt::Display for EmptyName {
@@ -865,6 +910,7 @@ mod tests {
     struct SixteenByteName;
     impl Target for SixteenByteName {
         const NAME: &'static str = "0123456789abcdef";
+        type Table = Unreadable;
         type Info = RawInfo;
     }
     impl fmt::Display for SixteenByteName {
@@ -876,6 +922,7 @@ mod tests {
     struct FifteenByteName;
     impl Target for FifteenByteName {
         const NAME: &'static str = "0123456789abcde";
+        type Table = Unreadable;
         type Info = RawInfo;
     }
     impl fmt::Display for FifteenByteName {
