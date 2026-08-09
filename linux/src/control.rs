@@ -155,6 +155,129 @@ impl Control {
         self.status_lookup(DmHeader::by_uuid(uuid)?)
     }
 
+    /// Shared body of [`Control::rename`] and [`Control::set_uuid`]:
+    /// `DM_DEV_RENAME` identifies the device by its *current name* (the
+    /// kernel looks it up in the name hash), and carries the replacement
+    /// string in the data area.
+    fn rename_inner(&self, current_name: &str, new: &str, as_uuid: bool) -> io::Result<Device> {
+        if new.as_bytes().contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "dm rename target contains a NUL byte",
+            ));
+        }
+        let limit = if as_uuid {
+            crate::uapi::DM_UUID_LEN
+        } else {
+            crate::uapi::DM_NAME_LEN
+        };
+        if new.len() >= limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "dm rename target too long: {} bytes (max {})",
+                    new.len(),
+                    limit - 1
+                ),
+            ));
+        }
+
+        let mut header = DmHeader::by_name(current_name)?;
+        if as_uuid {
+            header.set_uuid_flag();
+        }
+        let mut payload = Vec::with_capacity(new.len() + 1);
+        payload.extend_from_slice(new.as_bytes());
+        payload.push(0);
+
+        let buf = ioctl_with_growing_buffer(
+            &self.0,
+            |fd, h| crate::uapi::DM_DEV_RENAME.ioctl(fd, h),
+            header,
+            &payload,
+            4096,
+        )?;
+        let (parsed, _): (&DmHeader, _) = zerocopy::FromBytes::ref_from_prefix(&buf)
+            .expect("buf is at least DmHeader::SIZE bytes");
+        Ok(Device::new(
+            DevId::from_dev_t(parsed.dev()),
+            Arc::clone(&self.0),
+        ))
+    }
+
+    /// `DM_DEV_RENAME` — give the device currently called `current_name`
+    /// the name `new_name`.
+    ///
+    /// Keyed by name rather than [`DevId`] because that is how the kernel
+    /// resolves it: `dm_hash_rename` looks the device up in the name hash,
+    /// so this lives on `Control` rather than [`Device`].
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` if `new_name` has a NUL byte or is too long;
+    /// otherwise the kernel's `io::Error` — `NotFound` (`ENXIO`) if no
+    /// device has `current_name`, `AlreadyExists` (`EBUSY`) if `new_name`
+    /// is taken, or `InvalidInput` (`EINVAL`) if the kernel rejects the
+    /// name (it forbids `/`, `.`, and `..`).
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: panics only if the kernel returned fewer than
+    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
+    /// indicate a kernel bug.
+    pub fn rename(&self, current_name: &str, new_name: &str) -> io::Result<Device> {
+        self.rename_inner(current_name, new_name, false)
+    }
+
+    /// `DM_DEV_RENAME` with `DM_UUID_FLAG` — attach a uuid to the device
+    /// currently called `name`.
+    ///
+    /// A device created by [`Control::create`] has no uuid;  this is the
+    /// only way to give it one, and the kernel permits it exactly once —
+    /// a device that already has a uuid cannot have it changed.
+    ///
+    /// # Errors
+    ///
+    /// As [`Control::rename`], plus the kernel's `InvalidInput`
+    /// (`EINVAL`) if the device already has a uuid.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: panics only if the kernel returned fewer than
+    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
+    /// indicate a kernel bug.
+    pub fn set_uuid(&self, name: &str, uuid: &str) -> io::Result<Device> {
+        self.rename_inner(name, uuid, true)
+    }
+
+    /// `DM_LIST_VERSIONS` — every target type this kernel has registered,
+    /// with its version.
+    ///
+    /// Lets a caller check a target is available before building a table
+    /// for it, rather than discovering it via `EINVAL` from
+    /// `DM_TABLE_LOAD`. Targets are registered on module load, so a target
+    /// whose module is not yet loaded will not appear.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: panics only if the kernel returned fewer than
+    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
+    /// indicate a kernel bug.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if it rejects the query.
+    pub fn list_versions(&self) -> io::Result<Vec<TargetVersion>> {
+        let buf = ioctl_with_growing_buffer(
+            &self.0,
+            |fd, h| crate::uapi::DM_LIST_VERSIONS.ioctl(fd, h),
+            DmHeader::any(),
+            &[],
+            4096,
+        )?;
+        Ok(parse_versions(&buf))
+    }
+
     /// `DM_LIST_DEVICES` — every registered dm device, each paired with a
     /// ready-to-use handle.
     ///
@@ -181,6 +304,63 @@ impl Control {
             end,
             control: Arc::clone(&self.0),
         })
+    }
+}
+
+/// One registered dm target type and its version, from
+/// [`Control::list_versions`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TargetVersion {
+    /// The kernel `target_type` name, e.g. `"linear"` — matches
+    /// [`crate::Target::NAME`].
+    pub name: String,
+    /// The target's `[major, minor, patch]` version.
+    pub version: [u32; 3],
+}
+
+/// Parses `DM_LIST_VERSIONS`' response into [`TargetVersion`]s.
+///
+/// The payload is a chain of `struct dm_target_versions`: a `u32` `next`
+/// (byte offset from *this* record's start to the following one, 0 on the
+/// last), a `u32[3]` version, then a NUL-terminated name. Split out from
+/// [`Control::list_versions`] so it is unit-testable against a synthetic
+/// buffer, and every read is bounded by the actual buffer.
+fn parse_versions(buf: &[u8]) -> Vec<TargetVersion> {
+    let (header, _): (&DmHeader, _) =
+        zerocopy::FromBytes::ref_from_prefix(buf).expect("buf is at least DmHeader::SIZE bytes");
+    let end = (header.data_size() as usize).min(buf.len());
+    let mut offset = (header.data_start() as usize).min(buf.len());
+
+    let mut out = Vec::new();
+    loop {
+        // `next` plus the three version words must both be present.
+        let Some(name_start) = offset.checked_add(16) else {
+            return out;
+        };
+        if offset >= end || name_start > buf.len() {
+            return out;
+        }
+        let record = &buf[offset..];
+        let next = u32::from_ne_bytes(record[0..4].try_into().unwrap());
+        let version = [
+            u32::from_ne_bytes(record[4..8].try_into().unwrap()),
+            u32::from_ne_bytes(record[8..12].try_into().unwrap()),
+            u32::from_ne_bytes(record[12..16].try_into().unwrap()),
+        ];
+        let name_bytes = &buf[name_start..end.max(name_start)];
+        let nul = name_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(name_bytes.len());
+        out.push(TargetVersion {
+            name: String::from_utf8_lossy(&name_bytes[..nul]).into_owned(),
+            version,
+        });
+
+        if next == 0 {
+            return out;
+        }
+        offset = offset.saturating_add(next as usize);
     }
 }
 
@@ -274,6 +454,90 @@ mod tests {
 
     fn dummy_control() -> Arc<File> {
         Arc::new(File::open("/dev/null").expect("/dev/null always exists"))
+    }
+
+    /// Hand-builds a synthetic `DM_LIST_VERSIONS` response: a chain of
+    /// `dm_target_versions` records whose `next` is relative to *that
+    /// record's own* start (the same convention as `dm_name_list`).
+    #[allow(clippy::cast_possible_truncation)] // test fixture, sizes are tiny
+    fn synthetic_versions_response(entries: &[(&str, [u32; 3])]) -> Vec<u8> {
+        let start = DmHeader::SIZE;
+        let lens: Vec<usize> = entries
+            .iter()
+            .map(|(name, _)| (16 + name.len() + 1).next_multiple_of(8))
+            .collect();
+        let payload_len: usize = lens.iter().sum();
+        let mut buf = vec![0u8; start + payload_len];
+        buf[16..20].copy_from_slice(&(start as u32).to_ne_bytes());
+        buf[12..16].copy_from_slice(&((start + payload_len) as u32).to_ne_bytes());
+
+        let mut offset = start;
+        for (i, (name, version)) in entries.iter().enumerate() {
+            let next = if i == entries.len() - 1 {
+                0
+            } else {
+                lens[i] as u32
+            };
+            buf[offset..offset + 4].copy_from_slice(&next.to_ne_bytes());
+            for (v, word) in version.iter().enumerate() {
+                let off = offset + 4 + v * 4;
+                buf[off..off + 4].copy_from_slice(&word.to_ne_bytes());
+            }
+            buf[offset + 16..offset + 16 + name.len()].copy_from_slice(name.as_bytes());
+            offset += lens[i];
+        }
+        buf
+    }
+
+    #[test]
+    fn parse_versions_reads_a_single_record() {
+        let buf = synthetic_versions_response(&[("linear", [1, 4, 0])]);
+        assert_eq!(
+            parse_versions(&buf),
+            [TargetVersion {
+                name: "linear".to_string(),
+                version: [1, 4, 0],
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_versions_follows_next_relative_to_current_record() {
+        let buf = synthetic_versions_response(&[
+            ("linear", [1, 4, 0]),
+            ("striped", [1, 6, 0]),
+            ("thin-pool", [1, 23, 0]),
+        ]);
+        let got: Vec<(String, [u32; 3])> = parse_versions(&buf)
+            .into_iter()
+            .map(|t| (t.name, t.version))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("linear".to_string(), [1, 4, 0]),
+                ("striped".to_string(), [1, 6, 0]),
+                ("thin-pool".to_string(), [1, 23, 0]),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_versions_yields_nothing_for_an_empty_list() {
+        assert_eq!(parse_versions(&synthetic_versions_response(&[])), []);
+    }
+
+    #[test]
+    fn parse_versions_stops_on_a_truncated_final_record() {
+        // `data_size` claims a record the buffer doesn't actually hold: the
+        // 16-byte-header guard must stop rather than slice out of bounds.
+        let mut buf = vec![0u8; DmHeader::SIZE + 8];
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            buf[16..20].copy_from_slice(&(DmHeader::SIZE as u32).to_ne_bytes());
+            buf[12..16].copy_from_slice(&((DmHeader::SIZE + 100) as u32).to_ne_bytes());
+        }
+        assert_eq!(parse_versions(&buf), []);
     }
 
     #[test]
