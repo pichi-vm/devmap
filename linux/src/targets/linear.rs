@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{ParseError, RawInfo, Target, parse_device};
+use crate::table::{NoInfo, ParseError, Target, parse_device};
 
 /// Maps straight through to another device at a sector offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,7 +20,7 @@ pub struct Linear {
 impl Target for Linear {
     const NAME: &'static str = "linear";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = NoInfo;
 }
 impl fmt::Display for Linear {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

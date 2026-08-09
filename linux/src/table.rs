@@ -83,9 +83,9 @@ pub(crate) fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T
 /// The uninterpreted params of a target whose typed status this crate
 /// doesn't model. Its [`FromStr`] never fails.
 ///
-/// This is what every in-tree target sets [`Target::Info`] to: none of
-/// their `STATUSTYPE_INFO` grammars are modelled yet, so [`Row::parse`] on
-/// an info row hands back the raw string.
+/// Every in-tree target now models both of its status grammars, so this
+/// exists for out-of-tree targets that would rather take the raw string
+/// than write a parser.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RawInfo(pub String);
 
@@ -93,6 +93,40 @@ impl FromStr for RawInfo {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(RawInfo(s.to_owned()))
+    }
+}
+
+impl fmt::Display for RawInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The [`Target::Info`] of a target with no runtime status: the kernel
+/// emits an empty params field for it.
+///
+/// Six in-tree targets report nothing — `linear`, `unstriped`, `zero`,
+/// `error`, `flakey`, and `snapshot-origin`. Parsing rejects a non-empty
+/// row rather than ignoring it, so a kernel that grew a status for one of
+/// these surfaces as a parse failure instead of silently reporting
+/// "nothing to see".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct NoInfo;
+
+impl FromStr for NoInfo {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.trim().is_empty() {
+            Ok(NoInfo)
+        } else {
+            Err(ParseError)
+        }
+    }
+}
+
+impl fmt::Display for NoInfo {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Ok(())
     }
 }
 
@@ -471,6 +505,17 @@ impl<'a> Params<'a> {
         self.0.next().ok_or(ParseError)
     }
 
+    /// The next token as a `used/total` pair — the shape several status
+    /// grammars use to report usage (era and thin-pool metadata, snapshot
+    /// exception store).
+    pub(crate) fn fraction<T: FromStr>(&mut self) -> Result<(T, T), ParseError> {
+        let (used, total) = self.token()?.split_once('/').ok_or(ParseError)?;
+        Ok((
+            used.parse().map_err(|_| ParseError)?,
+            total.parse().map_err(|_| ParseError)?,
+        ))
+    }
+
     /// The next token, if any, without consuming a failure.
     pub(crate) fn optional(&mut self) -> Option<&'a str> {
         self.0.next()
@@ -808,19 +853,19 @@ mod tests {
     fn info_row_parse_of_non_matching_type_is_none() {
         // An info row reports runtime status, never a target's ctor params;
         // parsing it as a different target's Info must yield None on a
-        // type-name mismatch (RawInfo's own FromStr is infallible, so the
-        // guard is the type_name check).
-        let (bytes, count) = synthetic_table_status_response(&[(b"raid", "raid1 2 AA 1.0 idle 0")]);
+        // type-name mismatch, before the params are even looked at.
+        let params = "raid1 2 AA 4096/4096 idle 0 0 -";
+        let (bytes, count) = synthetic_table_status_response(&[(b"raid", params)]);
         let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count)
             .next()
             .expect("one row");
         assert_eq!(row.type_name(), "raid");
-        // Matching type: RawInfo captures the raw status string.
-        assert_eq!(
-            row.parse::<targets::Raid>(),
-            Some(RawInfo("raid1 2 AA 1.0 idle 0".to_owned()))
-        );
-        // Non-matching type: None.
+        // Matching type: the row decodes into raid's typed Info.
+        let info = row.parse::<targets::Raid>().expect("raid info parses");
+        assert_eq!(info.devices.len(), 2);
+        assert_eq!(info.to_string(), params);
+        // Non-matching type: None, even though linear's Info would happily
+        // parse an empty string — the type-name guard runs first.
         assert_eq!(row.parse::<Linear>(), None);
     }
 

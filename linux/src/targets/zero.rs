@@ -6,7 +6,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::table::{ParseError, RawInfo, Target};
+use crate::table::{NoInfo, ParseError, Target};
 
 /// Discards writes, returns zeroed reads. No parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -14,7 +14,7 @@ pub struct Zero;
 impl Target for Zero {
     const NAME: &'static str = "zero";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = NoInfo;
 }
 impl fmt::Display for Zero {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {

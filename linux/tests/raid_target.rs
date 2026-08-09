@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
 use devmap_linux::targets::Raid;
-use devmap_linux::targets::raid::{DevicePair, Type};
+use devmap_linux::targets::raid::{DeviceHealth, DevicePair, Type};
 
 #[test]
 fn raid1_mirrors_writes_across_two_devices() {
@@ -83,4 +83,27 @@ fn raid1_mirrors_writes_across_two_devices() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].type_name(), "raid");
     assert_eq!(rows[0].to_string(), format!("0 {length} raid {written}"));
+
+    // The INFO grammar is a different shape entirely: per-device health
+    // characters packed into a single token whose length is set by the
+    // device count preceding it, then sync progress and state.
+    let info: Vec<_> = removed.info().expect("DM_TABLE_STATUS (info)").collect();
+    assert_eq!(info.len(), 1);
+    let status = info[0]
+        .parse::<Raid>()
+        .expect("the raid info grammar must parse");
+    assert_eq!(status.raid_type, "raid1");
+    assert_eq!(
+        status.devices.len(),
+        2,
+        "two mirror legs, one health char each"
+    );
+    assert!(
+        !status.devices.contains(&DeviceHealth::Dead),
+        "a freshly built mirror has no failed leg: {status:?}"
+    );
+    assert_eq!(status.sync_total, length, "sync covers the whole array");
+    assert_eq!(status.mismatches, 0);
+    // Parsing is faithful: the value renders back to the kernel's line.
+    assert_eq!(info[0].to_string(), format!("0 {length} raid {status}"));
 }

@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{Params, ParseError, Target};
 
 /// One `<device, offset, delay>` leg of a [`Delay`] mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -50,7 +50,7 @@ pub struct Delay {
 impl Target for Delay {
     const NAME: &'static str = "delay";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Delay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -102,6 +102,38 @@ impl FromStr for Delay {
         };
         p.end()?;
         Ok(Delay { read, write, flush })
+    }
+}
+
+/// [`Delay`]'s runtime status: the I/O it has delayed so far, counted per
+/// direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Info {
+    /// Reads delayed.
+    pub read_ops: u32,
+    /// Writes delayed.
+    pub write_ops: u32,
+    /// Flushes delayed.
+    pub flush_ops: u32,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.read_ops, self.write_ops, self.flush_ops)
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let info = Info {
+            read_ops: p.value()?,
+            write_ops: p.value()?,
+            flush_ops: p.value()?,
+        };
+        p.end()?;
+        Ok(info)
     }
 }
 

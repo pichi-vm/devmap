@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{Params, ParseError, Target};
 
 /// Backing store kind for a [`Writecache`] cache device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,7 +82,7 @@ impl Writecache {
 impl Target for Writecache {
     const NAME: &'static str = "writecache";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Writecache {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -186,6 +186,96 @@ impl Builder {
             high_watermark_percent: self.high_watermark_percent,
             low_watermark_percent: self.low_watermark_percent,
         }
+    }
+}
+
+/// [`Writecache`]'s runtime status: cache occupancy plus fourteen
+/// counters covering hit rates and why writes took each path.
+///
+/// Every field is a plain counter; the kernel emits them positionally in
+/// exactly the order below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Info {
+    /// Whether the cache device has taken an I/O error. Once set, the
+    /// target is degraded.
+    pub has_error: bool,
+    /// Cache blocks in total.
+    pub blocks: u64,
+    /// Cache blocks currently free.
+    pub free_blocks: u64,
+    /// Cache blocks currently being written back to the origin.
+    pub writeback_blocks: u64,
+    /// Reads served.
+    pub reads: u64,
+    /// Reads that hit the cache.
+    pub read_hits: u64,
+    /// Writes served.
+    pub writes: u64,
+    /// Writes that hit an uncommitted cache entry.
+    pub write_hits_uncommitted: u64,
+    /// Writes that hit a committed cache entry.
+    pub write_hits_committed: u64,
+    /// Writes sent straight to the origin, bypassing the cache.
+    pub writes_around: u64,
+    /// Writes that had to allocate a new cache block.
+    pub writes_allocate: u64,
+    /// Writes that stalled waiting for a block to be freed. Persistently
+    /// non-zero means writeback is not keeping up.
+    pub writes_blocked_on_freelist: u64,
+    /// Flushes served.
+    pub flushes: u64,
+    /// Discards served.
+    pub discards: u64,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            u32::from(self.has_error),
+            self.blocks,
+            self.free_blocks,
+            self.writeback_blocks,
+            self.reads,
+            self.read_hits,
+            self.writes,
+            self.write_hits_uncommitted,
+            self.write_hits_committed,
+            self.writes_around,
+            self.writes_allocate,
+            self.writes_blocked_on_freelist,
+            self.flushes,
+            self.discards
+        )
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        // The kernel prints the error field as a signed count rather than
+        // a flag, so treat any non-zero value as "errored".
+        let has_error = p.value::<i64>()? != 0;
+        let info = Info {
+            has_error,
+            blocks: p.value()?,
+            free_blocks: p.value()?,
+            writeback_blocks: p.value()?,
+            reads: p.value()?,
+            read_hits: p.value()?,
+            writes: p.value()?,
+            write_hits_uncommitted: p.value()?,
+            write_hits_committed: p.value()?,
+            writes_around: p.value()?,
+            writes_allocate: p.value()?,
+            writes_blocked_on_freelist: p.value()?,
+            flushes: p.value()?,
+            discards: p.value()?,
+        };
+        p.end()?;
+        Ok(info)
     }
 }
 

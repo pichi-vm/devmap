@@ -9,7 +9,7 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap_linux::targets::{Thin, ThinPool};
+use devmap_linux::targets::{Thin, ThinPool, thin, thin_pool};
 
 #[test]
 fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
@@ -77,6 +77,48 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     file.read_exact(&mut readback).expect("read back");
     assert_eq!(readback, pattern);
     drop(file); // DM_DEV_REMOVE fails with EBUSY while the device node is open
+
+    // The thin volume reports how much it has actually provisioned, which
+    // is far less than its nominal size — that is the whole point of thin
+    // provisioning.
+    let thin_info: Vec<_> = thin_removed.info().expect("thin info").collect();
+    assert_eq!(thin_info.len(), 1);
+    let thin_status = thin_info[0].parse::<Thin>().expect("thin info parses");
+    let thin::Info::Mapped { mapped_sectors, .. } = thin_status else {
+        panic!("a live thin volume must report as mapped, got {thin_status:?}");
+    };
+    assert!(
+        mapped_sectors > 0,
+        "the 4 KiB written above must be provisioned"
+    );
+
+    // The pool's own status is the nine-field grammar, whose every field
+    // the kernel terminates with a space — including the last.
+    let pool_info: Vec<_> = pool_removed.info().expect("pool info").collect();
+    assert_eq!(pool_info.len(), 1);
+    let pool_status = pool_info[0]
+        .parse::<ThinPool>()
+        .expect("thin-pool info parses");
+    let thin_pool::Info::Active {
+        used_data_blocks,
+        total_data_blocks,
+        access_mode,
+        needs_check,
+        ..
+    } = pool_status
+    else {
+        panic!("a healthy pool must not report Fail");
+    };
+    assert!(used_data_blocks > 0, "the thin write consumed a data block");
+    assert!(used_data_blocks <= total_data_blocks);
+    assert_eq!(access_mode, thin_pool::AccessMode::ReadWrite);
+    assert!(!needs_check, "a freshly formatted pool is clean");
+    // Faithful: the parsed value renders back to the kernel's own line.
+    let pool_sectors = 32 * 1024 * 1024 / 512;
+    assert_eq!(
+        pool_info[0].to_string(),
+        format!("0 {pool_sectors} thin-pool {pool_status}")
+    );
 
     // Thin devices must be removed before their pool.
     devmap_linux::Device::from(thin_removed)

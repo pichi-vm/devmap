@@ -7,7 +7,7 @@ use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{Params, ParseError, Target};
 
 /// [`Integrity`]'s write mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -113,7 +113,7 @@ impl Target for Integrity {
     const NAME: &'static str = "integrity";
     // The one target whose read shape isn't its write shape — see `Table`.
     type Table = Table;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Integrity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -399,6 +399,51 @@ impl Builder {
             internal_hash: self.internal_hash,
             allow_discards: self.allow_discards,
         }
+    }
+}
+
+/// [`Integrity`]'s runtime status: how many integrity checks have failed,
+/// the usable capacity, and any recalculation in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Info {
+    /// Integrity check failures detected since the device was loaded.
+    /// Non-zero means data corruption was found.
+    pub mismatches: u64,
+    /// The usable data capacity in 512-byte sectors, after the space the
+    /// target reserves for tags and journal. This is the value a caller
+    /// needs for the full-size table load after first-use formatting.
+    pub provided_data_sectors: u64,
+    /// How far a background tag recalculation has progressed, or `None`
+    /// when none is running — which the kernel renders as `-`.
+    pub recalc_sector: Option<u64>,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.mismatches, self.provided_data_sectors)?;
+        match self.recalc_sector {
+            Some(sector) => write!(f, " {sector}"),
+            None => f.write_str(" -"),
+        }
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let mismatches = p.value()?;
+        let provided_data_sectors = p.value()?;
+        let recalc_sector = match p.token()? {
+            "-" => None,
+            sector => Some(sector.parse().map_err(|_| ParseError)?),
+        };
+        p.end()?;
+        Ok(Info {
+            mismatches,
+            provided_data_sectors,
+            recalc_sector,
+        })
     }
 }
 

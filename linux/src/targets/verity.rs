@@ -7,7 +7,7 @@ use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
 use crate::DevId;
-use crate::table::{Params, ParseError, RawInfo, Target};
+use crate::table::{Params, ParseError, Target};
 
 // Data/hash block size for `Verity`, locked to 4096 rather than exposing
 // every value the kernel target supports.
@@ -73,7 +73,7 @@ pub struct Verity {
 impl Target for Verity {
     const NAME: &'static str = "verity";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = Info;
 }
 impl fmt::Display for Verity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -122,6 +122,53 @@ impl FromStr for Verity {
             algorithm,
             digest,
             salt,
+        })
+    }
+}
+
+/// [`Verity`]'s runtime status: whether the mapping has ever failed a
+/// hash check, and how much forward error correction has repaired.
+///
+/// The corruption flag is sticky — once dm-verity has seen a bad block it
+/// reports corrupted for the life of the mapping, even if every later
+/// read verifies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Info {
+    /// Whether a hash mismatch has been detected (the kernel's `C`, as
+    /// opposed to `V` for verified).
+    pub corrupted: bool,
+    /// Blocks repaired by forward error correction, or `None` when FEC is
+    /// not configured — which the kernel renders as `-`.
+    pub fec_corrected: Option<u64>,
+}
+
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_char(if self.corrupted { 'C' } else { 'V' })?;
+        match self.fec_corrected {
+            Some(n) => write!(f, " {n}"),
+            None => f.write_str(" -"),
+        }
+    }
+}
+
+impl FromStr for Info {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Params::new(s);
+        let corrupted = match p.token()? {
+            "V" => false,
+            "C" => true,
+            _ => return Err(ParseError),
+        };
+        let fec_corrected = match p.token()? {
+            "-" => None,
+            n => Some(n.parse().map_err(|_| ParseError)?),
+        };
+        p.end()?;
+        Ok(Info {
+            corrupted,
+            fec_corrected,
         })
     }
 }

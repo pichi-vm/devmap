@@ -5,7 +5,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use crate::table::{ParseError, RawInfo, Target};
+use crate::table::{NoInfo, ParseError, Target};
 
 /// Returns I/O errors for the whole range. No parameters. (The kernel
 /// target is named `error`.)
@@ -14,7 +14,7 @@ pub struct Error;
 impl Target for Error {
     const NAME: &'static str = "error";
     type Table = Self;
-    type Info = RawInfo;
+    type Info = NoInfo;
 }
 impl fmt::Display for Error {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {

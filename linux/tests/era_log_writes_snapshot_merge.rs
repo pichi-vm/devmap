@@ -9,7 +9,6 @@ mod common;
 use std::io::Write;
 
 use common::{LoopDevice, ensure_module_loaded, open_control};
-use devmap_linux::RawInfo;
 use devmap_linux::targets::snapshot::{self, Snapshot};
 use devmap_linux::targets::{Era, LogWrites};
 
@@ -211,19 +210,15 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         let status = origin_removed.status().expect("DM_DEV_STATUS");
         assert_eq!(status.target_count(), 1);
         let reported: Vec<_> = origin_removed.info().expect("DM_TABLE_STATUS").collect();
-        // snapshot-merge's runtime status isn't typed by this crate, so it
-        // parses back as `RawInfo` — the merge-completion check reads the
-        // raw status string directly.
-        if let Some(RawInfo(params)) = reported[0].parse::<snapshot::Merge>() {
-            let mut nums = params
-                .split(['/', ' '])
-                .filter_map(|tok| tok.parse::<u64>().ok());
-            if let (Some(allocated), Some(_total), Some(metadata)) =
-                (nums.next(), nums.next(), nums.next())
-                && allocated == metadata
-            {
-                break;
-            }
+        // The merge is done once nothing but metadata is left allocated.
+        if let Some(snapshot::Info::Usage {
+            allocated_sectors,
+            metadata_sectors,
+            ..
+        }) = reported[0].parse::<snapshot::Merge>()
+            && allocated_sectors == metadata_sectors
+        {
+            break;
         }
         assert!(
             std::time::Instant::now() < deadline,
