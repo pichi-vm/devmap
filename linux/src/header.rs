@@ -182,6 +182,12 @@ impl DmHeader {
         self.target_count = count;
     }
 
+    /// Set the event number `DM_DEV_WAIT` blocks against — the ioctl
+    /// returns once the device's event counter has advanced past this.
+    pub(crate) fn set_event_nr(&mut self, event_nr: u32) {
+        self.event_nr = event_nr;
+    }
+
     /// Test-only: overwrite the raw `flags` word, simulating what the kernel
     /// writes back (e.g. `DM_BUFFER_FULL_FLAG`). Not part of the normal API —
     /// production code never sets arbitrary flags.

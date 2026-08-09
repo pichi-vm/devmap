@@ -111,3 +111,9 @@ pub(crate) const DM_TABLE_STATUS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(12) };
 pub(crate) const DM_TARGET_MSG: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(14) };
+pub(crate) const DM_DEV_WAIT: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(8) };
+pub(crate) const DM_TABLE_CLEAR: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(10) };
+pub(crate) const DM_TABLE_DEPS: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(11) };

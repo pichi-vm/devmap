@@ -12,8 +12,9 @@ use std::sync::Arc;
 use crate::header::DmHeader;
 use crate::table::{Row, TableBuilder, mode};
 use crate::uapi::{
-    DM_ACTIVE_PRESENT_FLAG, DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_INACTIVE_PRESENT_FLAG,
-    DM_IOCTL_VERSION_MAJOR, DM_READONLY_FLAG, DM_SUSPEND_FLAG, DM_UEVENT_GENERATED_FLAG,
+    DM_ACTIVE_PRESENT_FLAG, DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT,
+    DM_INACTIVE_PRESENT_FLAG, DM_IOCTL_VERSION_MAJOR, DM_READONLY_FLAG, DM_SUSPEND_FLAG,
+    DM_TABLE_CLEAR, DM_UEVENT_GENERATED_FLAG,
 };
 
 /// A device-mapper device's `(major, minor)` identity — a block device
@@ -221,6 +222,75 @@ impl Device {
         Ok(Status::from_header(&header))
     }
 
+    /// `DM_DEV_WAIT` — block until the device's event counter advances
+    /// past `event_nr`, then return the new [`Status`].
+    ///
+    /// dm devices raise an event on table changes and on target-specific
+    /// progress: a snapshot-merge finishing, a raid resync or reshape
+    /// completing, a thin-pool crossing its low-water mark. Pass the
+    /// `event_nr` from an earlier [`Status`] and this sleeps in the kernel
+    /// until something happens, rather than spinning on [`Device::status`].
+    ///
+    /// Because the wait is against a *previously observed* counter, there
+    /// is no lost-wakeup window: an event that fires between the status
+    /// read and this call has already advanced the counter, so the ioctl
+    /// returns immediately.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if it rejects the wait (e.g. `ENXIO` if
+    /// the device is gone). Interrupted by a signal surfaces as
+    /// `ErrorKind::Interrupted` (`ERESTARTSYS`).
+    pub fn wait_event(&self, event_nr: u32) -> io::Result<Status> {
+        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        header.set_event_nr(event_nr);
+        DM_DEV_WAIT.ioctl(&*self.control, &mut header)?;
+        check_version(&header)?;
+        Ok(Status::from_header(&header))
+    }
+
+    /// `DM_TABLE_CLEAR` — discard the staged inactive table, leaving the
+    /// active one untouched.
+    ///
+    /// Without this the only way to abandon a table that was loaded but
+    /// not yet resumed is to activate it or tear the device down.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if it rejects the clear. Clearing when no
+    /// inactive table is staged is not an error.
+    pub fn clear_inactive_table(&self) -> io::Result<()> {
+        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        DM_TABLE_CLEAR.ioctl(&*self.control, &mut header)?;
+        check_version(&header)
+    }
+
+    /// `DM_TABLE_DEPS` — the block devices the active table depends on.
+    ///
+    /// One entry per distinct device the table opens, which is what a
+    /// caller needs to tear a stack down in the right order, or to check
+    /// nothing else is still holding a lower device.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: panics only if the kernel returned fewer than
+    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
+    /// indicate a kernel bug.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if it rejects the query.
+    pub fn deps(&self) -> io::Result<Vec<DevId>> {
+        let buf = crate::control::ioctl_with_growing_buffer(
+            &self.control,
+            |fd, h| crate::uapi::DM_TABLE_DEPS.ioctl(fd, h),
+            DmHeader::by_dev(self.dev_t.to_dev_t()),
+            &[],
+            4096,
+        )?;
+        Ok(parse_deps(&buf))
+    }
+
     /// `DM_TABLE_STATUS` in table mode (`STATUSTYPE_TABLE`) — the active
     /// table's construction params, one [`Row<mode::Spec>`] per target.
     /// Reconstruct a target with [`Row::parse`].
@@ -313,6 +383,37 @@ impl Device {
         )?;
         Ok(parse_message_reply(&buf))
     }
+}
+
+/// Extracts `DM_TABLE_DEPS`' device list from a response buffer. Split
+/// out from [`Device::deps`] so the parsing logic is unit-testable
+/// against a synthetic buffer, without a real ioctl.
+///
+/// The payload is a `struct dm_target_deps`: a `u32` count, a `u32` of
+/// padding, then that many `u64` `dev_t`s. Every read is bounded by the
+/// actual buffer, so a truncated or malformed response yields a short
+/// list rather than a panicking slice.
+fn parse_deps(buf: &[u8]) -> Vec<DevId> {
+    let (parsed, _): (&DmHeader, _) =
+        zerocopy::FromBytes::ref_from_prefix(buf).expect("buf is at least DmHeader::SIZE bytes");
+    let start = (parsed.data_start() as usize).min(buf.len());
+    // The count and its padding word must both be present.
+    let Some(first) = start.checked_add(8) else {
+        return Vec::new();
+    };
+    if first > buf.len() {
+        return Vec::new();
+    }
+    let count = u32::from_ne_bytes(buf[start..start + 4].try_into().unwrap()) as usize;
+    // Trust the count only as far as the buffer actually reaches.
+    let available = (buf.len() - first) / 8;
+    (0..count.min(available))
+        .map(|i| {
+            let off = first + i * 8;
+            let dev = u64::from_ne_bytes(buf[off..off + 8].try_into().unwrap());
+            DevId::from_dev_t(dev)
+        })
+        .collect()
 }
 
 /// Extracts `DM_TARGET_MSG`'s reply string (if any) from a response
@@ -558,6 +659,61 @@ mod tests {
         }
         buf[DmHeader::SIZE..].copy_from_slice(reply);
         buf
+    }
+
+    /// Hand-builds a synthetic `DM_TABLE_DEPS` response: `data_start`
+    /// pointing at a `struct dm_target_deps` (count, padding, then the
+    /// `dev_t` array). `claimed_count` is written into the count field
+    /// independently of how many devices are actually appended, so the
+    /// truncation guard can be exercised.
+    #[allow(clippy::cast_possible_truncation)] // test fixture, sizes are tiny
+    fn synthetic_deps_response(claimed_count: u32, devs: &[u64]) -> Vec<u8> {
+        let total = DmHeader::SIZE + 8 + devs.len() * 8;
+        let mut buf = vec![0u8; total];
+        buf[16..20].copy_from_slice(&(DmHeader::SIZE as u32).to_ne_bytes());
+        buf[12..16].copy_from_slice(&(total as u32).to_ne_bytes());
+        buf[DmHeader::SIZE..DmHeader::SIZE + 4].copy_from_slice(&claimed_count.to_ne_bytes());
+        for (i, dev) in devs.iter().enumerate() {
+            let off = DmHeader::SIZE + 8 + i * 8;
+            buf[off..off + 8].copy_from_slice(&dev.to_ne_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn parse_deps_reads_the_device_array() {
+        let devs = [
+            DevId::new(7, 0).unwrap().to_dev_t(),
+            DevId::new(252, 5).unwrap().to_dev_t(),
+        ];
+        let buf = synthetic_deps_response(2, &devs);
+        assert_eq!(
+            parse_deps(&buf),
+            [DevId::new(7, 0).unwrap(), DevId::new(252, 5).unwrap()]
+        );
+    }
+
+    #[test]
+    fn parse_deps_yields_nothing_for_an_empty_list() {
+        assert_eq!(parse_deps(&synthetic_deps_response(0, &[])), []);
+    }
+
+    #[test]
+    fn parse_deps_clamps_a_count_past_the_buffer_end() {
+        // The kernel claims 100 devices but only one is present: reading
+        // all 100 would slice out of bounds.
+        let buf = synthetic_deps_response(100, &[DevId::new(7, 0).unwrap().to_dev_t()]);
+        assert_eq!(parse_deps(&buf), [DevId::new(7, 0).unwrap()]);
+    }
+
+    #[test]
+    fn parse_deps_handles_a_response_with_no_room_for_the_count() {
+        // data_start at the very end of the buffer: not even the count and
+        // its padding word fit.
+        let mut buf = vec![0u8; DmHeader::SIZE];
+        #[allow(clippy::cast_possible_truncation)]
+        buf[16..20].copy_from_slice(&(DmHeader::SIZE as u32).to_ne_bytes());
+        assert_eq!(parse_deps(&buf), []);
     }
 
     #[test]
