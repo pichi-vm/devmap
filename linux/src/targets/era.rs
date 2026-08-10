@@ -4,9 +4,11 @@
 //! since a given "era", for incremental backup.
 
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 
 use crate::DevId;
+use crate::LiveTarget;
 use crate::table::{Params, ParseError, Target};
 
 /// Tracks which blocks of `origin` have changed since which "era", for
@@ -100,6 +102,27 @@ impl FromStr for Info {
             current_era,
             held_metadata_root,
         })
+    }
+}
+
+/// Messages to a live [`Era`], via
+/// [`Device::target`](crate::Device::target).
+impl LiveTarget<'_, Era> {
+    /// `checkpoint` — begin a new era, so subsequent writes are stamped
+    /// with a higher era number.
+    pub fn checkpoint(&self) -> io::Result<()> {
+        self.send("checkpoint").map(drop)
+    }
+
+    /// `take_metadata_snap` — pin a metadata snapshot so userspace can read
+    /// the change map offline.
+    pub fn take_metadata_snap(&self) -> io::Result<()> {
+        self.send("take_metadata_snap").map(drop)
+    }
+
+    /// `drop_metadata_snap` — release the pinned metadata snapshot.
+    pub fn drop_metadata_snap(&self) -> io::Result<()> {
+        self.send("drop_metadata_snap").map(drop)
     }
 }
 

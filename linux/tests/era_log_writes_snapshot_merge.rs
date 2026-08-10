@@ -48,11 +48,8 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
 
     // `checkpoint` may or may not bump the era counter on this call (the
     // kernel doc explicitly says not to assume it will), but it must not
-    // error, and it produces no reply string.
-    let reply = removed
-        .message(0, "checkpoint")
-        .expect("checkpoint message");
-    assert_eq!(reply, None);
+    // error. Driven through the typed live-target handle.
+    removed.target::<Era>(0).checkpoint().expect("checkpoint");
 }
 
 #[test]
@@ -94,11 +91,11 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
         .expect("write to logged device");
     file.sync_all().expect("fsync");
 
-    // Marking a point in the log must succeed and produce no reply.
-    let reply = removed
-        .message(0, "mark after-write")
-        .expect("mark message");
-    assert_eq!(reply, None);
+    // Marking a point in the log must succeed. Driven through the handle.
+    removed
+        .target::<LogWrites>(0)
+        .mark("after-write")
+        .expect("mark");
 }
 
 /// Exercises `snapshot::Merge`'s real handover procedure end to

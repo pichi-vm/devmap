@@ -4,9 +4,11 @@
 //! regular block device.
 
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 
 use crate::DevId;
+use crate::LiveTarget;
 use crate::table::{Params, ParseError, Target};
 
 /// Exposes a zoned block device (ZBC/ZAC/ZNS) as a regular block
@@ -133,6 +135,16 @@ impl FromStr for Info {
             cache,
             devices,
         })
+    }
+}
+
+/// Messages to a live [`Zoned`], via
+/// [`Device::target`](crate::Device::target).
+impl LiveTarget<'_, Zoned> {
+    /// `reclaim` — trigger zone reclaim, migrating data out of buffer
+    /// zones so they can be freed for reuse.
+    pub fn reclaim(&self) -> io::Result<()> {
+        self.send("reclaim").map(drop)
     }
 }
 

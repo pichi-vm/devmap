@@ -7,10 +7,11 @@
 use std::fmt;
 use std::fs::File;
 use std::io;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::table::{Row, TableBuilder, mode};
+use crate::table::{Row, TableBuilder, Target, mode};
 use crate::uapi::{
     DM_ACTIVE_PRESENT_FLAG, DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT,
     DM_INACTIVE_PRESENT_FLAG, DM_IOCTL_VERSION_MAJOR, DM_READONLY_FLAG, DM_SUSPEND_FLAG,
@@ -343,9 +344,30 @@ impl Device {
         ))
     }
 
+    /// A handle to the target of kind `T` occupying `sector` of this
+    /// device's active table — the surface for reading that target's
+    /// runtime status and sending it messages.
+    ///
+    /// This is the write-and-read counterpart of [`Row::parse`]: where
+    /// `parse` interprets a status row as kind `T`, this interprets a live
+    /// region of the device as kind `T`. Naming the kind is the caller's
+    /// assertion; the kernel rejects a message aimed at the wrong target.
+    /// Message verbs live on the per-kind impls in [`crate::targets`] — a
+    /// kind with no messages simply has none.
+    #[must_use]
+    pub fn target<T: Target>(&self, sector: u64) -> LiveTarget<'_, T> {
+        LiveTarget {
+            device: self,
+            sector,
+            _kind: PhantomData,
+        }
+    }
+
     /// `DM_TARGET_MSG` — send a target-specific message string to whichever
     /// target covers `sector` in this device's active table. Returns the
     /// reply string if the target produced one (most messages don't).
+    ///
+    /// Prefer the typed verbs on [`Device::target`]; this is the raw path.
     ///
     /// # Errors
     ///
@@ -382,6 +404,63 @@ impl Device {
             4096,
         )?;
         Ok(parse_message_reply(&buf))
+    }
+}
+
+/// A handle to one target within a live device's active table, at a known
+/// sector and of a known kind `T`. Obtained from [`Device::target`].
+///
+/// The read face is [`info`](LiveTarget::info), shared by every kind. The
+/// write face is each kind's messages, added as inherent methods on
+/// `LiveTarget<'_, ThatKind>` in [`crate::targets`]; a kind with no
+/// messages simply has no such methods.
+#[derive(Debug)]
+pub struct LiveTarget<'d, T> {
+    device: &'d Device,
+    sector: u64,
+    // `fn() -> T` so the handle is Send/Sync and doesn't borrow T's
+    // auto-traits — T is only a kind tag, never stored.
+    _kind: PhantomData<fn() -> T>,
+}
+
+impl<'d, T> LiveTarget<'d, T> {
+    /// The device this target belongs to.
+    #[must_use]
+    pub fn device(&self) -> &'d Device {
+        self.device
+    }
+
+    /// The sector this target sits at in the device's table.
+    #[must_use]
+    pub fn sector(&self) -> u64 {
+        self.sector
+    }
+
+    /// Send a raw message to this target. The typed verbs in
+    /// [`crate::targets`] are thin wrappers over this.
+    pub(crate) fn send(&self, message: &str) -> io::Result<Option<String>> {
+        self.device.message(self.sector, message)
+    }
+}
+
+impl<T: Target> LiveTarget<'_, T> {
+    /// Read this target's runtime status (`STATUSTYPE_INFO`), parsed as
+    /// [`Target::Info`].
+    ///
+    /// Returns `Ok(None)` if no target of kind `T` covers this sector —
+    /// the region is a different target, or the status didn't parse.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if the status query fails.
+    pub fn info(&self) -> io::Result<Option<T::Info>> {
+        for row in self.device.info()? {
+            let covers = self.sector >= row.start() && self.sector < row.start() + row.length();
+            if covers {
+                return Ok(row.parse::<T>());
+            }
+        }
+        Ok(None)
     }
 }
 

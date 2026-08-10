@@ -4,9 +4,11 @@
 //! persistent memory) in front of a slower origin device.
 
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 
 use crate::DevId;
+use crate::LiveTarget;
 use crate::table::{Params, ParseError, Target};
 
 /// Backing store kind for a [`Writecache`] cache device.
@@ -276,6 +278,32 @@ impl FromStr for Info {
         };
         p.end()?;
         Ok(info)
+    }
+}
+
+/// Messages to a live [`Writecache`], via
+/// [`Device::target`](crate::Device::target).
+impl LiveTarget<'_, Writecache> {
+    /// `flush` — write every dirty cache block back to the origin now.
+    pub fn flush(&self) -> io::Result<()> {
+        self.send("flush").map(drop)
+    }
+
+    /// `flush_on_suspend` — arm a flush to run on the next suspend.
+    pub fn flush_on_suspend(&self) -> io::Result<()> {
+        self.send("flush_on_suspend").map(drop)
+    }
+
+    /// `cleaner` — enter cleaner mode: flush everything and stop caching,
+    /// so the cache can be detached.
+    pub fn cleaner(&self) -> io::Result<()> {
+        self.send("cleaner").map(drop)
+    }
+
+    /// `clear_stats` — reset the hit/miss counters
+    /// [`info`](crate::LiveTarget::info) reports.
+    pub fn clear_stats(&self) -> io::Result<()> {
+        self.send("clear_stats").map(drop)
     }
 }
 

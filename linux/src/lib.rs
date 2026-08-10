@@ -77,7 +77,7 @@ pub mod targets;
 mod uapi;
 
 pub use control::{Control, TargetVersion};
-pub use device::{DevId, Device, Removed, Status};
+pub use device::{DevId, Device, LiveTarget, Removed, Status};
 pub use table::{NoInfo, ParseError, RawInfo, Row, TableBuilder, Target, mode};
 
 /// The primary handles are cheap to clone and safe to share across

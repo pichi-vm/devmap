@@ -4,9 +4,11 @@
 //! fault-injection testing.
 
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 
 use crate::DevId;
+use crate::LiveTarget;
 use crate::table::{Params, ParseError, Target};
 
 /// Injects read/write errors at specific blocks, for fault-injection
@@ -121,6 +123,58 @@ impl FromStr for Info {
             read_behavior,
             verbosity,
         })
+    }
+}
+
+/// Messages to a live [`Dust`], via
+/// [`Device::target`](crate::Device::target). Bad-block injection is
+/// entirely message-driven.
+impl LiveTarget<'_, Dust> {
+    /// `addbadblock <block>` — mark a block bad.
+    pub fn add_bad_block(&self, block: u64) -> io::Result<()> {
+        self.send(&format!("addbadblock {block}")).map(drop)
+    }
+
+    /// `removebadblock <block>` — unmark a block.
+    pub fn remove_bad_block(&self, block: u64) -> io::Result<()> {
+        self.send(&format!("removebadblock {block}")).map(drop)
+    }
+
+    /// `clearbadblocks` — clear the entire bad-block list.
+    pub fn clear_bad_blocks(&self) -> io::Result<()> {
+        self.send("clearbadblocks").map(drop)
+    }
+
+    /// `countbadblocks` — how many blocks are currently marked bad.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error`, or an error if the reply can't be parsed.
+    pub fn count_bad_blocks(&self) -> io::Result<u64> {
+        // The kernel replies "countbadblocks: <n> badblock(s) found".
+        let reply = self
+            .send("countbadblocks")?
+            .ok_or_else(|| io::Error::other("countbadblocks: no reply"))?;
+        reply
+            .split_whitespace()
+            .nth(1)
+            .and_then(|tok| tok.parse().ok())
+            .ok_or_else(|| io::Error::other(format!("countbadblocks: unexpected reply {reply:?}")))
+    }
+
+    /// `enable` — start failing reads that land on a bad block.
+    pub fn enable(&self) -> io::Result<()> {
+        self.send("enable").map(drop)
+    }
+
+    /// `disable` — bypass bad blocks so reads pass through.
+    pub fn disable(&self) -> io::Result<()> {
+        self.send("disable").map(drop)
+    }
+
+    /// `quiet` — toggle suppression of per-event logging.
+    pub fn quiet(&self) -> io::Result<()> {
+        self.send("quiet").map(drop)
     }
 }
 

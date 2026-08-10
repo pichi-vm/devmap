@@ -4,9 +4,11 @@
 //! a separate log device, for crash-consistency testing.
 
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 
 use crate::DevId;
+use crate::LiveTarget;
 use crate::table::{Params, ParseError, Target};
 
 /// Logs every write to `device` into `log_device`, for crash-consistency
@@ -84,6 +86,16 @@ impl FromStr for Info {
             highest_sector,
             logging_disabled,
         })
+    }
+}
+
+/// Messages to a live [`LogWrites`], via
+/// [`Device::target`](crate::Device::target).
+impl LiveTarget<'_, LogWrites> {
+    /// `mark <description>` — record a named point in the write log, so a
+    /// replay tool can roll the origin forward to exactly here.
+    pub fn mark(&self, description: &str) -> io::Result<()> {
+        self.send(&format!("mark {description}")).map(drop)
     }
 }
 

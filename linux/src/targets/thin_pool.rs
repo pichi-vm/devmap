@@ -4,10 +4,11 @@
 //! thin-provisioned volumes.
 
 use std::fmt;
+use std::io;
 use std::str::FromStr;
 
-use crate::DevId;
 use crate::table::{Params, ParseError, Target};
+use crate::{DevId, LiveTarget};
 
 /// A thin-provisioning pool backing zero or more [`crate::targets::Thin`] devices.
 /// Provisioning (`create_thin`/`create_snap`/`delete`) is
@@ -155,6 +156,62 @@ impl FromStr for ThinPool {
         }
         p.end()?;
         Ok(pool)
+    }
+}
+
+/// Messages to a live [`ThinPool`] — thin provisioning is driven entirely
+/// through these, not through table reloads. Reach them via
+/// [`Device::target`](crate::Device::target):
+///
+/// ```no_run
+/// # use devmap_linux::{Device, targets::ThinPool};
+/// # fn f(pool: &Device) -> std::io::Result<()> {
+/// pool.target::<ThinPool>(0).create_thin(0)?;
+/// # Ok(()) }
+/// ```
+impl LiveTarget<'_, ThinPool> {
+    /// `create_thin <dev_id>` — provision a new thin volume with this id,
+    /// ready to be mapped with a [`crate::targets::Thin`] table.
+    pub fn create_thin(&self, dev_id: u32) -> io::Result<()> {
+        self.send(&format!("create_thin {dev_id}")).map(drop)
+    }
+
+    /// `create_snap <dev_id> <origin_id>` — snapshot the thin volume
+    /// `origin_id` into a new volume `dev_id`.
+    pub fn create_snap(&self, dev_id: u32, origin_id: u32) -> io::Result<()> {
+        self.send(&format!("create_snap {dev_id} {origin_id}"))
+            .map(drop)
+    }
+
+    /// `delete <dev_id>` — delete a thin volume from the pool.
+    pub fn delete(&self, dev_id: u32) -> io::Result<()> {
+        self.send(&format!("delete {dev_id}")).map(drop)
+    }
+
+    /// `set_transaction_id <current> <new>` — advance the pool's
+    /// transaction id, a compare-and-swap userspace uses to fence its own
+    /// metadata operations.
+    pub fn set_transaction_id(&self, current: u64, new: u64) -> io::Result<()> {
+        self.send(&format!("set_transaction_id {current} {new}"))
+            .map(drop)
+    }
+
+    /// `reserve_metadata_snap` — pin a metadata snapshot for offline
+    /// inspection and return the block it was reserved at.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error`, or an error if the reply is missing or
+    /// unparsable.
+    pub fn reserve_metadata_snap(&self) -> io::Result<u64> {
+        self.send("reserve_metadata_snap")?
+            .and_then(|reply| reply.trim().parse().ok())
+            .ok_or_else(|| io::Error::other("reserve_metadata_snap: no block in reply"))
+    }
+
+    /// `release_metadata_snap` — release the pinned metadata snapshot.
+    pub fn release_metadata_snap(&self) -> io::Result<()> {
+        self.send("release_metadata_snap").map(drop)
     }
 }
 
