@@ -37,13 +37,12 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .expect("DM_TABLE_LOAD pool");
     pool_removed.resume().expect("resume pool");
 
-    let reply = pool_removed
-        .message(0, "create_thin 0")
-        .expect("create_thin message");
-    assert_eq!(
-        reply, None,
-        "create_thin produces no reply string on success"
-    );
+    // Provision the volume through the typed live-target handle rather
+    // than a raw message string.
+    pool_removed
+        .target::<ThinPool>(0)
+        .create_thin(0)
+        .expect("create_thin");
 
     let thin_name = format!("devmap-test-thin-{}", std::process::id());
     let thin_removed = control.create(&thin_name).expect("DM_DEV_CREATE thin");

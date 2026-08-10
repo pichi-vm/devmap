@@ -4,9 +4,11 @@
 //! kernel's MD raid personalities.
 
 use std::fmt::{self, Write as _};
+use std::io;
 use std::str::FromStr;
 
 use crate::DevId;
+use crate::LiveTarget;
 use crate::table::{Params, ParseError, Target, parse_device};
 
 /// One `(metadata device, data device)` pair of a [`Raid`] mapping.
@@ -370,6 +372,42 @@ impl FromStr for Info {
             data_offset,
             journal,
         })
+    }
+}
+
+/// Messages to a live [`Raid`] array, via
+/// [`Device::target`](crate::Device::target). These drive the sync thread;
+/// its progress shows up in [`Info::sync_action`].
+impl LiveTarget<'_, Raid> {
+    /// `idle` — stop the running sync thread.
+    pub fn idle(&self) -> io::Result<()> {
+        self.send("idle").map(drop)
+    }
+
+    /// `frozen` — freeze sync activity until told otherwise.
+    pub fn frozen(&self) -> io::Result<()> {
+        self.send("frozen").map(drop)
+    }
+
+    /// `resync` — (re)start a resync of the array's redundancy.
+    pub fn resync(&self) -> io::Result<()> {
+        self.send("resync").map(drop)
+    }
+
+    /// `recover` — (re)start recovery onto a replaced or added device.
+    pub fn recover(&self) -> io::Result<()> {
+        self.send("recover").map(drop)
+    }
+
+    /// `check` — scrub the array, counting mismatches without fixing them
+    /// (see [`Info::mismatches`]).
+    pub fn check(&self) -> io::Result<()> {
+        self.send("check").map(drop)
+    }
+
+    /// `repair` — scrub the array and repair any mismatches found.
+    pub fn repair(&self) -> io::Result<()> {
+        self.send("repair").map(drop)
     }
 }
 
