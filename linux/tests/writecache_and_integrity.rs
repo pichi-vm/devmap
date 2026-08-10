@@ -69,36 +69,33 @@ fn integrity_first_use_format_then_reload_sequence() {
     let backing = LoopDevice::create("integrity", 32 * 1024 * 1024);
     let backing_device = control.by_node(&backing.path).expect("by_node backing");
 
+    let target = Integrity::builder(backing_device.id(), 0, Mode::Journaled)
+        .internal_hash("sha256")
+        .build();
+
+    // Format for first use and get the usable capacity back — the whole
+    // two-step dance, done with no external tool.
+    let format_name = format!("devmap-test-integrity-fmt-{}", std::process::id());
+    let provided_data_sectors = target
+        .format(&control, &format_name, &backing.path)
+        .expect("Integrity::format");
+    assert!(
+        provided_data_sectors > 0,
+        "the formatted device must report a usable capacity"
+    );
+    // The reserved journal and tag space means usable is strictly less
+    // than the raw device.
+    assert!(
+        provided_data_sectors < 32 * 1024 * 1024 / 512,
+        "usable capacity must be under the raw device size"
+    );
+
+    // Load the real table at the capacity the format reported.
     let name = format!("devmap-test-integrity-{}", std::process::id());
     let removed = control.create(&name).expect("DM_DEV_CREATE");
-
-    let target = || {
-        Integrity::builder(backing_device.id(), 0, Mode::Journaled)
-            .internal_hash("sha256")
-            .build()
-    };
-
-    // First load: 1-sector table lets the kernel format the (all-zero)
-    // superblock rather than rejecting a mismatched size outright.
     removed
         .builder()
-        .add(0, 1, target())
-        .expect("add integrity")
-        .load()
-        .expect("DM_TABLE_LOAD (format)");
-    removed.resume().expect("resume (format)");
-    removed.suspend().expect("suspend before reload");
-
-    // Reload with a conservative size well under the raw device's sector
-    // count — dm-integrity reserves journal/tag space internally, so the
-    // real `provided_data_sectors` is always smaller than the raw device;
-    // a real caller reads that exact value back from the superblock, but
-    // for this test any value safely inside it is enough to prove the
-    // reload sequence itself works.
-    let real_length = 8 * 1024 * 1024 / 512;
-    removed
-        .builder()
-        .add(0, real_length, target())
+        .add(0, provided_data_sectors, target.clone())
         .expect("add integrity")
         .load()
         .expect("DM_TABLE_LOAD (real size)");
@@ -106,6 +103,8 @@ fn integrity_first_use_format_then_reload_sequence() {
 
     let status = removed.status().expect("DM_DEV_STATUS");
     assert_eq!(status.target_count(), 1);
+
+    let real_length = provided_data_sectors;
 
     // dm-integrity reports the full effective configuration, not the four
     // arguments devmap wrote. `Integrity` renders

@@ -108,6 +108,70 @@ impl Integrity {
     pub fn allow_discards(&self) -> bool {
         self.allow_discards
     }
+
+    /// Format the backing device for first use and return its usable
+    /// `provided_data_sectors` — the length to give the real table load.
+    ///
+    /// dm-integrity can't be brought up in one step: the usable capacity
+    /// depends on the tag and journal space the target reserves, which the
+    /// kernel only computes once it has formatted the device. So this runs
+    /// the sequence the kernel documents, with no external tool:
+    ///
+    /// 1. Zero the superblock so the kernel treats the device as fresh.
+    /// 2. Load a one-sector table under `name` and resume it, which makes
+    ///    the kernel write a superblock sized to `backing`.
+    /// 3. Remove that device and read `provided_data_sectors` back out of
+    ///    the superblock.
+    ///
+    /// Load the real table with `add(0, provided_data_sectors, target)`
+    /// afterward. `backing` is the path of the device this target's
+    /// [`device`](Integrity::device) refers to; it is both formatted and
+    /// read here.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` from any ioctl in the sequence, or the
+    /// underlying error if `backing` can't be zeroed or read.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: panics only if the superblock read returns fewer
+    /// than the 24 bytes every dm-integrity superblock begins with.
+    pub fn format(
+        &self,
+        control: &crate::Control,
+        name: &str,
+        backing: impl AsRef<std::path::Path>,
+    ) -> std::io::Result<u64> {
+        use std::os::unix::fs::FileExt as _;
+
+        let backing = backing.as_ref();
+        // A non-zero, non-magic superblock is rejected outright, so clear
+        // the 8 sectors dm-integrity checks before formatting.
+        crate::format::zero_metadata(backing, crate::format::METADATA_BLOCK_LEN)?;
+
+        // One sector is enough to trigger the format without tripping the
+        // "table longer than the device can provide" check.
+        {
+            let device = control.create(name)?;
+            device.builder().add(0, 1, self.clone())?.load()?;
+            device.resume()?;
+            // `device` drops here, removing the temporary mapping; the
+            // superblock it wrote persists on `backing`.
+        }
+
+        // provided_data_sectors is a little-endian u64 at offset 16 of the
+        // superblock — after magic[8], version, log2_interleave_sectors,
+        // tag_size (u16), and journal_sections (u32).
+        let file = std::fs::File::open(backing)?;
+        let mut sb = [0u8; 24];
+        file.read_exact_at(&mut sb, 0)?;
+        Ok(u64::from_le_bytes(
+            sb[16..24]
+                .try_into()
+                .expect("24-byte read covers offset 16"),
+        ))
+    }
 }
 impl Target for Integrity {
     const NAME: &'static str = "integrity";

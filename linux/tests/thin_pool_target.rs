@@ -125,3 +125,54 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .remove()
         .expect("remove thin device");
 }
+
+#[test]
+fn zero_metadata_lets_a_stale_metadata_device_self_format() {
+    let Some(control) = open_control() else {
+        return;
+    };
+    ensure_module_loaded("dm-thin-pool");
+
+    let metadata = LoopDevice::create("thinpool-fmt-meta", 8 * 1024 * 1024);
+    let data = LoopDevice::create("thinpool-fmt-data", 32 * 1024 * 1024);
+
+    // Seed the metadata device with stale, non-zero bytes so the test
+    // can't pass merely because a fresh loop device already reads as zero
+    // — zero_metadata has to do real work here.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&metadata.path)
+        .and_then(|f| {
+            use std::os::unix::fs::FileExt as _;
+            f.write_all_at(&[0xABu8; 4096], 0)
+        })
+        .expect("seed stale metadata");
+
+    let metadata_device = control.by_node(&metadata.path).expect("by_node metadata");
+    let data_device = control.by_node(&data.path).expect("by_node data");
+    let build = || ThinPool::builder(metadata_device.id(), data_device.id(), 128, 32).build();
+
+    // Formatting is just zeroing the metadata block; the kernel then
+    // writes a fresh superblock and brings the pool up on the next load.
+    devmap_linux::format::zero_metadata(&metadata.path, devmap_linux::format::METADATA_BLOCK_LEN)
+        .expect("zero_metadata");
+
+    let name = format!("devmap-test-thinpool-fmt-{}", std::process::id());
+    let fresh = control.create(&name).expect("DM_DEV_CREATE");
+    fresh
+        .builder()
+        .add(0, 32 * 1024 * 1024 / 512, build())
+        .expect("add thin-pool")
+        .load()
+        .expect("a zeroed metadata device must load and self-format");
+    fresh.resume().expect("resume");
+
+    let info: Vec<_> = fresh.info().expect("pool info").collect();
+    assert!(
+        matches!(
+            info[0].parse::<ThinPool>(),
+            Some(thin_pool::Info::Active { .. })
+        ),
+        "the self-formatted pool must come up active"
+    );
+}
