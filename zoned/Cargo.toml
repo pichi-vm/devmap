@@ -1,0 +1,13 @@
+[package]
+name = "devmap-zoned"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Builder for the dm-zoned on-disk metadata format (a pure-Rust dmzadm)."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+keywords = ["dm-zoned", "zoned", "device-mapper", "zbc", "smr"]
+categories = ["filesystem"]
+
+[lints]
+workspace = true
