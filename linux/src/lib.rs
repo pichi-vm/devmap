@@ -70,6 +70,7 @@
 
 mod control;
 mod device;
+pub mod format;
 mod header;
 mod table;
 pub mod targets;
