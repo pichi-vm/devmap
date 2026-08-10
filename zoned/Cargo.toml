@@ -9,5 +9,14 @@ homepage = "https://github.com/pichi-vm/devmap"
 keywords = ["dm-zoned", "zoned", "device-mapper", "zbc", "smr"]
 categories = ["filesystem"]
 
+# The zone-geometry query (BLKREPORTZONE) and device writes are Linux-only;
+# the format computation in the rest of the crate stays portable.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+# The end-to-end test formats a device and then activates dm-zoned over it.
+devmap-linux = { path = "../linux" }
+
 [lints]
 workspace = true
