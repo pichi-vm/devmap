@@ -24,11 +24,22 @@
 // truncates the u64 generation to u32, matching the kernel passing it into
 // crc32_le's u32 parameter; block sizes are small compile-time constants;
 // and the fixed-slice `try_into().unwrap()`s in from_block cannot panic.
-#![allow(clippy::cast_possible_truncation, clippy::missing_panics_doc)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::missing_panics_doc,
+    clippy::doc_markdown
+)]
 
 mod crc32;
+mod layout;
 
 pub use crc32::crc32_le;
+pub use layout::{FormatOptions, Geometry, Layout, LayoutError};
+
+#[cfg(target_os = "linux")]
+mod device;
+#[cfg(target_os = "linux")]
+pub use device::{FormatError, format, report_zones};
 
 /// The dm-zoned block size. Every metadata unit — superblock, mapping
 /// block, bitmap block — is one of these.

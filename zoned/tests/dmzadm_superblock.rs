@@ -11,6 +11,10 @@
 //! This is the load-bearing correctness check: it proves the non-standard
 //! `crc32_le` and the field offsets reproduce dm-zoned's bytes exactly.
 
+// The generation is 1 here; the u64->u32 CRC seed cast is the deliberate
+// kernel behaviour this crate mirrors.
+#![allow(clippy::cast_possible_truncation)]
+
 use devmap_zoned::{BLOCK_SIZE, Superblock, crc32_le};
 
 /// The captured 512-byte `dmz_super` struct.
