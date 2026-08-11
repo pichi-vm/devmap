@@ -17,6 +17,7 @@ homepage = "https://github.com/pichi-vm/devmap"
 devmap-linux = { path = "linux" }
 devmap-verity = { path = "verity" }
 devmap-zoned = { path = "zoned" }
+devmap-snapshot = { path = "snapshot" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 
@@ -29,7 +30,7 @@ workspace = true
 
 [workspace]
 resolver = "3"
-members = ["linux", "verity", "zoned"]
+members = ["linux", "verity", "zoned", "snapshot"]
 
 # Shared lints for every member. Kept here so a new member picks them up
 # with `[lints] workspace = true` rather than duplicating the block.
