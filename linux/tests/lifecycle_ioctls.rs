@@ -260,6 +260,35 @@ fn list_versions_reports_the_targets_the_kernel_has_registered() {
 }
 
 #[test]
+fn add_raw_loads_a_table_line_from_strings() {
+    let Some(control) = open_control() else {
+        return;
+    };
+
+    let backing = LoopDevice::create("addraw", 8 * 1024 * 1024);
+    let backing_device = control.by_node(&backing.path).expect("by_node backing");
+
+    // Build the linear row as raw strings — the dmsetup-style path, no
+    // typed target involved.
+    let params = format!("{} 0", backing_device.id());
+    let name = format!("devmap-test-addraw-{}", std::process::id());
+    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    removed
+        .builder()
+        .add_raw(0, 8 * 1024 * 1024 / 512, "linear", &params)
+        .expect("add_raw linear")
+        .load()
+        .expect("DM_TABLE_LOAD");
+    removed.resume().expect("resume");
+
+    // The kernel accepts it and reads the same line back.
+    let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].type_name(), "linear");
+    assert_eq!(rows[0].params(), params);
+}
+
+#[test]
 fn wait_event_returns_at_once_when_the_counter_already_differs() {
     let Some(control) = open_control() else {
         return;
