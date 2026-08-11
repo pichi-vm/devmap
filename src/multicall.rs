@@ -21,17 +21,56 @@ fn persona_for(program: &str) -> Option<&'static str> {
 /// a legacy tool, its object word is inserted so `dmsetup create …`
 /// becomes `dmsetup dm create …`, which the parser reads as the `dm`
 /// object. Verb-style tools map by this prepend; option-style ones (e.g.
-/// `dmzadm`) get dedicated translators in their persona.
+/// `dmzadm`) get dedicated translators.
 pub(crate) fn normalize(mut argv: Vec<OsString>) -> Vec<OsString> {
     let program = argv
         .first()
         .and_then(|a| a.to_str())
         .map(basename)
         .unwrap_or_default();
+    if program == "dmzadm" {
+        return translate_dmzadm(argv);
+    }
     if let Some(object) = persona_for(program) {
         argv.insert(1, OsString::from(object));
     }
     argv
+}
+
+/// Translate `dmzadm`'s option-style mode flags into the `zoned` object's
+/// verbs. `dmzadm --format --seq=16 /dev/sdb` becomes
+/// `dmzadm zoned format --seq=16 /dev/sdb`: the leading mode flag is
+/// dropped and `zoned <verb>` inserted; all other arguments (including
+/// `--label=`/`--seq=` value flags the `zoned` parser already accepts)
+/// pass through unchanged. An unrecognised invocation is returned as-is so
+/// the parser reports a normal error.
+fn translate_dmzadm(argv: Vec<OsString>) -> Vec<OsString> {
+    let verb_for = |flag: &str| match flag {
+        "--format" => Some("format"),
+        "--check" => Some("check"),
+        "--start" => Some("start"),
+        "--stop" => Some("stop"),
+        "--status" => Some("status"),
+        _ => None,
+    };
+
+    let mut out = Vec::with_capacity(argv.len() + 2);
+    let mut iter = argv.into_iter();
+    if let Some(program) = iter.next() {
+        out.push(program);
+    }
+    let mut rest: Vec<OsString> = iter.collect();
+    if let Some(pos) = rest
+        .iter()
+        .position(|a| a.to_str().and_then(verb_for).is_some())
+    {
+        let verb = verb_for(rest[pos].to_str().expect("checked above")).expect("checked above");
+        rest.remove(pos);
+        out.push(OsString::from("zoned"));
+        out.push(OsString::from(verb));
+    }
+    out.extend(rest);
+    out
 }
 
 fn basename(path: &str) -> &str {
@@ -71,6 +110,34 @@ mod tests {
                 "abc"
             ]
         );
+    }
+
+    #[test]
+    fn dmzadm_format_translates_to_zoned_format() {
+        assert_eq!(
+            norm(&["/usr/sbin/dmzadm", "--format", "--seq=16", "/dev/sdb"]),
+            [
+                "/usr/sbin/dmzadm",
+                "zoned",
+                "format",
+                "--seq=16",
+                "/dev/sdb"
+            ]
+        );
+    }
+
+    #[test]
+    fn dmzadm_start_translates_and_keeps_the_device() {
+        assert_eq!(
+            norm(&["dmzadm", "--start", "/dev/sdb"]),
+            ["dmzadm", "zoned", "start", "/dev/sdb"]
+        );
+    }
+
+    #[test]
+    fn dmzadm_without_a_mode_flag_is_left_for_the_parser() {
+        // No recognised mode flag: pass through so clap reports the error.
+        assert_eq!(norm(&["dmzadm", "/dev/sdb"]), ["dmzadm", "/dev/sdb"]);
     }
 
     #[test]

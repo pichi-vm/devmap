@@ -23,6 +23,9 @@ pub(crate) enum Object {
     /// dm-verity volumes — the `veritysetup` layer.
     #[command(subcommand)]
     Verity(VerityCmd),
+    /// dm-zoned volumes — the `dmzadm` layer.
+    #[command(subcommand)]
+    Zoned(ZonedCmd),
 }
 
 /// The `dmsetup`-equivalent verbs.
@@ -196,6 +199,65 @@ pub(crate) struct VerityDump {
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct VerityStatus {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+/// The `dmzadm`-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum ZonedCmd {
+    /// Write dm-zoned metadata to a zoned block device.
+    Format(ZonedFormat),
+    /// Validate a zoned device's superblock.
+    Check(ZonedCheck),
+    /// Activate a dm-zoned device over a formatted zoned device.
+    Start(ZonedStart),
+    /// Deactivate a dm-zoned device.
+    Stop(ZonedStop),
+    /// Print a dm-zoned device's runtime status.
+    Status(ZonedStatus),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ZonedFormat {
+    /// Zoned block device to format.
+    pub(crate) device: PathBuf,
+    /// Volume label (truncated to 32 bytes).
+    #[arg(long)]
+    pub(crate) label: Option<String>,
+    /// Sequential zones to reserve for reclaim; defaults to a proportional value.
+    #[arg(long)]
+    pub(crate) seq: Option<u32>,
+    /// Volume UUID (hex or hyphenated); defaults to random.
+    #[arg(long)]
+    pub(crate) uuid: Option<String>,
+    /// Device UUID (hex or hyphenated); defaults to random.
+    #[arg(long)]
+    pub(crate) dev_uuid: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ZonedCheck {
+    /// Zoned block device.
+    pub(crate) device: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ZonedStart {
+    /// Formatted zoned block device.
+    pub(crate) device: PathBuf,
+    /// Name for the mapped device; defaults to `dmz-<basename>`.
+    pub(crate) name: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ZonedStop {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ZonedStatus {
     /// Mapped device name.
     pub(crate) name: String,
 }

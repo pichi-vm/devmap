@@ -4,6 +4,7 @@
 
 mod dm;
 mod verity;
+mod zoned;
 
 use anyhow::Result;
 
@@ -14,5 +15,6 @@ pub(crate) fn run(cli: Cli) -> Result<()> {
     match cli.object {
         Object::Dm(cmd) => dm::run(cmd),
         Object::Verity(cmd) => verity::run(cmd),
+        Object::Zoned(cmd) => zoned::run(cmd),
     }
 }
