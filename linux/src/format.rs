@@ -41,6 +41,10 @@ pub const METADATA_BLOCK_LEN: u64 = 4096;
 ///
 /// The underlying `io::Error` if `path` can't be opened for writing or
 /// the write/sync fails.
+// The chunk length and the per-write `n` are bounded by
+// METADATA_BLOCK_LEN (4096), so the u64<->usize casts here can't truncate
+// on any target this runs on.
+#[allow(clippy::cast_possible_truncation)]
 pub fn zero_metadata(path: impl AsRef<Path>, bytes: u64) -> io::Result<()> {
     let file = OpenOptions::new().write(true).open(path)?;
     // Chunked so a caller passing a large `bytes` doesn't allocate it all
