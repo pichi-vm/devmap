@@ -306,30 +306,53 @@ impl TableBuilder {
     // Table buffers never approach u32::MAX; the kernel's own fields are u32.
     // `target` is taken by value (the builder owns each row's rendering) even
     // though it's only read through `Display`.
-    #[allow(clippy::cast_possible_truncation, clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn add<T: Target + fmt::Display>(
-        mut self,
+        self,
         start: u64,
         length: u64,
         target: T,
     ) -> io::Result<Self> {
-        let name = T::NAME.as_bytes();
+        let mut params = String::new();
+        write!(params, "{target}").expect("Display into String is infallible");
+        self.add_raw(start, length, T::NAME, &params)
+    }
+
+    /// Append a table row from a raw target type name and params string,
+    /// for a target this crate doesn't model — or for loading a table line
+    /// whose type is only known at runtime (a `dmsetup`-style front end).
+    ///
+    /// Prefer [`add`](TableBuilder::add) with a typed [`Target`], which
+    /// renders the params for you; this is the untyped escape hatch.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` if `type_name` is empty, too long, or contains
+    /// whitespace or a NUL, or if `params` contains a NUL (either would
+    /// corrupt the table line the kernel parses).
+    // Table buffers never approach u32::MAX; the kernel's own fields are u32.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn add_raw(
+        mut self,
+        start: u64,
+        length: u64,
+        type_name: &str,
+        params: &str,
+    ) -> io::Result<Self> {
+        let name = type_name.as_bytes();
         if name.is_empty()
             || name.len() >= DM_MAX_TYPE_NAME
             || name.iter().any(|b| *b == 0 || b.is_ascii_whitespace())
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("invalid dm target type name: {:?}", T::NAME),
+                format!("invalid dm target type name: {type_name:?}"),
             ));
         }
-
-        let mut params = String::new();
-        write!(params, "{target}").expect("Display into String is infallible");
         if params.as_bytes().contains(&0) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("target {} rendered an interior NUL in its params", T::NAME),
+                format!("target {type_name} params contain an interior NUL"),
             ));
         }
 
