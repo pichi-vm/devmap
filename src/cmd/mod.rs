@@ -3,6 +3,7 @@
 //! Command handlers, one module per object.
 
 mod dm;
+mod integrity;
 mod verity;
 mod zoned;
 
@@ -16,5 +17,6 @@ pub(crate) fn run(cli: Cli) -> Result<()> {
         Object::Dm(cmd) => dm::run(cmd),
         Object::Verity(cmd) => verity::run(cmd),
         Object::Zoned(cmd) => zoned::run(cmd),
+        Object::Integrity(cmd) => integrity::run(cmd),
     }
 }

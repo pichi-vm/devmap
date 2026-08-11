@@ -13,6 +13,7 @@ fn persona_for(program: &str) -> Option<&'static str> {
     match program {
         "dmsetup" => Some("dm"),
         "veritysetup" => Some("verity"),
+        "integritysetup" => Some("integrity"),
         _ => None,
     }
 }
@@ -108,6 +109,19 @@ mod tests {
                 "v",
                 "hash",
                 "abc"
+            ]
+        );
+    }
+
+    #[test]
+    fn integritysetup_symlink_gets_the_integrity_object_prepended() {
+        assert_eq!(
+            norm(&["/usr/sbin/integritysetup", "format", "/dev/sdb"]),
+            [
+                "/usr/sbin/integritysetup",
+                "integrity",
+                "format",
+                "/dev/sdb"
             ]
         );
     }

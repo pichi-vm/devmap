@@ -26,6 +26,9 @@ pub(crate) enum Object {
     /// dm-zoned volumes — the `dmzadm` layer.
     #[command(subcommand)]
     Zoned(ZonedCmd),
+    /// dm-integrity volumes — the `integritysetup` layer.
+    #[command(subcommand)]
+    Integrity(IntegrityCmd),
 }
 
 /// The `dmsetup`-equivalent verbs.
@@ -258,6 +261,65 @@ pub(crate) struct ZonedStop {
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct ZonedStatus {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+/// The `integritysetup`-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum IntegrityCmd {
+    /// Write a dm-integrity superblock sized to the device.
+    Format(IntegrityFormat),
+    /// Activate an integrity device over a formatted device.
+    Open(IntegrityOpen),
+    /// Deactivate an integrity device.
+    Close(IntegrityClose),
+    /// Print an integrity device's runtime status.
+    Status(IntegrityStatus),
+}
+
+/// Shared knobs for `format` and `open`; they MUST match, so the same
+/// fields appear on both (integritysetup takes them on both too).
+#[derive(clap::Args, Debug)]
+pub(crate) struct IntegrityFormat {
+    /// Device to protect.
+    pub(crate) device: PathBuf,
+    /// Internal hash / checksum algorithm.
+    #[arg(long, default_value = "crc32c")]
+    pub(crate) integrity: String,
+    /// Per-block tag size in bytes; omitted lets the kernel derive it.
+    #[arg(long)]
+    pub(crate) tag_size: Option<u32>,
+    /// Allow discards to pass through.
+    #[arg(long)]
+    pub(crate) allow_discards: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct IntegrityOpen {
+    /// Formatted device.
+    pub(crate) device: PathBuf,
+    /// Name for the mapped device.
+    pub(crate) name: String,
+    /// Internal hash / checksum algorithm (must match format).
+    #[arg(long, default_value = "crc32c")]
+    pub(crate) integrity: String,
+    /// Per-block tag size in bytes (must match format).
+    #[arg(long)]
+    pub(crate) tag_size: Option<u32>,
+    /// Allow discards to pass through.
+    #[arg(long)]
+    pub(crate) allow_discards: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct IntegrityClose {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct IntegrityStatus {
     /// Mapped device name.
     pub(crate) name: String,
 }
