@@ -9,6 +9,8 @@
 //! loads) and null_blk with zoned support; skips otherwise.
 
 #![cfg(target_os = "linux")]
+// Bare tool/device names (null_blk, dmzadm) read fine unquoted here.
+#![allow(clippy::doc_markdown)]
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
