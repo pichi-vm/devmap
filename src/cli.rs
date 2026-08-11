@@ -20,6 +20,9 @@ pub(crate) enum Object {
     /// Raw device-mapper operations — the `dmsetup` layer.
     #[command(subcommand)]
     Dm(DmCmd),
+    /// dm-verity volumes — the `veritysetup` layer.
+    #[command(subcommand)]
+    Verity(VerityCmd),
 }
 
 /// The `dmsetup`-equivalent verbs.
@@ -115,4 +118,84 @@ pub(crate) struct Wait {
     pub(crate) name: String,
     /// Wait for an event after this number; defaults to the current one.
     pub(crate) event_nr: Option<u32>,
+}
+
+/// The `veritysetup`-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum VerityCmd {
+    /// Build a hash tree over a data device and write it to a hash device.
+    Format(VerityFormat),
+    /// Activate a verity device from a data device, hash device, and root hash.
+    Open(VerityOpen),
+    /// Deactivate a verity device.
+    Close(VerityClose),
+    /// Recompute the root hash from the data device and compare it.
+    Verify(VerityVerify),
+    /// Print a hash device's superblock fields.
+    Dump(VerityDump),
+    /// Print a verity device's runtime status.
+    Status(VerityStatus),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerityFormat {
+    /// Data device to protect.
+    pub(crate) data_dev: PathBuf,
+    /// Hash device to write the tree to.
+    pub(crate) hash_dev: PathBuf,
+    /// Data block size in bytes.
+    #[arg(long, default_value_t = 4096)]
+    pub(crate) data_block_size: u32,
+    /// Hash block size in bytes.
+    #[arg(long, default_value_t = 4096)]
+    pub(crate) hash_block_size: u32,
+    /// Salt as hex; defaults to 32 random bytes.
+    #[arg(long)]
+    pub(crate) salt: Option<String>,
+    /// UUID (hex or hyphenated); defaults to random.
+    #[arg(long)]
+    pub(crate) uuid: Option<String>,
+    /// Byte offset of the superblock on the hash device.
+    #[arg(long, default_value_t = 0)]
+    pub(crate) hash_offset: u64,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerityOpen {
+    /// Data device.
+    pub(crate) data_dev: PathBuf,
+    /// Name for the new mapped device.
+    pub(crate) name: String,
+    /// Hash device.
+    pub(crate) hash_dev: PathBuf,
+    /// Expected root hash (hex).
+    pub(crate) root_hash: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerityClose {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerityVerify {
+    /// Data device.
+    pub(crate) data_dev: PathBuf,
+    /// Hash device.
+    pub(crate) hash_dev: PathBuf,
+    /// Expected root hash (hex).
+    pub(crate) root_hash: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerityDump {
+    /// Hash device.
+    pub(crate) hash_dev: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct VerityStatus {
+    /// Mapped device name.
+    pub(crate) name: String,
 }

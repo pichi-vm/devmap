@@ -13,8 +13,10 @@
 
 mod cli;
 mod cmd;
+mod hex;
 mod multicall;
 mod table_input;
+mod urandom;
 
 use std::process::ExitCode;
 

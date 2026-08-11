@@ -54,6 +54,31 @@ impl DevId {
         self.minor
     }
 
+    /// The `DevId` of the block device at `path`, read from its `st_rdev`.
+    ///
+    /// A `dmsetup`/`veritysetup`-style front end names backing devices by
+    /// path (`/dev/loop0`, `/dev/sdb`); the kernel table line needs their
+    /// `major:minor`. This stats the path and decodes `st_rdev` with
+    /// [`DevId::from_dev_t`].
+    ///
+    /// # Errors
+    ///
+    /// The underlying `io::Error` if `path` can't be stat'd, or
+    /// `InvalidInput` if it is not a block device (a regular file's
+    /// `st_rdev` is meaningless — catching it here beats loading a table
+    /// that names device `0:0`).
+    pub fn from_path(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
+        let meta = std::fs::metadata(path)?;
+        if !meta.file_type().is_block_device() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a block device",
+            ));
+        }
+        Ok(Self::from_dev_t(meta.rdev()))
+    }
+
     /// Decode a Linux `dev_t` into `(major, minor)`, matching the classic
     /// 32-bit packed encoding device-mapper uses (and glibc's
     /// `gnu_dev_major`/`gnu_dev_minor` within that range): `dev` bits
@@ -674,6 +699,17 @@ mod tests {
             DevId::new(0xfff, 0xf_ffff).is_some(),
             "the maxima are in range"
         );
+    }
+
+    #[test]
+    fn from_path_rejects_a_non_block_device() {
+        // A regular file has a meaningless st_rdev; from_path must refuse it
+        // rather than hand back device 0:0.
+        let path = std::env::temp_dir().join(format!("devmap-devid-{}", std::process::id()));
+        std::fs::write(&path, b"not a block device").expect("seed file");
+        let err = DevId::from_path(&path).expect_err("regular file must be rejected");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

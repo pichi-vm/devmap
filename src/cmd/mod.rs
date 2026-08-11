@@ -3,6 +3,7 @@
 //! Command handlers, one module per object.
 
 mod dm;
+mod verity;
 
 use anyhow::Result;
 
@@ -12,5 +13,6 @@ use crate::cli::{Cli, Object};
 pub(crate) fn run(cli: Cli) -> Result<()> {
     match cli.object {
         Object::Dm(cmd) => dm::run(cmd),
+        Object::Verity(cmd) => verity::run(cmd),
     }
 }
