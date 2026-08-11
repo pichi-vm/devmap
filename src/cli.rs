@@ -29,6 +29,8 @@ pub(crate) enum Object {
     /// dm-integrity volumes — the `integritysetup` layer.
     #[command(subcommand)]
     Integrity(IntegrityCmd),
+    /// Create the legacy-tool symlinks (dmsetup, veritysetup, …) in a directory.
+    InstallLinks(InstallLinks),
 }
 
 /// The `dmsetup`-equivalent verbs.
@@ -322,4 +324,13 @@ pub(crate) struct IntegrityClose {
 pub(crate) struct IntegrityStatus {
     /// Mapped device name.
     pub(crate) name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct InstallLinks {
+    /// Directory to create the symlinks in (e.g. `/usr/local/bin`).
+    pub(crate) dir: PathBuf,
+    /// Replace any existing files at those names.
+    #[arg(long)]
+    pub(crate) force: bool,
 }
