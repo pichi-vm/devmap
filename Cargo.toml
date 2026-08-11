@@ -13,6 +13,17 @@ description = "Command-line front-end for the Linux device-mapper."
 repository = "https://github.com/pichi-vm/devmap"
 homepage = "https://github.com/pichi-vm/devmap"
 
+[dependencies]
+devmap-linux = { path = "linux" }
+devmap-verity = { path = "verity" }
+devmap-zoned = { path = "zoned" }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+# Tests only: the root gate (Control::open) for the CLI integration test.
+[dev-dependencies]
+devmap-linux = { path = "linux" }
+
 [lints]
 workspace = true
 
