@@ -12,6 +12,7 @@ use std::ffi::OsString;
 fn persona_for(program: &str) -> Option<&'static str> {
     match program {
         "dmsetup" => Some("dm"),
+        "veritysetup" => Some("verity"),
         _ => None,
     }
 }
@@ -53,6 +54,22 @@ mod tests {
         assert_eq!(
             norm(&["/usr/bin/dmsetup", "create", "foo"]),
             ["/usr/bin/dmsetup", "dm", "create", "foo"]
+        );
+    }
+
+    #[test]
+    fn veritysetup_symlink_gets_the_verity_object_prepended() {
+        assert_eq!(
+            norm(&["/usr/sbin/veritysetup", "open", "data", "v", "hash", "abc"]),
+            [
+                "/usr/sbin/veritysetup",
+                "verity",
+                "open",
+                "data",
+                "v",
+                "hash",
+                "abc"
+            ]
         );
     }
 
