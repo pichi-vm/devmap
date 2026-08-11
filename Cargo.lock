@@ -151,6 +151,7 @@ dependencies = [
  "anyhow",
  "clap",
  "devmap-linux",
+ "devmap-snapshot",
  "devmap-verity",
  "devmap-zoned",
 ]
@@ -162,6 +163,16 @@ dependencies = [
  "iocuddle",
  "rustix",
  "zerocopy",
+]
+
+[[package]]
+name = "devmap-snapshot"
+version = "0.1.0"
+dependencies = [
+ "devmap-linux",
+ "rustix",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

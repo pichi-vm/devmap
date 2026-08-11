@@ -1,0 +1,27 @@
+[package]
+name = "devmap-snapshot"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Writer and reader for the dm-snapshot persistent COW (exception store) on-disk format."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+keywords = ["dm-snapshot", "snapshot", "device-mapper", "copy-on-write", "cow"]
+categories = ["filesystem"]
+
+[dependencies]
+thiserror = "2"
+
+# The sparse-aware converter uses SEEK_DATA / SEEK_HOLE to skip holes in a
+# raw image; the rest of the crate (the format itself) stays portable.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
+[dev-dependencies]
+tempfile = "3"
+# The end-to-end test activates dm-snapshot over our COW to prove the
+# kernel accepts the format.
+devmap-linux = { path = "../linux" }
+
+[lints]
+workspace = true

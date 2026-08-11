@@ -29,6 +29,9 @@ pub(crate) enum Object {
     /// dm-integrity volumes — the `integritysetup` layer.
     #[command(subcommand)]
     Integrity(IntegrityCmd),
+    /// dm-snapshot persistent COW images.
+    #[command(subcommand)]
+    Snapshot(SnapshotCmd),
     /// Create the legacy-tool symlinks (dmsetup, veritysetup, …) in a directory.
     InstallLinks(InstallLinks),
 }
@@ -324,6 +327,24 @@ pub(crate) struct IntegrityClose {
 pub(crate) struct IntegrityStatus {
     /// Mapped device name.
     pub(crate) name: String,
+}
+
+/// The dm-snapshot COW verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum SnapshotCmd {
+    /// Write a raw image into a dm-snapshot persistent COW.
+    Convert(SnapshotConvert),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct SnapshotConvert {
+    /// Raw source image (all-zero chunks are skipped, layering over a zero origin).
+    pub(crate) raw: PathBuf,
+    /// COW output — a file (truncated) or a block device (written in place).
+    pub(crate) cow: PathBuf,
+    /// COW chunk size in 512-byte sectors (power of two, >= 8).
+    #[arg(long, default_value_t = devmap_snapshot::DEFAULT_CHUNK_SIZE_SECTORS)]
+    pub(crate) chunk_size: u32,
 }
 
 #[derive(clap::Args, Debug)]
