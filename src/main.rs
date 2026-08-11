@@ -17,6 +17,7 @@ mod hex;
 mod multicall;
 mod table_input;
 mod urandom;
+mod uuid;
 
 use std::process::ExitCode;
 

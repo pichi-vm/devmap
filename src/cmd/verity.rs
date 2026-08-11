@@ -16,7 +16,7 @@ use devmap_verity::{Superblock, VerityBuilder, VerityParams, feed_from_reader};
 use crate::cli::{
     VerityClose, VerityCmd, VerityDump, VerityFormat, VerityOpen, VerityStatus, VerityVerify,
 };
-use crate::{hex, urandom};
+use crate::{hex, urandom, uuid};
 
 /// Bytes per sector — the unit of a dm table's start/length.
 const SECTOR: u64 = 512;
@@ -46,8 +46,8 @@ fn format(a: &VerityFormat) -> Result<()> {
         Some(hexstr) => hex::decode(hexstr).context("parse --salt")?,
         None => urandom::bytes(32).context("read random salt")?,
     };
-    let uuid = if let Some(s) = &a.uuid {
-        parse_uuid(s).context("parse --uuid")?
+    let uuid_bytes = if let Some(s) = &a.uuid {
+        uuid::parse(s).context("parse --uuid")?
     } else {
         let bytes = urandom::bytes(16).context("read random uuid")?;
         bytes.try_into().expect("urandom(16) is 16 bytes")
@@ -56,7 +56,7 @@ fn format(a: &VerityFormat) -> Result<()> {
         data_block_size: a.data_block_size,
         hash_block_size: a.hash_block_size,
         salt,
-        uuid,
+        uuid: uuid_bytes,
     };
 
     // Stream the data device through the builder rather than loading it.
@@ -81,7 +81,7 @@ fn format(a: &VerityFormat) -> Result<()> {
 
     let data_blocks = size.div_ceil(u64::from(params.data_block_size));
     println!("VERITY header information for {}", a.hash_dev.display());
-    println!("UUID:            \t{}", format_uuid(&params.uuid));
+    println!("UUID:            \t{}", uuid::format(&params.uuid));
     println!("Hash type:       \t1");
     println!("Data blocks:     \t{data_blocks}");
     println!("Data block size: \t{}", params.data_block_size);
@@ -174,7 +174,7 @@ fn verify(a: &VerityVerify) -> Result<()> {
 fn dump(a: &VerityDump) -> Result<()> {
     let sb = read_superblock(&a.hash_dev)?;
     println!("VERITY header information for {}", a.hash_dev.display());
-    println!("UUID:            \t{}", format_uuid(&sb.uuid));
+    println!("UUID:            \t{}", uuid::format(&sb.uuid));
     println!("Hash type:       \t{}", sb.hash_type);
     println!("Data blocks:     \t{}", sb.data_blocks);
     println!("Data block size: \t{}", sb.data_block_size);
@@ -204,26 +204,4 @@ fn status(a: &VerityStatus) -> Result<()> {
         println!("{}: no verity target at sector 0", a.name);
     }
     Ok(())
-}
-
-/// Format a 16-byte UUID in canonical 8-4-4-4-12 hyphenated form.
-fn format_uuid(uuid: &[u8; 16]) -> String {
-    let h = hex::encode(uuid);
-    format!(
-        "{}-{}-{}-{}-{}",
-        &h[0..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..32]
-    )
-}
-
-/// Parse a UUID given as 32 hex chars or the canonical hyphenated form.
-fn parse_uuid(s: &str) -> Result<[u8; 16]> {
-    let stripped: String = s.chars().filter(|c| *c != '-').collect();
-    let bytes = hex::decode(&stripped)?;
-    bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("uuid must be 16 bytes (32 hex digits)"))
 }
