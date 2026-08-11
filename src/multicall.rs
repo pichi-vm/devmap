@@ -7,6 +7,12 @@
 
 use std::ffi::OsString;
 
+/// Every legacy tool name this binary answers to when symlinked. Kept in
+/// one place so `install-links` creates exactly the set `normalize`
+/// dispatches (the prepend-style personas in [`persona_for`] plus the
+/// option-style `dmzadm` handled by [`translate_dmzadm`]).
+pub(crate) const LEGACY_NAMES: &[&str] = &["dmsetup", "veritysetup", "integritysetup", "dmzadm"];
+
 /// Map a legacy program name to the `devmap` object it fronts. Only tools
 /// whose persona exists are listed; the rest fall through to `devmap`.
 fn persona_for(program: &str) -> Option<&'static str> {
@@ -162,5 +168,22 @@ mod tests {
     #[test]
     fn unknown_program_names_fall_through() {
         assert_eq!(norm(&["whatever", "dm", "ls"]), ["whatever", "dm", "ls"]);
+    }
+
+    #[test]
+    fn every_legacy_name_is_actually_dispatched() {
+        // install-links promises these names work; given each tool's own
+        // invocation, normalize must insert an object word rather than
+        // leave the argv untouched (dmzadm is option-style, so it needs a
+        // mode flag; the others are verb-style).
+        for name in LEGACY_NAMES {
+            let probe = if *name == "dmzadm" { "--format" } else { "status" };
+            let out = norm(&[name, probe, "/dev/x"]);
+            assert_eq!(
+                out.len(),
+                4,
+                "{name} was not dispatched (argv unchanged): {out:?}"
+            );
+        }
     }
 }
