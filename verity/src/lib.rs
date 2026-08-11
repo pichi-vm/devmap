@@ -603,6 +603,105 @@ fn write_superblock(blob: &mut Vec<u8>, params: &VerityParams, data_blocks: u64)
     debug_assert_eq!(blob.len(), VERITY_SB_SIZE, "superblock must be 512 bytes");
 }
 
+/// A dm-verity superblock read back from a hash device.
+///
+/// The write path ([`VerityParams`]/[`VerityBuilder`]) emits this at the
+/// start of the hash device; this reads it back so a `verity open` can
+/// recover the parameters — block sizes, salt, algorithm, data-block count
+/// — needed to reconstruct the kernel table line without the caller
+/// restating them.
+///
+/// Fields are public: the type is the on-disk record.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Superblock {
+    /// Format version (`1` for the current format).
+    pub version: u32,
+    /// Hash type (`1` = normal).
+    pub hash_type: u32,
+    /// The volume UUID.
+    pub uuid: [u8; 16],
+    /// The hash algorithm name, e.g. `"sha256"`.
+    pub algorithm: String,
+    /// Data device block size in bytes.
+    pub data_block_size: u32,
+    /// Hash device block size in bytes.
+    pub hash_block_size: u32,
+    /// Number of data blocks the tree covers.
+    pub data_blocks: u64,
+    /// The salt (raw bytes; `salt_size` bytes of the on-disk field).
+    pub salt: Vec<u8>,
+}
+
+impl Superblock {
+    /// Parse a superblock from the start of a hash device.
+    ///
+    /// # Errors
+    ///
+    /// [`SuperblockError`] if `bytes` is shorter than the 512-byte
+    /// superblock, the signature doesn't match, the algorithm name isn't
+    /// valid UTF-8, or the recorded salt size exceeds the field.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SuperblockError> {
+        if bytes.len() < VERITY_SB_SIZE {
+            return Err(SuperblockError::TooShort);
+        }
+        if &bytes[0..8] != VERITY_SIGNATURE {
+            return Err(SuperblockError::BadSignature);
+        }
+        let u32_at = |off: usize| u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+
+        let algo_field = &bytes[32..32 + VERITY_SB_ALGO_LEN];
+        let algo_nul = algo_field
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(algo_field.len());
+        let algorithm = core::str::from_utf8(&algo_field[..algo_nul])
+            .map_err(|_| SuperblockError::BadAlgorithm)?;
+
+        let salt_size = u16::from_le_bytes(bytes[80..82].try_into().unwrap()) as usize;
+        if salt_size > VERITY_SB_SALT_MAX {
+            return Err(SuperblockError::SaltTooLong);
+        }
+
+        Ok(Superblock {
+            version: u32_at(8),
+            hash_type: u32_at(12),
+            uuid: bytes[16..32].try_into().unwrap(),
+            algorithm: algorithm.to_owned(),
+            data_block_size: u32_at(64),
+            hash_block_size: u32_at(68),
+            data_blocks: u64::from_le_bytes(bytes[72..80].try_into().unwrap()),
+            salt: bytes[88..88 + salt_size].to_vec(),
+        })
+    }
+}
+
+/// Why a block failed to parse as a [`Superblock`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SuperblockError {
+    /// Fewer than 512 bytes were supplied.
+    TooShort,
+    /// The `verity\0\0` signature is absent.
+    BadSignature,
+    /// The algorithm field is not valid UTF-8.
+    BadAlgorithm,
+    /// The recorded salt size exceeds the 256-byte field.
+    SaltTooLong,
+}
+
+impl core::fmt::Display for SuperblockError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            SuperblockError::TooShort => "verity superblock: fewer than 512 bytes",
+            SuperblockError::BadSignature => "not a verity superblock (bad signature)",
+            SuperblockError::BadAlgorithm => "verity superblock: algorithm is not UTF-8",
+            SuperblockError::SaltTooLong => "verity superblock: salt size exceeds 256",
+        })
+    }
+}
+
+impl core::error::Error for SuperblockError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,6 +741,42 @@ mod tests {
             &wrong_full[..],
             &got[..],
             "salt-PREPEND must differ from salt-APPEND"
+        );
+    }
+
+    /// The reader recovers exactly what the writer emitted, so `verity
+    /// open` can reconstruct the table from the hash device alone.
+    #[test]
+    fn superblock_reads_back_what_was_written() {
+        let salt: Vec<u8> = (0..24u8).collect(); // non-32 length, to test salt_size
+        let uuid = [0x5Au8; 16];
+        let params = VerityParams {
+            data_block_size: 4096,
+            hash_block_size: 4096,
+            salt: salt.clone(),
+            uuid,
+        };
+        let out = params.compute(&vec![0u8; 16 * 1024]).unwrap();
+        let sb = Superblock::from_bytes(&out.blob).expect("parse our own superblock");
+        assert_eq!(sb.version, VERITY_FORMAT_VERSION);
+        assert_eq!(sb.hash_type, VERITY_HASH_TYPE_NORMAL);
+        assert_eq!(sb.uuid, uuid);
+        assert_eq!(sb.algorithm, "sha256");
+        assert_eq!(sb.data_block_size, 4096);
+        assert_eq!(sb.hash_block_size, 4096);
+        assert_eq!(sb.data_blocks, 4); // 16 KiB / 4 KiB
+        assert_eq!(sb.salt, salt);
+    }
+
+    #[test]
+    fn superblock_from_bytes_rejects_junk() {
+        assert_eq!(
+            Superblock::from_bytes(&[0u8; 512]),
+            Err(SuperblockError::BadSignature)
+        );
+        assert_eq!(
+            Superblock::from_bytes(&[0u8; 100]),
+            Err(SuperblockError::TooShort)
         );
     }
 
