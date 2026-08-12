@@ -5,9 +5,12 @@
 //! Both versions start with the same six magic bytes and a big-endian `u16`
 //! version, so detection is: match the magic, read the version, dispatch.
 
+pub mod json;
 pub mod luks1;
+pub mod luks2;
 
 pub use luks1::Luks1Header;
+pub use luks2::Luks2Header;
 
 use crate::{Error, LUKS_MAGIC};
 
@@ -21,7 +24,9 @@ pub const DETECT_SIZE: usize = 4096;
 #[non_exhaustive]
 pub enum Header {
     /// A LUKS1 volume.
-    V1(Luks1Header),
+    V1(Box<Luks1Header>),
+    /// A LUKS2 volume.
+    V2(Box<Luks2Header>),
 }
 
 impl Header {
@@ -37,7 +42,8 @@ impl Header {
             return Err(Error::BadMagic);
         }
         match u16::from_be_bytes([raw[6], raw[7]]) {
-            1 => Ok(Header::V1(Luks1Header::parse(raw)?)),
+            1 => Ok(Header::V1(Box::new(Luks1Header::parse(raw)?))),
+            2 => Ok(Header::V2(Box::new(Luks2Header::parse(raw)?))),
             other => Err(Error::BadVersion(other)),
         }
     }
@@ -47,22 +53,31 @@ impl Header {
     pub fn uuid(&self) -> &str {
         match self {
             Header::V1(h) => &h.uuid,
+            Header::V2(h) => &h.uuid,
         }
     }
 
     /// The cipher spec for a dm-crypt table, e.g. `aes-xts-plain64`.
-    #[must_use]
-    pub fn cipher_spec(&self) -> String {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] if a LUKS2 volume declares no data segment.
+    pub fn cipher_spec(&self) -> Result<String, Error> {
         match self {
-            Header::V1(h) => h.cipher_spec(),
+            Header::V1(h) => Ok(h.cipher_spec()),
+            Header::V2(h) => h.cipher_spec(),
         }
     }
 
     /// Byte offset of the encrypted payload within the device.
-    #[must_use]
-    pub fn payload_offset_bytes(&self) -> u64 {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] if a LUKS2 volume declares no data segment.
+    pub fn payload_offset_bytes(&self) -> Result<u64, Error> {
         match self {
-            Header::V1(h) => h.payload_offset_bytes(),
+            Header::V1(h) => Ok(h.payload_offset_bytes()),
+            Header::V2(h) => h.payload_offset_bytes(),
         }
     }
 
@@ -71,6 +86,20 @@ impl Header {
     pub fn key_bytes(&self) -> u32 {
         match self {
             Header::V1(h) => h.key_bytes,
+            Header::V2(h) => h.key_bytes(),
+        }
+    }
+
+    /// The encryption unit in bytes: always a 512-byte sector for LUKS1,
+    /// configurable (commonly 4096) for LUKS2.
+    #[must_use]
+    pub fn sector_size(&self) -> u32 {
+        match self {
+            Header::V1(_) => 512,
+            Header::V2(h) => h
+                .metadata
+                .first_segment()
+                .map_or(512, |segment| segment.sector_size),
         }
     }
 }
