@@ -140,8 +140,112 @@ impl Header {
                 }
                 Err(Error::NoKey)
             }
+            Header::V2(header) => {
+                for (index, slot) in &header.metadata.keyslots {
+                    if slot.kind != "luks2" || slot.af.kind != "luks1" || slot.area.kind != "raw" {
+                        // A slot shape this crate does not implement (e.g. a
+                        // reencryption slot); skip rather than fail, so other
+                        // slots still get a chance.
+                        continue;
+                    }
+                    let Some(digest) = header.metadata.digest_for(index) else {
+                        continue;
+                    };
+                    let hash = crate::Hash::from_spec(&slot.af.hash).ok_or(Error::Unsupported {
+                        what: "af hash",
+                        name: slot.af.hash.clone(),
+                    })?;
+
+                    // Derive the slot key, decrypt the slot's area, merge.
+                    let kdf = kdf_from_spec(&slot.kdf)?;
+                    let slot_key = kdf.derive(passphrase, &slot.kdf.salt, slot.area.key_size)?;
+                    let split_len = slot.key_size * slot.af.stripes;
+                    if u64::try_from(split_len).unwrap_or(u64::MAX) > slot.area.size {
+                        return Err(Error::Malformed(format!(
+                            "keyslot {index} needs {split_len} bytes but its area holds {}",
+                            slot.area.size
+                        )));
+                    }
+                    let mut area = areas.read_at(slot.area.offset, split_len)?;
+                    decrypt_area(&slot.area.encryption, &mut area, slot_key.expose())?;
+
+                    let candidate = af::merge(&area, slot.key_size, slot.af.stripes, hash)
+                        .ok_or_else(|| Error::Malformed("keyslot area is short".to_owned()))?;
+                    let matches = verify_digest(digest, &candidate)?;
+                    let candidate = Secret::new(candidate);
+                    if matches {
+                        return Ok(candidate);
+                    }
+                }
+                Err(Error::NoKey)
+            }
         }
     }
+}
+
+/// Build a [`Kdf`] from a LUKS2 keyslot's JSON parameters.
+fn kdf_from_spec(spec: &crate::header::json::KdfSpec) -> Result<crate::kdf::Kdf, Error> {
+    match spec.kind.as_str() {
+        "argon2i" | "argon2id" => Ok(crate::kdf::Kdf::Argon2 {
+            id: spec.kind == "argon2id",
+            time: spec.time,
+            memory: spec.memory,
+            lanes: spec.cpus,
+        }),
+        "pbkdf2" => {
+            let name = spec.hash.clone().unwrap_or_default();
+            let hash = crate::Hash::from_spec(&name).ok_or(Error::Unsupported {
+                what: "keyslot hash",
+                name,
+            })?;
+            Ok(crate::kdf::Kdf::Pbkdf2 {
+                hash,
+                iterations: spec.iterations,
+            })
+        }
+        other => Err(Error::Unsupported {
+            what: "keyslot kdf",
+            name: other.to_owned(),
+        }),
+    }
+}
+
+/// Check a candidate master key against a LUKS2 digest.
+fn verify_digest(digest: &crate::header::json::Digest, candidate: &[u8]) -> Result<bool, Error> {
+    if digest.kind != "pbkdf2" {
+        return Err(Error::Unsupported {
+            what: "digest",
+            name: digest.kind.clone(),
+        });
+    }
+    let hash = crate::Hash::from_spec(&digest.hash).ok_or(Error::Unsupported {
+        what: "digest hash",
+        name: digest.hash.clone(),
+    })?;
+    let derived = crate::kdf::Kdf::Pbkdf2 {
+        hash,
+        iterations: digest.iterations,
+    }
+    .derive(candidate, &digest.salt, digest.digest.len())?;
+    // Compare every byte, with no early exit.
+    Ok(derived
+        .expose()
+        .iter()
+        .zip(&digest.digest)
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0)
+}
+
+/// Decrypt a keyslot area whose cipher is named by a LUKS2 `encryption`
+/// spec. Only AES-XTS is implemented, which is what cryptsetup writes.
+fn decrypt_area(encryption: &str, area: &mut [u8], key: &[u8]) -> Result<(), Error> {
+    if encryption != "aes-xts-plain64" {
+        return Err(Error::Unsupported {
+            what: "keyslot area cipher",
+            name: encryption.to_owned(),
+        });
+    }
+    decrypt_area_aes_xts(area, key)
 }
 
 #[cfg(test)]

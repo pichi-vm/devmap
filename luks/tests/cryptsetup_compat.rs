@@ -28,26 +28,10 @@ fn have_cryptsetup() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// `cryptsetup luksFormat` a file-backed volume with deliberately cheap KDF
-/// parameters, so the test is fast and reproducible.
-fn format_volume(path: &Path, kind: &str) -> bool {
-    std::fs::File::create(path)
-        .and_then(|f| f.set_len(32 * 1024 * 1024))
-        .expect("create backing file");
-
+/// Run `cryptsetup` with `args`, feeding [`PASSPHRASE`] on stdin.
+fn run_cryptsetup(args: &[&str]) -> bool {
     let out = Command::new("cryptsetup")
-        .args([
-            "luksFormat",
-            "--type",
-            kind,
-            "--batch-mode",
-            "--pbkdf",
-            "pbkdf2",
-            "--pbkdf-force-iterations",
-            "1000",
-        ])
-        .arg(path)
-        .arg("-")
+        .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -57,14 +41,35 @@ fn format_volume(path: &Path, kind: &str) -> bool {
             child.stdin.take().unwrap().write_all(PASSPHRASE)?;
             child.wait_with_output()
         })
-        .expect("run cryptsetup luksFormat");
+        .expect("run cryptsetup");
     if !out.status.success() {
         eprintln!(
-            "skip: luksFormat --type {kind} failed: {}",
+            "cryptsetup {args:?} failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }
     out.status.success()
+}
+
+/// `cryptsetup luksFormat` a file-backed volume with deliberately cheap KDF
+/// parameters, so the test is fast and reproducible.
+fn format_volume(path: &Path, kind: &str) -> bool {
+    std::fs::File::create(path)
+        .and_then(|f| f.set_len(32 * 1024 * 1024))
+        .expect("create backing file");
+
+    run_cryptsetup(&[
+        "luksFormat",
+        "--type",
+        kind,
+        "--batch-mode",
+        "--pbkdf",
+        "pbkdf2",
+        "--pbkdf-force-iterations",
+        "1000",
+        &path.to_string_lossy(),
+        "-",
+    ])
 }
 
 /// The master key `cryptsetup` itself reports, as raw bytes.
@@ -114,41 +119,100 @@ fn hex_bytes(row: &str) -> Vec<u8> {
         .collect()
 }
 
-#[test]
-fn unlocks_a_luks1_volume_cryptsetup_created() {
+/// Format a volume of `kind`, unlock it with this crate, and require the
+/// master key to match the one cryptsetup itself reports.
+fn assert_unlocks(kind: &str, expected_payload_offset: u64) {
     if !have_cryptsetup() {
         eprintln!("skip: cryptsetup not installed");
         return;
     }
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("luks1.img");
-    if !format_volume(&path, "luks1") {
+    let path = dir.path().join(format!("{kind}.img"));
+    if !format_volume(&path, kind) {
         return;
     }
 
     let image = std::fs::read(&path).expect("read volume");
-    let header = Header::parse(&image).expect("parse LUKS1 header");
-    assert_eq!(header.cipher_spec(), "aes-xts-plain64");
+    let header = Header::parse(&image).unwrap_or_else(|e| panic!("parse {kind} header: {e}"));
+    assert_eq!(header.cipher_spec().expect("cipher"), "aes-xts-plain64");
     assert_eq!(header.key_bytes(), 64);
 
     let expected = cryptsetup_master_key(&path);
     let recovered = header
         .unlock(PASSPHRASE, &image.as_slice())
-        .expect("unlock with the correct passphrase");
+        .unwrap_or_else(|e| panic!("unlock {kind} with the correct passphrase: {e}"));
     assert_eq!(
         recovered.expose(),
         expected.as_slice(),
-        "our master key must equal the one cryptsetup reports"
+        "our {kind} master key must equal the one cryptsetup reports"
     );
 
     // The header fields we hand to dm-crypt must agree with cryptsetup's.
-    assert_eq!(header.payload_offset_bytes(), 4096 * 512);
+    assert_eq!(
+        header.payload_offset_bytes().expect("payload offset"),
+        expected_payload_offset
+    );
     assert_eq!(
         header.uuid().len(),
         36,
         "uuid is the canonical hyphenated form: {}",
         header.uuid()
     );
+}
+
+#[test]
+fn unlocks_a_luks1_volume_cryptsetup_created() {
+    // LUKS1 puts the payload at 4096 sectors.
+    assert_unlocks("luks1", 4096 * 512);
+}
+
+#[test]
+fn unlocks_a_luks2_volume_cryptsetup_created() {
+    // LUKS2 defaults to a 16 MiB header + keyslots region.
+    assert_unlocks("luks2", 16 * 1024 * 1024);
+}
+
+#[test]
+fn unlocks_a_luks2_volume_with_an_argon2id_keyslot() {
+    // The default KDF, and the one the other tests deliberately avoid for
+    // speed — so exercise it once with cheap parameters.
+    if !have_cryptsetup() {
+        eprintln!("skip: cryptsetup not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("argon.img");
+    std::fs::File::create(&path)
+        .and_then(|f| f.set_len(32 * 1024 * 1024))
+        .expect("create backing file");
+
+    let ok = run_cryptsetup(&[
+        "luksFormat",
+        "--type",
+        "luks2",
+        "--batch-mode",
+        "--pbkdf",
+        "argon2id",
+        "--pbkdf-force-iterations",
+        "4",
+        "--pbkdf-memory",
+        "32",
+        "--pbkdf-parallel",
+        "1",
+        &path.to_string_lossy(),
+        "-",
+    ]);
+    if !ok {
+        eprintln!("skip: argon2id luksFormat failed");
+        return;
+    }
+
+    let image = std::fs::read(&path).expect("read volume");
+    let header = Header::parse(&image).expect("parse header");
+    let recovered = header
+        .unlock(PASSPHRASE, &image.as_slice())
+        .expect("unlock an argon2id keyslot");
+    assert_eq!(recovered.expose(), cryptsetup_master_key(&path).as_slice());
 }
 
 #[test]
