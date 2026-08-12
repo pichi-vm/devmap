@@ -23,10 +23,15 @@ use anyhow::{Context as _, Result, bail};
 use devmap_linux::targets::Crypt;
 use devmap_linux::targets::crypt::{Key, KeyType};
 use devmap_linux::{Control, DevId, Device};
-use devmap_luks::{Header, MasterKey};
+use devmap_luks::format::{Entropy, FormatOptions, Version};
+use devmap_luks::kdf::Kdf;
+use devmap_luks::{Hash, Header, MasterKey};
 use keyutils::keytypes::{Logon, logon};
 
-use crate::cli::{CryptClose, CryptCmd, CryptDump, CryptOpen, CryptStatus};
+use crate::cli::{
+    CryptClose, CryptCmd, CryptDump, CryptFormat, CryptOpen, CryptStatus, LuksVersion,
+};
+use crate::uuid;
 
 /// Bytes per sector — dm-crypt table offsets and lengths are in sectors.
 const SECTOR: u64 = 512;
@@ -42,6 +47,28 @@ pub(crate) fn run(cmd: CryptCmd) -> Result<()> {
         CryptCmd::Close(a) => close(&a),
         CryptCmd::Status(a) => status(&a),
         CryptCmd::Dump(a) => dump(&a),
+        CryptCmd::Format(a) => format(&a),
+    }
+}
+
+/// Entropy for LUKS formatting, drawn from `/dev/urandom`.
+///
+/// The formatter takes its randomness through this trait rather than
+/// reading the device itself, which keeps the crate testable with a
+/// deterministic stream; the CLI supplies the real source here.
+struct UrandomEntropy(File);
+
+impl UrandomEntropy {
+    fn open() -> Result<Self> {
+        Ok(UrandomEntropy(
+            File::open("/dev/urandom").context("open /dev/urandom")?,
+        ))
+    }
+}
+
+impl Entropy for UrandomEntropy {
+    fn fill(&mut self, buf: &mut [u8]) -> Result<(), devmap_luks::Error> {
+        self.0.read_exact(buf).map_err(devmap_luks::Error::Io)
     }
 }
 
@@ -187,6 +214,104 @@ fn activate(name: &str, length_sectors: u64, target: Crypt) -> Result<()> {
     removed.resume().context("resume")?;
     let _ = Device::from(removed);
     Ok(())
+}
+
+/// PBKDF2 keyslot/digest iterations for `format`.
+///
+/// cryptsetup picks this by benchmarking to a target time; without a
+/// benchmark we use a fixed, deliberately high floor instead.
+const PBKDF2_ITERATIONS: u32 = 500_000;
+
+fn format(a: &CryptFormat) -> Result<()> {
+    let version = match a.r#type {
+        LuksVersion::Luks1 => Version::V1,
+        LuksVersion::Luks2 => Version::V2,
+    };
+
+    // LUKS1 has only PBKDF2 keyslots; refusing an argon2 request there is
+    // less surprising than silently downgrading it, except that argon2id is
+    // our default, so treat the default as "use the version's native KDF".
+    let kdf = if matches!(version, Version::V1) || a.pbkdf == "pbkdf2" {
+        Kdf::Pbkdf2 {
+            hash: Hash::Sha256,
+            iterations: PBKDF2_ITERATIONS,
+        }
+    } else {
+        Kdf::Argon2 {
+            id: a.pbkdf == "argon2id",
+            time: a.iter_time,
+            memory: a.pbkdf_memory,
+            lanes: 4,
+        }
+    };
+
+    let options = FormatOptions {
+        version,
+        key_size: a.key_size,
+        kdf,
+        digest_iterations: PBKDF2_ITERATIONS,
+        uuid: random_uuid()?,
+        label: a.label.clone().unwrap_or_default(),
+        ..FormatOptions::default()
+    };
+
+    let passphrase = read_new_passphrase(a.key_file.as_deref())?;
+
+    let mut device = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&a.device)
+        .with_context(|| format!("open {}", a.device.display()))?;
+    let mut entropy = UrandomEntropy::open()?;
+    let formatted = devmap_luks::format::format(&mut device, &options, &passphrase, &mut entropy)
+        .with_context(|| format!("format {}", a.device.display()))?;
+
+    println!(
+        "Formatted {} as LUKS{}",
+        a.device.display(),
+        header_version(version)
+    );
+    println!("  UUID:           \t{}", options.uuid);
+    println!("  Cipher:         \t{}", options.cipher);
+    println!("  Key size:       \t{} bits", options.key_size * 8);
+    println!(
+        "  Payload offset: \t{} sectors",
+        formatted.payload_offset / SECTOR
+    );
+    Ok(())
+}
+
+/// The LUKS version number for display.
+fn header_version(version: Version) -> u16 {
+    match version {
+        Version::V1 => 1,
+        Version::V2 => 2,
+    }
+}
+
+/// A random version-4 UUID in canonical hyphenated form.
+fn random_uuid() -> Result<String> {
+    let bytes = crate::urandom::bytes(16).context("read random uuid")?;
+    let mut b: [u8; 16] = bytes.try_into().expect("urandom(16) is 16 bytes");
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+    Ok(uuid::format(&b))
+}
+
+/// Read a passphrase for a *new* volume: from a key file, or prompted
+/// twice and confirmed so a typo cannot lock the volume with an unknown
+/// passphrase.
+fn read_new_passphrase(key_file: Option<&Path>) -> Result<Vec<u8>> {
+    if key_file.is_some() {
+        return read_passphrase(key_file);
+    }
+    let first = rpassword::prompt_password("Enter new passphrase: ").context("read passphrase")?;
+    let second =
+        rpassword::prompt_password("Verify passphrase: ").context("read passphrase again")?;
+    if first != second {
+        bail!("passphrases do not match");
+    }
+    Ok(first.into_bytes())
 }
 
 fn close(a: &CryptClose) -> Result<()> {
