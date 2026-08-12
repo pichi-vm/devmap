@@ -237,6 +237,97 @@ fn rejects_a_wrong_passphrase() {
     ));
 }
 
+/// A deterministic entropy stream, so a formatted volume is reproducible.
+struct Counter(u8);
+impl devmap_luks::format::Entropy for Counter {
+    fn fill(&mut self, buf: &mut [u8]) -> Result<(), Error> {
+        for byte in buf.iter_mut() {
+            *byte = self.0;
+            self.0 = self.0.wrapping_add(1);
+        }
+        Ok(())
+    }
+}
+
+/// Create a volume with **our** formatter and require the real
+/// `cryptsetup` to understand it.
+///
+/// This is the safety gate for the write path: our own reader agreeing
+/// with our own writer proves nothing about interoperability, but
+/// `cryptsetup luksDump` parsing the header does.
+fn assert_cryptsetup_reads_our_header(version: devmap_luks::Version, expect: &str) {
+    if !have_cryptsetup() {
+        eprintln!("skip: cryptsetup not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("ours.img");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .expect("create image");
+    file.set_len(64 * 1024 * 1024).expect("size image");
+    let mut file = file;
+
+    let options = devmap_luks::FormatOptions {
+        version,
+        kdf: devmap_luks::kdf::Kdf::Pbkdf2 {
+            hash: devmap_luks::Hash::Sha256,
+            iterations: 1000,
+        },
+        digest_iterations: 1000,
+        uuid: "1b4e28ba-2fa1-11d2-883f-0016d3cca427".to_owned(),
+        ..devmap_luks::FormatOptions::default()
+    };
+    devmap_luks::format::format(&mut file, &options, PASSPHRASE, &mut Counter(1))
+        .expect("format the volume");
+    drop(file);
+
+    let out = Command::new("cryptsetup")
+        .args(["luksDump", &path.to_string_lossy()])
+        .output()
+        .expect("run luksDump");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "cryptsetup must parse the header we wrote: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains(expect), "luksDump output:\n{text}");
+    assert!(
+        text.contains("1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+        "our uuid must survive: {text}"
+    );
+
+    // And it must recover the same master key from our keyslot — proof the
+    // keyslot wrapping, not merely the header layout, is correct.
+    let ours = {
+        let image = std::fs::read(&path).expect("read image");
+        let header = devmap_luks::Header::parse(&image).expect("parse our own header");
+        header
+            .unlock(PASSPHRASE, &image.as_slice())
+            .expect("unlock our own volume")
+    };
+    assert_eq!(
+        ours.expose(),
+        cryptsetup_master_key(&path).as_slice(),
+        "cryptsetup must derive the same master key from our keyslot"
+    );
+}
+
+#[test]
+fn cryptsetup_reads_a_luks1_volume_we_created() {
+    assert_cryptsetup_reads_our_header(devmap_luks::Version::V1, "Version:       \t1");
+}
+
+#[test]
+fn cryptsetup_reads_a_luks2_volume_we_created() {
+    assert_cryptsetup_reads_our_header(devmap_luks::Version::V2, "Version:       \t2");
+}
+
 #[test]
 fn rejects_a_device_that_is_not_luks() {
     let not_luks = vec![0u8; 4096];

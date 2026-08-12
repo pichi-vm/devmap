@@ -28,10 +28,12 @@
 //! crate prints key bytes; keep it that way.
 
 pub mod af;
+pub mod format;
 pub mod header;
 pub mod kdf;
 pub mod unlock;
 
+pub use format::{FormatOptions, Formatted, Version};
 pub use header::{Header, Luks1Header};
 pub use unlock::{KeyslotAreas, MasterKey};
 

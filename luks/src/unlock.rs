@@ -91,6 +91,36 @@ fn decrypt_area_aes_xts(area: &mut [u8], key: &[u8]) -> Result<(), Error> {
     }
 }
 
+/// Encrypt a keyslot area in place with AES-XTS — the exact inverse of
+/// [`decrypt_area_aes_xts`], used when writing a keyslot.
+pub(crate) fn encrypt_area_aes_xts(area: &mut [u8], key: &[u8]) -> Result<(), Error> {
+    let sector_size = usize::try_from(SECTOR_SIZE).expect("512 fits usize");
+    match key.len() {
+        32 => {
+            let (cipher, tweak) = key.split_at(16);
+            let xts = Xts128::new(
+                aes::Aes128::new_from_slice(cipher).map_err(|_| bad_key())?,
+                aes::Aes128::new_from_slice(tweak).map_err(|_| bad_key())?,
+            );
+            xts.encrypt_area(area, sector_size, 0, get_tweak_default);
+            Ok(())
+        }
+        64 => {
+            let (cipher, tweak) = key.split_at(32);
+            let xts = Xts128::new(
+                aes::Aes256::new_from_slice(cipher).map_err(|_| bad_key())?,
+                aes::Aes256::new_from_slice(tweak).map_err(|_| bad_key())?,
+            );
+            xts.encrypt_area(area, sector_size, 0, get_tweak_default);
+            Ok(())
+        }
+        other => Err(Error::Unsupported {
+            what: "aes-xts key size",
+            name: format!("{} bits", other * 8),
+        }),
+    }
+}
+
 fn bad_key() -> Error {
     Error::Unsupported {
         what: "aes key",

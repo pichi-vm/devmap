@@ -343,6 +343,44 @@ pub(crate) enum CryptCmd {
     Status(CryptStatus),
     /// Print a LUKS header's fields (never key material).
     Dump(CryptDump),
+    /// Create a new LUKS volume (like `cryptsetup luksFormat`).
+    Format(CryptFormat),
+}
+
+/// The LUKS version `crypt format` writes.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub(crate) enum LuksVersion {
+    /// LUKS1 — a fixed binary header, PBKDF2 keyslots.
+    Luks1,
+    /// LUKS2 — a binary header plus JSON metadata, argon2id keyslots.
+    Luks2,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CryptFormat {
+    /// The device to turn into a LUKS volume. Its start is overwritten.
+    pub(crate) device: PathBuf,
+    /// The LUKS on-disk format to write.
+    #[arg(long, value_enum, default_value_t = LuksVersion::Luks2)]
+    pub(crate) r#type: LuksVersion,
+    /// Read the passphrase from this file instead of prompting.
+    #[arg(long)]
+    pub(crate) key_file: Option<PathBuf>,
+    /// Master key size in bytes (64 = AES-256-XTS, 32 = AES-128-XTS).
+    #[arg(long, default_value_t = 64)]
+    pub(crate) key_size: usize,
+    /// Volume label (LUKS2 only).
+    #[arg(long)]
+    pub(crate) label: Option<String>,
+    /// Keyslot KDF. LUKS1 always uses pbkdf2 regardless.
+    #[arg(long, value_parser = ["argon2id", "argon2i", "pbkdf2"], default_value = "argon2id")]
+    pub(crate) pbkdf: String,
+    /// argon2 memory cost in KiB (argon2 KDFs only).
+    #[arg(long, default_value_t = 1_048_576)]
+    pub(crate) pbkdf_memory: u32,
+    /// KDF cost: argon2 passes, or PBKDF2 iterations.
+    #[arg(long, default_value_t = 4)]
+    pub(crate) iter_time: u32,
 }
 
 #[derive(clap::Args, Debug)]
