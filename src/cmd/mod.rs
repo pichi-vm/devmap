@@ -2,6 +2,7 @@
 
 //! Command handlers, one module per object.
 
+mod crypt;
 mod dm;
 mod integrity;
 mod links;
@@ -20,6 +21,7 @@ pub(crate) fn run(cli: Cli) -> Result<()> {
         Object::Verity(cmd) => verity::run(cmd),
         Object::Zoned(cmd) => zoned::run(cmd),
         Object::Integrity(cmd) => integrity::run(cmd),
+        Object::Crypt(cmd) => crypt::run(cmd),
         Object::Snapshot(cmd) => snapshot::run(cmd),
         Object::InstallLinks(a) => links::run(&a),
     }
