@@ -18,6 +18,7 @@ devmap-linux = { path = "linux" }
 devmap-verity = { path = "verity" }
 devmap-zoned = { path = "zoned" }
 devmap-snapshot = { path = "snapshot" }
+devmap-luks = { path = "luks" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 
@@ -30,7 +31,7 @@ workspace = true
 
 [workspace]
 resolver = "3"
-members = ["linux", "verity", "zoned", "snapshot"]
+members = ["linux", "verity", "zoned", "snapshot", "luks"]
 
 # Shared lints for every member. Kept here so a new member picks them up
 # with `[lints] workspace = true` rather than duplicating the block.
