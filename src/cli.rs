@@ -29,6 +29,9 @@ pub(crate) enum Object {
     /// dm-integrity volumes — the `integritysetup` layer.
     #[command(subcommand)]
     Integrity(IntegrityCmd),
+    /// LUKS encrypted volumes — the `cryptsetup` layer.
+    #[command(subcommand)]
+    Crypt(CryptCmd),
     /// dm-snapshot persistent COW images.
     #[command(subcommand)]
     Snapshot(SnapshotCmd),
@@ -327,6 +330,53 @@ pub(crate) struct IntegrityClose {
 pub(crate) struct IntegrityStatus {
     /// Mapped device name.
     pub(crate) name: String,
+}
+
+/// The `cryptsetup`-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum CryptCmd {
+    /// Unlock a LUKS volume and activate it as a dm-crypt device.
+    Open(CryptOpen),
+    /// Deactivate a dm-crypt device.
+    Close(CryptClose),
+    /// Print a mapped device's state (never key material).
+    Status(CryptStatus),
+    /// Print a LUKS header's fields (never key material).
+    Dump(CryptDump),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CryptOpen {
+    /// The LUKS volume.
+    pub(crate) device: PathBuf,
+    /// Name for the mapped device under /dev/mapper.
+    pub(crate) name: String,
+    /// Read the passphrase from this file instead of prompting.
+    #[arg(long)]
+    pub(crate) key_file: Option<PathBuf>,
+    /// Allow discards (TRIM) to pass through to the backing device.
+    ///
+    /// This can leak which blocks are unused, so it is off by default.
+    #[arg(long)]
+    pub(crate) allow_discards: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CryptClose {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CryptStatus {
+    /// Mapped device name.
+    pub(crate) name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CryptDump {
+    /// The LUKS volume.
+    pub(crate) device: PathBuf,
 }
 
 /// The dm-snapshot COW verbs.

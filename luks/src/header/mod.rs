@@ -102,6 +102,87 @@ impl Header {
                 .map_or(512, |segment| segment.sector_size),
         }
     }
+
+    /// The IV offset for the dm-crypt table. LUKS1 always starts the IV
+    /// sequence at zero; LUKS2 records it per segment.
+    #[must_use]
+    pub fn iv_tweak(&self) -> u64 {
+        match self {
+            Header::V1(_) => 0,
+            Header::V2(h) => h
+                .metadata
+                .first_segment()
+                .map_or(0, |segment| segment.iv_tweak),
+        }
+    }
+
+    /// The format version, as the header records it.
+    #[must_use]
+    pub fn version(&self) -> u16 {
+        match self {
+            Header::V1(_) => 1,
+            Header::V2(_) => 2,
+        }
+    }
+
+    /// A human-readable summary of each usable keyslot, for `dump`.
+    ///
+    /// Deliberately carries no key material and no digest preimage — only
+    /// the KDF parameters, which are not secret.
+    #[must_use]
+    pub fn keyslot_summaries(&self) -> Vec<KeyslotSummary> {
+        match self {
+            Header::V1(h) => h
+                .keyslots
+                .iter()
+                .enumerate()
+                .filter(|(_, slot)| slot.active)
+                .map(|(i, slot)| KeyslotSummary {
+                    index: i.to_string(),
+                    kdf: format!("pbkdf2({})", h.hash.spec()),
+                    iterations: slot.iterations,
+                    memory_kib: 0,
+                    lanes: 0,
+                    stripes: slot.stripes,
+                })
+                .collect(),
+            Header::V2(h) => h
+                .metadata
+                .keyslots
+                .iter()
+                .map(|(index, slot)| KeyslotSummary {
+                    index: index.clone(),
+                    kdf: slot.kdf.kind.clone(),
+                    // argon2 reports time cost here, PBKDF2 its iterations.
+                    iterations: if slot.kdf.iterations > 0 {
+                        slot.kdf.iterations
+                    } else {
+                        slot.kdf.time
+                    },
+                    memory_kib: slot.kdf.memory,
+                    lanes: slot.kdf.cpus,
+                    stripes: u32::try_from(slot.af.stripes).unwrap_or(0),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Non-secret facts about one keyslot, for display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyslotSummary {
+    /// The slot's index as the header names it.
+    pub index: String,
+    /// The KDF name, e.g. `argon2id` or `pbkdf2(sha256)`.
+    pub kdf: String,
+    /// PBKDF2 iterations, or argon2's time cost.
+    pub iterations: u32,
+    /// argon2 memory cost in KiB; zero for PBKDF2.
+    pub memory_kib: u32,
+    /// argon2 parallelism; zero for PBKDF2.
+    pub lanes: u32,
+    /// AF stripe count.
+    pub stripes: u32,
 }
 
 #[cfg(test)]

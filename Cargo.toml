@@ -20,6 +20,11 @@ devmap-zoned = { path = "zoned" }
 devmap-snapshot = { path = "snapshot" }
 devmap-luks = { path = "luks" }
 clap = { version = "4", features = ["derive"] }
+# Master keys go into the kernel keyring; this is a safe wrapper, so the
+# workspace-wide `unsafe_code = "deny"` still holds.
+keyutils = "0.4"
+# Passphrase entry without terminal echo.
+rpassword = "7"
 anyhow = "1"
 
 # Tests only: the root gate (Control::open) for the CLI integration test.
