@@ -14,6 +14,7 @@
 //! Targets this crate has no type for at all (`cache`, `crypt`, `mirror`,
 //! and the rest) can still be enumerated and read as raw params.
 
+pub mod crypt;
 pub mod delay;
 pub mod dust;
 pub mod era;
@@ -33,6 +34,7 @@ pub mod writecache;
 pub mod zero;
 pub mod zoned;
 
+pub use crypt::Crypt;
 pub use delay::Delay;
 pub use dust::Dust;
 pub use era::Era;
