@@ -28,9 +28,15 @@
 //! then combined by XOR with a per-structure constant, which is what stops a block
 //! of one kind being silently accepted where another kind was expected.
 
+pub mod array;
+pub mod bitset;
 pub mod block;
 pub mod btree;
+pub mod cache;
+pub mod cache_xml;
 pub mod check;
+pub mod era;
+pub mod era_xml;
 pub mod restore;
 pub mod space_map;
 pub mod thin;
