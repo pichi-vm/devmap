@@ -7,6 +7,7 @@ mod dm;
 mod integrity;
 mod links;
 mod snapshot;
+mod thin;
 mod verity;
 mod zoned;
 
@@ -23,6 +24,7 @@ pub(crate) fn run(cli: Cli) -> Result<()> {
         Object::Integrity(cmd) => integrity::run(cmd),
         Object::Crypt(cmd) => crypt::run(cmd),
         Object::Snapshot(cmd) => snapshot::run(cmd),
+        Object::Thin(cmd) => thin::run(cmd),
         Object::InstallLinks(a) => links::run(&a),
     }
 }
