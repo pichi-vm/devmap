@@ -445,6 +445,14 @@ pub(crate) enum ThinCmd {
     Dump(ThinDump),
     /// Summarise the pool: space maps, devices, geometry.
     Info(ThinInfo),
+    /// Validate the metadata, reconciling reference counts.
+    Check(ThinCheck),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ThinCheck {
+    /// The thin pool's metadata device.
+    pub(crate) metadata: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]

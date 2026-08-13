@@ -5,16 +5,36 @@
 
 use std::fs::File;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use devmap_persistent::thin::Superblock;
 use devmap_persistent::{thin, thin_xml};
 
-use crate::cli::{ThinCmd, ThinDump, ThinInfo};
+use crate::cli::{ThinCheck, ThinCmd, ThinDump, ThinInfo};
 
 pub(crate) fn run(cmd: ThinCmd) -> Result<()> {
     match cmd {
         ThinCmd::Dump(a) => dump(&a),
         ThinCmd::Info(a) => info(&a),
+        ThinCmd::Check(a) => check(&a),
+    }
+}
+
+fn check(a: &ThinCheck) -> Result<()> {
+    let file = File::open(&a.metadata).with_context(|| format!("open {}", a.metadata.display()))?;
+    let report = devmap_persistent::check::check(&file)
+        .with_context(|| format!("check {}", a.metadata.display()))?;
+
+    for error in &report.errors {
+        eprintln!("devmap: {error}");
+    }
+    if report.is_clean() {
+        println!("{}: metadata is consistent", a.metadata.display());
+        println!("  Metadata blocks in use: {}", report.metadata_blocks_used);
+        println!("  Data blocks in use:     {}", report.data_blocks_used);
+        Ok(())
+    } else {
+        // Exit non-zero like thin_check, so scripts can branch on it.
+        bail!("{} problem(s) found", report.errors.len())
     }
 }
 

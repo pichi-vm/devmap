@@ -30,6 +30,7 @@
 
 pub mod block;
 pub mod btree;
+pub mod check;
 pub mod space_map;
 pub mod thin;
 pub mod thin_xml;
