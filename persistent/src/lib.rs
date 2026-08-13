@@ -31,9 +31,11 @@
 pub mod block;
 pub mod btree;
 pub mod check;
+pub mod restore;
 pub mod space_map;
 pub mod thin;
 pub mod thin_xml;
+pub mod xml;
 
 pub use block::{BLOCK_SIZE, Blocks};
 
