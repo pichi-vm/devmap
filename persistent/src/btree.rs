@@ -187,6 +187,40 @@ where
     Ok(())
 }
 
+/// Visit every *node* of the tree rooted at `root`, internal nodes
+/// included, in depth-first order.
+///
+/// [`walk`] reports leaf entries; this reports the blocks the tree
+/// occupies, which is what a reference-count audit needs.
+///
+/// # Errors
+///
+/// The first structural error encountered, or whatever `visit` returns.
+pub fn walk_nodes<B, F>(blocks: &B, root: u64, max_depth: usize, visit: &mut F) -> Result<(), Error>
+where
+    B: Blocks + ?Sized,
+    F: FnMut(&Node) -> Result<(), Error>,
+{
+    if max_depth == 0 {
+        return Err(Error::Malformed {
+            block: root,
+            reason: "btree is deeper than expected (possible cycle)".to_owned(),
+        });
+    }
+    let node = read_node(blocks, root)?;
+    visit(&node)?;
+    if !node.leaf {
+        for index in 0..node.keys.len() {
+            let child = node.child(index).ok_or_else(|| Error::Malformed {
+                block: root,
+                reason: format!("child pointer {index} runs past the block"),
+            })?;
+            walk_nodes(blocks, child, max_depth - 1, visit)?;
+        }
+    }
+    Ok(())
+}
+
 /// Collect every `(key, value)` of the tree rooted at `root`.
 ///
 /// Convenience over [`walk`] for trees small enough to hold in memory,
