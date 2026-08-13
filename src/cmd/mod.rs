@@ -2,8 +2,10 @@
 
 //! Command handlers, one module per object.
 
+mod cache;
 mod crypt;
 mod dm;
+mod era;
 mod integrity;
 mod links;
 mod snapshot;
@@ -25,6 +27,8 @@ pub(crate) fn run(cli: Cli) -> Result<()> {
         Object::Crypt(cmd) => crypt::run(cmd),
         Object::Snapshot(cmd) => snapshot::run(cmd),
         Object::Thin(cmd) => thin::run(cmd),
+        Object::Cache(cmd) => cache::run(cmd),
+        Object::Era(cmd) => era::run(cmd),
         Object::InstallLinks(a) => links::run(&a),
     }
 }

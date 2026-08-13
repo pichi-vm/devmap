@@ -68,6 +68,31 @@ impl Blocks for std::fs::File {
 /// Never: `read_block` always yields a full [`BLOCK_SIZE`] block, so the
 /// fixed-offset field reads below are always in bounds.
 pub fn read_validated<B: Blocks + ?Sized>(blocks: &B, nr: u64, xor: u32) -> Result<Vec<u8>, Error> {
+    read_validated_at(blocks, nr, xor, OFF_BLOCKNR)
+}
+
+/// As [`read_validated`], but for structures that record their address
+/// somewhere other than offset 8.
+///
+/// Most persistent-data structures put `blocknr` right after `csum` and
+/// `flags`, but an array block orders its header differently and keeps it
+/// at offset 16. Getting that wrong would either reject every array block
+/// or, worse, compare against whatever field happens to sit at offset 8.
+///
+/// # Errors
+///
+/// As [`read_validated`].
+///
+/// # Panics
+///
+/// Never for `blocknr_offset + 8 <= BLOCK_SIZE`, which every caller
+/// satisfies with a compile-time constant.
+pub fn read_validated_at<B: Blocks + ?Sized>(
+    blocks: &B,
+    nr: u64,
+    xor: u32,
+    blocknr_offset: usize,
+) -> Result<Vec<u8>, Error> {
     let raw = blocks.read_block(nr)?;
     let stored = u32::from_le_bytes(raw[0..4].try_into().expect("4 bytes"));
     let computed = checksum(&raw, xor);
@@ -79,7 +104,7 @@ pub fn read_validated<B: Blocks + ?Sized>(blocks: &B, nr: u64, xor: u32) -> Resu
         });
     }
     let claimed = u64::from_le_bytes(
-        raw[OFF_BLOCKNR..OFF_BLOCKNR + 8]
+        raw[blocknr_offset..blocknr_offset + 8]
             .try_into()
             .expect("8 bytes"),
     );

@@ -38,6 +38,12 @@ pub(crate) enum Object {
     /// dm-thin metadata — the thin-provisioning-tools layer.
     #[command(subcommand)]
     Thin(ThinCmd),
+    /// dm-cache metadata — the cache_* tools layer.
+    #[command(subcommand)]
+    Cache(CacheCmd),
+    /// dm-era metadata — the era_* tools layer.
+    #[command(subcommand)]
+    Era(EraCmd),
     /// Create the legacy-tool symlinks (dmsetup, veritysetup, …) in a directory.
     InstallLinks(InstallLinks),
 }
@@ -476,6 +482,32 @@ pub(crate) struct ThinDump {
 #[derive(clap::Args, Debug)]
 pub(crate) struct ThinInfo {
     /// The thin pool's metadata device.
+    pub(crate) metadata: PathBuf,
+}
+
+/// The cache-tools-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum CacheCmd {
+    /// Print the metadata as cache_dump-compatible XML.
+    Dump(CacheDump),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct CacheDump {
+    /// The cache's metadata device.
+    pub(crate) metadata: PathBuf,
+}
+
+/// The era-tools-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum EraCmd {
+    /// Print the metadata as era_dump-compatible XML.
+    Dump(EraDump),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct EraDump {
+    /// The era device's metadata.
     pub(crate) metadata: PathBuf,
 }
 
