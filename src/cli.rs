@@ -35,6 +35,9 @@ pub(crate) enum Object {
     /// dm-snapshot persistent COW images.
     #[command(subcommand)]
     Snapshot(SnapshotCmd),
+    /// dm-thin metadata — the thin-provisioning-tools layer.
+    #[command(subcommand)]
+    Thin(ThinCmd),
     /// Create the legacy-tool symlinks (dmsetup, veritysetup, …) in a directory.
     InstallLinks(InstallLinks),
 }
@@ -433,6 +436,27 @@ pub(crate) struct SnapshotConvert {
     /// COW chunk size in 512-byte sectors (power of two, >= 8).
     #[arg(long, default_value_t = devmap_snapshot::DEFAULT_CHUNK_SIZE_SECTORS)]
     pub(crate) chunk_size: u32,
+}
+
+/// The thin-provisioning-tools-equivalent verbs.
+#[derive(Subcommand, Debug)]
+pub(crate) enum ThinCmd {
+    /// Print the metadata as thin_dump-compatible XML.
+    Dump(ThinDump),
+    /// Summarise the pool: space maps, devices, geometry.
+    Info(ThinInfo),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ThinDump {
+    /// The thin pool's metadata device.
+    pub(crate) metadata: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ThinInfo {
+    /// The thin pool's metadata device.
+    pub(crate) metadata: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]
