@@ -1,0 +1,21 @@
+[package]
+name = "devmap-persistent"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Reader and writer for the dm persistent-data metadata format shared by thin, cache and era."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+keywords = ["device-mapper", "dm-thin", "persistent-data", "btree", "metadata"]
+categories = ["filesystem"]
+
+[dependencies]
+# Every metadata block is checksummed with CRC32C (Castagnoli).
+crc32c = "0.6"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
