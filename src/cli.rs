@@ -447,6 +447,18 @@ pub(crate) enum ThinCmd {
     Info(ThinInfo),
     /// Validate the metadata, reconciling reference counts.
     Check(ThinCheck),
+    /// Rebuild metadata from thin_dump XML.
+    Restore(ThinRestore),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ThinRestore {
+    /// The XML to rebuild from, or `-` for stdin.
+    #[arg(short = 'i', long = "input")]
+    pub(crate) input: PathBuf,
+    /// The metadata device to write. Its contents are replaced.
+    #[arg(short = 'o', long = "output")]
+    pub(crate) output: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]

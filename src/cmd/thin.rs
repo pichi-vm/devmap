@@ -4,19 +4,50 @@
 //! dm-thin metadata device, via [`devmap_persistent`].
 
 use std::fs::File;
+use std::io::Seek as _;
 
 use anyhow::{Context as _, Result, bail};
 use devmap_persistent::thin::Superblock;
 use devmap_persistent::{thin, thin_xml};
 
-use crate::cli::{ThinCheck, ThinCmd, ThinDump, ThinInfo};
+use crate::cli::{ThinCheck, ThinCmd, ThinDump, ThinInfo, ThinRestore};
 
 pub(crate) fn run(cmd: ThinCmd) -> Result<()> {
     match cmd {
         ThinCmd::Dump(a) => dump(&a),
         ThinCmd::Info(a) => info(&a),
         ThinCmd::Check(a) => check(&a),
+        ThinCmd::Restore(a) => restore(&a),
     }
+}
+
+fn restore(a: &ThinRestore) -> Result<()> {
+    let text = if a.input == std::path::Path::new("-") {
+        std::io::read_to_string(std::io::stdin()).context("read XML from stdin")?
+    } else {
+        std::fs::read_to_string(&a.input).with_context(|| format!("read {}", a.input.display()))?
+    };
+    let pool = devmap_persistent::xml::parse(&text).context("parse the XML")?;
+
+    let mut out = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&a.output)
+        .with_context(|| format!("open {}", a.output.display()))?;
+    // The destination's own size bounds the allocator.
+    let len = out
+        .seek(std::io::SeekFrom::End(0))
+        .with_context(|| format!("size {}", a.output.display()))?;
+    let metadata_blocks = len / devmap_persistent::BLOCK_SIZE as u64;
+
+    devmap_persistent::restore::restore(&pool, &mut out, metadata_blocks)
+        .with_context(|| format!("write metadata to {}", a.output.display()))?;
+    println!(
+        "Restored {} device(s) into {}",
+        pool.devices.len(),
+        a.output.display()
+    );
+    Ok(())
 }
 
 fn check(a: &ThinCheck) -> Result<()> {
