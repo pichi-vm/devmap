@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use devmap_persistent::{cache_xml, era_xml};
+use devmap_persistent::{cache_xml, check, era_xml};
 
 /// Whether `tool` is installed.
 fn have(tool: &str) -> bool {
@@ -152,4 +152,125 @@ fn a_cache_superblock_is_not_an_era_superblock() {
         "cache metadata must not parse as era"
     );
     assert!(devmap_persistent::cache::Superblock::read(&file).is_ok());
+}
+
+/// Whether `tool` considers `meta` sound.
+fn reference_check_passes(tool: &str, meta: &Path) -> bool {
+    Command::new(tool)
+        .arg(meta)
+        .output()
+        .expect("run check")
+        .status
+        .success()
+}
+
+#[test]
+fn cache_check_agrees_and_reconciles_counts() {
+    if !have("cache_restore") {
+        eprintln!("skip: cache tools not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let Some(meta) = restore(
+        dir.path(),
+        "cache_restore",
+        r#"<superblock uuid="" block_size="128" nr_cache_blocks="1024" policy="smq" hint_width="4">
+  <mappings>
+    <mapping cache_block="0" origin_block="0" dirty="false"/>
+    <mapping cache_block="1" origin_block="17" dirty="true"/>
+  </mappings>
+</superblock>
+"#,
+    ) else {
+        return;
+    };
+
+    let file = std::fs::File::open(&meta).expect("open");
+    let report = check::check_cache(&file).expect("check");
+    assert!(report.is_clean(), "{:?}", report.errors);
+    assert!(reference_check_passes("cache_check", &meta));
+
+    // The reconciliation is exact, not approximate: every block the walk
+    // reaches is a block the space map says is allocated.
+    let superblock = devmap_persistent::cache::Superblock::read(&file).expect("superblock");
+    assert_eq!(
+        report.metadata_blocks_used, superblock.metadata_sm.nr_allocated,
+        "recomputed usage must equal what the space map records"
+    );
+}
+
+#[test]
+fn era_check_agrees_and_reconciles_counts() {
+    if !have("era_restore") {
+        eprintln!("skip: era tools not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let Some(meta) = restore(
+        dir.path(),
+        "era_restore",
+        r#"<superblock uuid="" block_size="128" nr_blocks="512" current_era="1">
+  <writeset era="1" nr_bits="512">
+    <bit block="0" value="true"/>
+  </writeset>
+  <era_array>
+    <era block="0" era="1"/>
+  </era_array>
+</superblock>
+"#,
+    ) else {
+        return;
+    };
+
+    let file = std::fs::File::open(&meta).expect("open");
+    let report = check::check_era(&file).expect("check");
+    assert!(report.is_clean(), "{:?}", report.errors);
+    assert!(reference_check_passes("era_check", &meta));
+
+    let superblock = devmap_persistent::era::Superblock::read(&file).expect("superblock");
+    assert_eq!(
+        report.metadata_blocks_used, superblock.metadata_sm.nr_allocated,
+        "recomputed usage must equal what the space map records"
+    );
+}
+
+#[test]
+fn cache_check_reports_a_damaged_array() {
+    if !have("cache_restore") {
+        eprintln!("skip: cache tools not installed");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let Some(meta) = restore(
+        dir.path(),
+        "cache_restore",
+        r#"<superblock uuid="" block_size="128" nr_cache_blocks="64" policy="smq" hint_width="4">
+  <mappings>
+    <mapping cache_block="0" origin_block="0" dirty="false"/>
+  </mappings>
+</superblock>
+"#,
+    ) else {
+        return;
+    };
+    let mut image = std::fs::read(&meta).expect("read");
+    let superblock =
+        devmap_persistent::cache::Superblock::read(image.as_slice()).expect("superblock");
+    // Damage the mapping array's index node.
+    let at = usize::try_from(superblock.mapping_root).expect("fits")
+        * devmap_persistent::BLOCK_SIZE
+        + 100;
+    image[at] ^= 0xFF;
+    std::fs::write(&meta, &image).expect("write back");
+
+    let file = std::fs::File::open(&meta).expect("open");
+    let report = check::check_cache(&file).expect("report");
+    assert!(
+        !report.is_clean(),
+        "a damaged mapping array must be reported"
+    );
+    assert!(
+        !reference_check_passes("cache_check", &meta),
+        "cache_check agrees"
+    );
 }

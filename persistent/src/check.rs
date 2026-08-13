@@ -249,6 +249,169 @@ fn count_space_map<B: Blocks + ?Sized>(
     }
 }
 
+/// Reconcile only the metadata space map, for targets that have no data
+/// space map of their own — cache and era track their data elsewhere.
+fn reconcile_metadata<B: Blocks + ?Sized>(
+    blocks: &B,
+    metadata_sm: &SpaceMap,
+    counts: &Counts,
+    report: &mut Report,
+) {
+    for (block, &expected) in counts.metadata.iter().enumerate() {
+        let block = block as u64;
+        if block >= metadata_sm.root.nr_blocks {
+            break;
+        }
+        match metadata_sm.ref_count(blocks, block) {
+            Ok(actual) if actual == expected => {}
+            Ok(actual) => report.errors.push(format!(
+                "metadata block {block}: {expected} references found, space map says {actual}"
+            )),
+            Err(e) => report.errors.push(format!("metadata block {block}: {e}")),
+        }
+    }
+}
+
+/// Check dm-cache metadata, reconciling its metadata reference counts.
+///
+/// # Errors
+///
+/// Only when the superblock cannot be read, which leaves nothing to check.
+pub fn check_cache<B: Blocks + ?Sized>(blocks: &B) -> Result<Report, Error> {
+    let superblock = crate::cache::Superblock::read(blocks)?;
+    let mut report = Report::default();
+    let mut counts = Counts::new(superblock.metadata_sm.nr_blocks)?;
+    counts.hit_metadata(0, &mut report.errors);
+
+    // The mapping and hint arrays, and the dirty and discard bitsets, are
+    // all arrays underneath, so one helper accounts for every one of them.
+    for (root, what) in [
+        (superblock.mapping_root, "mapping array"),
+        (superblock.hint_root, "hint array"),
+        (superblock.dirty_root, "dirty bitset"),
+        (superblock.discard_root, "discard bitset"),
+    ] {
+        if root == 0 {
+            continue;
+        }
+        match crate::array::blocks_used(blocks, root) {
+            Ok(used) => {
+                for block in used {
+                    counts.hit_metadata(block, &mut report.errors);
+                }
+            }
+            Err(e) => report.errors.push(format!("{what}: {e}")),
+        }
+    }
+
+    match SpaceMap::open(blocks, superblock.metadata_sm, space_map::Index::Inline) {
+        Ok(metadata_sm) => {
+            count_space_map(
+                blocks,
+                &superblock.metadata_sm,
+                &metadata_sm,
+                &mut counts,
+                &mut report,
+                false,
+            );
+            reconcile_metadata(blocks, &metadata_sm, &counts, &mut report);
+        }
+        Err(e) => report.errors.push(format!("metadata space map: {e}")),
+    }
+
+    report.metadata_blocks_used = counts.metadata.iter().filter(|&&c| c > 0).count() as u64;
+    Ok(report)
+}
+
+/// Check dm-era metadata, reconciling its metadata reference counts.
+///
+/// # Errors
+///
+/// Only when the superblock cannot be read.
+pub fn check_era<B: Blocks + ?Sized>(blocks: &B) -> Result<Report, Error> {
+    let superblock = crate::era::Superblock::read(blocks)?;
+    let mut report = Report::default();
+    let mut counts = Counts::new(superblock.metadata_sm.nr_blocks)?;
+    counts.hit_metadata(0, &mut report.errors);
+
+    // The era array is an array; the writeset tree is a btree whose values
+    // each point at a writeset's own bitset.
+    if superblock.era_array_root != 0 {
+        match crate::array::blocks_used(blocks, superblock.era_array_root) {
+            Ok(used) => {
+                for block in used {
+                    counts.hit_metadata(block, &mut report.errors);
+                }
+            }
+            Err(e) => report.errors.push(format!("era array: {e}")),
+        }
+    }
+    if superblock.writeset_tree_root != 0 {
+        let mut hits = Vec::new();
+        if let Err(e) = btree::walk_nodes(
+            blocks,
+            superblock.writeset_tree_root,
+            MAX_DEPTH,
+            &mut |node| {
+                hits.push(node.block);
+                Ok(())
+            },
+        ) {
+            report.errors.push(format!("writeset tree: {e}"));
+        }
+        for block in hits {
+            counts.hit_metadata(block, &mut report.errors);
+        }
+        match btree::collect(blocks, superblock.writeset_tree_root, MAX_DEPTH) {
+            Ok(writesets) => {
+                for (era, value) in writesets {
+                    let root = crate::block::le64(&value, 4);
+                    if root == 0 {
+                        continue;
+                    }
+                    match crate::array::blocks_used(blocks, root) {
+                        Ok(used) => {
+                            for block in used {
+                                counts.hit_metadata(block, &mut report.errors);
+                            }
+                        }
+                        Err(e) => report.errors.push(format!("writeset for era {era}: {e}")),
+                    }
+                }
+            }
+            Err(e) => report.errors.push(format!("writeset tree: {e}")),
+        }
+    }
+    if superblock.current_writeset_root != 0 {
+        match crate::array::blocks_used(blocks, superblock.current_writeset_root) {
+            Ok(used) => {
+                for block in used {
+                    counts.hit_metadata(block, &mut report.errors);
+                }
+            }
+            Err(e) => report.errors.push(format!("current writeset: {e}")),
+        }
+    }
+
+    match SpaceMap::open(blocks, superblock.metadata_sm, space_map::Index::Inline) {
+        Ok(metadata_sm) => {
+            count_space_map(
+                blocks,
+                &superblock.metadata_sm,
+                &metadata_sm,
+                &mut counts,
+                &mut report,
+                false,
+            );
+            reconcile_metadata(blocks, &metadata_sm, &counts, &mut report);
+        }
+        Err(e) => report.errors.push(format!("metadata space map: {e}")),
+    }
+
+    report.metadata_blocks_used = counts.metadata.iter().filter(|&&c| c > 0).count() as u64;
+    Ok(report)
+}
+
 /// Compare recomputed counts against what the space maps store.
 fn reconcile<B: Blocks + ?Sized>(
     blocks: &B,

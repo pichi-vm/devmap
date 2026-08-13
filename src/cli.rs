@@ -490,6 +490,8 @@ pub(crate) struct ThinInfo {
 pub(crate) enum CacheCmd {
     /// Print the metadata as cache_dump-compatible XML.
     Dump(CacheDump),
+    /// Validate the metadata, reconciling reference counts.
+    Check(CacheDump),
 }
 
 #[derive(clap::Args, Debug)]
@@ -503,6 +505,8 @@ pub(crate) struct CacheDump {
 pub(crate) enum EraCmd {
     /// Print the metadata as era_dump-compatible XML.
     Dump(EraDump),
+    /// Validate the metadata, reconciling reference counts.
+    Check(EraDump),
 }
 
 #[derive(clap::Args, Debug)]
