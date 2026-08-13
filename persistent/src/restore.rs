@@ -23,6 +23,7 @@
 use std::collections::BTreeMap;
 use std::io::{Seek, SeekFrom, Write};
 
+use crate::ARRAY_CSUM_XOR;
 use crate::block::BLOCK_SIZE;
 use crate::space_map::ENTRIES_PER_BITMAP;
 use crate::xml::Pool;
@@ -43,6 +44,8 @@ const LEAF: u32 = 2;
 const INTERNAL: u32 = 1;
 /// Bits of a mapping value given to the timestamp.
 const TIME_BITS: u32 = 24;
+/// Bytes of `array_block` header before its values.
+const ARRAY_HEADER: usize = 24;
 
 /// Entries a node holds for a given value size.
 ///
@@ -178,6 +181,58 @@ fn node_bytes(
         raw[at..at + value_size].copy_from_slice(value);
     }
     raw
+}
+
+/// Build a `dm-array` from `values`, returning the root of its index
+/// btree.
+///
+/// Values are packed into array blocks, and a btree maps each block's
+/// index to where it lives — the same shape [`crate::array`] reads.
+fn build_array(image: &mut Image, values: &[Vec<u8>], value_size: usize) -> Result<u64, Error> {
+    let per_block = crate::array::max_entries(value_size);
+    if per_block == 0 {
+        return Err(Error::Malformed {
+            block: 0,
+            reason: "array value size is zero".to_owned(),
+        });
+    }
+
+    let mut index = Vec::new();
+    for (i, chunk) in values.chunks(per_block).enumerate() {
+        let block = image.allocate()?;
+        let mut raw = vec![0u8; BLOCK_SIZE];
+        raw[4..8].copy_from_slice(&u32::try_from(per_block).expect("fits").to_le_bytes());
+        raw[8..12].copy_from_slice(&u32::try_from(chunk.len()).expect("fits").to_le_bytes());
+        raw[12..16].copy_from_slice(&u32::try_from(value_size).expect("fits").to_le_bytes());
+        for (j, value) in chunk.iter().enumerate() {
+            let at = ARRAY_HEADER + j * value_size;
+            raw[at..at + value_size].copy_from_slice(value);
+        }
+        // An array block records its address at offset 16, not 8.
+        raw[16..24].copy_from_slice(&block.to_le_bytes());
+        let csum = checksum(&raw, ARRAY_CSUM_XOR);
+        raw[0..4].copy_from_slice(&csum.to_le_bytes());
+        image.blocks.insert(block, raw);
+        index.push((i as u64, block.to_le_bytes().to_vec()));
+    }
+    build_btree(image, &index, 8)
+}
+
+/// Build a `dm-bitset` from `bits`, padding the final word.
+fn build_bitset(image: &mut Image, bits: &[bool]) -> Result<u64, Error> {
+    let words: Vec<Vec<u8>> = bits
+        .chunks(64)
+        .map(|chunk| {
+            let mut word = 0u64;
+            for (i, &set) in chunk.iter().enumerate() {
+                if set {
+                    word |= 1 << i;
+                }
+            }
+            word.to_le_bytes().to_vec()
+        })
+        .collect();
+    build_array(image, &words, 8)
 }
 
 /// Build a space map over `counts`, returning its `disk_sm_root` bytes.
@@ -444,4 +499,189 @@ mod tests {
         let nr_entries = u32::from_le_bytes(node[16..20].try_into().unwrap());
         assert_eq!(nr_entries, 4, "four leaves beneath it");
     }
+}
+
+/// A cache to be written, as parsed from `cache_dump` XML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachePool {
+    /// Cache block size in sectors.
+    pub block_size: u32,
+    /// How many cache blocks the cache has.
+    pub nr_cache_blocks: u32,
+    /// The replacement policy's name.
+    pub policy: String,
+    /// Bytes of hint per cache block.
+    pub hint_width: u32,
+    /// The mappings, in cache-block order.
+    pub mappings: Vec<crate::cache::Mapping>,
+}
+
+/// Write a fresh cache's metadata.
+///
+/// Version 2 is written, so dirtiness goes in its own bitset rather than
+/// into the mapping values.
+///
+/// # Errors
+///
+/// [`Error::Malformed`] if the device is too small, or an I/O error.
+pub fn restore_cache<W: Write + Seek>(
+    cache: &CachePool,
+    out: &mut W,
+    metadata_blocks: u64,
+) -> Result<(), Error> {
+    let mut image = Image::new(metadata_blocks);
+    let nr = usize::try_from(cache.nr_cache_blocks).map_err(|_| Error::Malformed {
+        block: 0,
+        reason: "cache is implausibly large".to_owned(),
+    })?;
+
+    // The mapping array has an entry for every cache block, valid or not.
+    let mut mappings = vec![0u64; nr];
+    let mut dirty = vec![false; nr];
+    for m in &cache.mappings {
+        let index = usize::try_from(m.cache_block).map_err(|_| Error::Malformed {
+            block: 0,
+            reason: "cache block index out of range".to_owned(),
+        })?;
+        if index >= nr {
+            return Err(Error::Malformed {
+                block: 0,
+                reason: format!("cache block {index} is beyond the cache"),
+            });
+        }
+        mappings[index] = (m.origin_block << 16) | 1 /* M_VALID */;
+        dirty[index] = m.dirty;
+    }
+    let mapping_values: Vec<Vec<u8>> = mappings.iter().map(|v| v.to_le_bytes().to_vec()).collect();
+    let mapping_root = build_array(&mut image, &mapping_values, 8)?;
+
+    let hint_width = usize::try_from(cache.hint_width).unwrap_or(0);
+    let hints: Vec<Vec<u8>> = vec![vec![0u8; hint_width]; nr];
+    let hint_root = build_array(&mut image, &hints, hint_width.max(1))?;
+    let dirty_root = build_bitset(&mut image, &dirty)?;
+    let discard_root = build_bitset(&mut image, &[])?;
+
+    let nr_bitmaps = metadata_blocks.div_ceil(ENTRIES_PER_BITMAP);
+    let reserved = image.allocated() + 1 + nr_bitmaps + 1;
+    if reserved > metadata_blocks {
+        return Err(Error::Malformed {
+            block: 0,
+            reason: format!("metadata device holds {metadata_blocks} blocks, {reserved} needed"),
+        });
+    }
+    let counts: BTreeMap<u64, u32> = (0..reserved).map(|b| (b, 1)).collect();
+    let sm_root = build_space_map(&mut image, metadata_blocks, &counts, true)?;
+
+    let mut sb = vec![0u8; BLOCK_SIZE];
+    sb[4..8].copy_from_slice(&1u32.to_le_bytes()); // clean shutdown
+    sb[32..40].copy_from_slice(&crate::cache::MAGIC.to_le_bytes());
+    sb[40..44].copy_from_slice(&2u32.to_le_bytes()); // metadata version 2
+    let name = cache.policy.as_bytes();
+    let n = name.len().min(16);
+    sb[44..44 + n].copy_from_slice(&name[..n]);
+    sb[60..64].copy_from_slice(&cache.hint_width.to_le_bytes());
+    sb[64..64 + 32].copy_from_slice(&sm_root);
+    sb[192..200].copy_from_slice(&mapping_root.to_le_bytes());
+    sb[200..208].copy_from_slice(&hint_root.to_le_bytes());
+    sb[208..216].copy_from_slice(&discard_root.to_le_bytes());
+    sb[232..236].copy_from_slice(&cache.block_size.to_le_bytes());
+    sb[236..240].copy_from_slice(&8u32.to_le_bytes());
+    sb[240..244].copy_from_slice(&cache.nr_cache_blocks.to_le_bytes());
+    sb[272..276].copy_from_slice(&2u32.to_le_bytes()); // policy version
+    sb[284..292].copy_from_slice(&dirty_root.to_le_bytes());
+    image.put(0, sb, crate::cache::SUPERBLOCK_CSUM_XOR);
+
+    for (block, raw) in &image.blocks {
+        out.seek(SeekFrom::Start(block * BLOCK_SIZE as u64))?;
+        out.write_all(raw)?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
+/// An era device to be written, as parsed from `era_dump` XML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EraPool {
+    /// Origin block size in sectors.
+    pub block_size: u32,
+    /// Origin blocks covered.
+    pub nr_blocks: u32,
+    /// The era currently being written.
+    pub current_era: u32,
+    /// Archived writesets, by era.
+    pub writesets: Vec<(u32, Vec<bool>)>,
+    /// The era each origin block was last written in.
+    pub era_array: Vec<u32>,
+}
+
+/// Write a fresh era device's metadata.
+///
+/// # Errors
+///
+/// [`Error::Malformed`] if the device is too small, or an I/O error.
+pub fn restore_era<W: Write + Seek>(
+    era: &EraPool,
+    out: &mut W,
+    metadata_blocks: u64,
+) -> Result<(), Error> {
+    let mut image = Image::new(metadata_blocks);
+    let nr = usize::try_from(era.nr_blocks).map_err(|_| Error::Malformed {
+        block: 0,
+        reason: "era device is implausibly large".to_owned(),
+    })?;
+
+    // The era array has an entry per origin block, defaulting to era zero.
+    let mut eras = vec![0u32; nr];
+    for (block, value) in era.era_array.iter().enumerate().take(nr) {
+        eras[block] = *value;
+    }
+    let era_values: Vec<Vec<u8>> = eras.iter().map(|e| e.to_le_bytes().to_vec()).collect();
+    let era_array_root = build_array(&mut image, &era_values, 4)?;
+
+    // Each writeset is a bitset; the tree maps era to (bit count, root).
+    let mut tree = Vec::new();
+    for (which, bits) in &era.writesets {
+        let mut padded = bits.clone();
+        padded.resize(nr, false);
+        let root = build_bitset(&mut image, &padded)?;
+        let mut value = vec![0u8; 12];
+        value[0..4].copy_from_slice(&u32::try_from(nr).unwrap_or(u32::MAX).to_le_bytes());
+        value[4..12].copy_from_slice(&root.to_le_bytes());
+        tree.push((u64::from(*which), value));
+    }
+    tree.sort_by_key(|(era, _)| *era);
+    let writeset_tree_root = build_btree(&mut image, &tree, 12)?;
+
+    let nr_bitmaps = metadata_blocks.div_ceil(ENTRIES_PER_BITMAP);
+    let reserved = image.allocated() + 1 + nr_bitmaps + 1;
+    if reserved > metadata_blocks {
+        return Err(Error::Malformed {
+            block: 0,
+            reason: format!("metadata device holds {metadata_blocks} blocks, {reserved} needed"),
+        });
+    }
+    let counts: BTreeMap<u64, u32> = (0..reserved).map(|b| (b, 1)).collect();
+    let sm_root = build_space_map(&mut image, metadata_blocks, &counts, true)?;
+
+    let mut sb = vec![0u8; BLOCK_SIZE];
+    sb[32..40].copy_from_slice(&crate::era::MAGIC.to_le_bytes());
+    sb[40..44].copy_from_slice(&1u32.to_le_bytes());
+    sb[44..44 + 32].copy_from_slice(&sm_root);
+    sb[172..176].copy_from_slice(&era.block_size.to_le_bytes());
+    sb[176..180].copy_from_slice(&8u32.to_le_bytes());
+    sb[180..184].copy_from_slice(&era.nr_blocks.to_le_bytes());
+    sb[184..188].copy_from_slice(&era.current_era.to_le_bytes());
+    // The current writeset is already archived in the tree, so the
+    // superblock's copy records its size but no root of its own.
+    sb[188..192].copy_from_slice(&era.nr_blocks.to_le_bytes());
+    sb[200..208].copy_from_slice(&writeset_tree_root.to_le_bytes());
+    sb[208..216].copy_from_slice(&era_array_root.to_le_bytes());
+    image.put(0, sb, crate::era::SUPERBLOCK_CSUM_XOR);
+
+    for (block, raw) in &image.blocks {
+        out.seek(SeekFrom::Start(block * BLOCK_SIZE as u64))?;
+        out.write_all(raw)?;
+    }
+    out.flush()?;
+    Ok(())
 }
