@@ -264,6 +264,90 @@ fn opens_a_luks2_volume_cryptsetup_created() {
     open_close_roundtrip("luks2");
 }
 
+/// Create a volume with `devmap crypt format`, then require the real
+/// `cryptsetup` to activate it and round-trip data — the write-path gate.
+fn format_then_cryptsetup_opens(kind: &str) {
+    if !have_dm() {
+        eprintln!("skipping: no device-mapper access (run as root)");
+        return;
+    }
+    if !have_cryptsetup() {
+        eprintln!("skipping: cryptsetup not installed");
+        return;
+    }
+    let _ = Command::new("modprobe").arg("dm-crypt").status();
+
+    let dir = std::env::temp_dir().join(format!("devmap-fmt-{kind}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let image = dir.join("volume.img");
+    std::fs::File::create(&image)
+        .and_then(|f| f.set_len(64 * 1024 * 1024))
+        .expect("create backing file");
+    let key_file = dir.join("passphrase");
+    std::fs::write(&key_file, PASSPHRASE).expect("write key file");
+    let loop_dev = LoopDevice::attach(image.clone());
+
+    // devmap creates the volume; pbkdf2 keeps the KDF cheap for the test.
+    let (ok, _) = run(
+        BIN,
+        &[
+            "crypt",
+            "format",
+            &loop_dev.path,
+            "--type",
+            kind,
+            "--pbkdf",
+            "pbkdf2",
+            "--key-file",
+            &key_file.to_string_lossy(),
+        ],
+    );
+    assert!(ok, "devmap crypt format ({kind})");
+
+    // The real cryptsetup must accept the header we wrote and activate it.
+    let name = format!("devmap-fmt-{kind}-{}", std::process::id());
+    let (ok, _) = run_with_passphrase(
+        "cryptsetup",
+        &["luksOpen", &loop_dev.path, &name, "--key-file", "-"],
+    );
+    assert!(
+        ok,
+        "cryptsetup must open the volume devmap created ({kind})"
+    );
+
+    let node = format!("/dev/mapper/{name}");
+    let pattern: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    {
+        use std::os::unix::fs::FileExt as _;
+        let mapped = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&node)
+            .expect("open the cryptsetup mapping");
+        mapped.write_all_at(&pattern, 0).expect("write");
+        mapped.sync_all().expect("sync");
+        let mut back = vec![0u8; pattern.len()];
+        mapped.read_exact_at(&mut back, 0).expect("read");
+        assert_eq!(back, pattern, "round-trip through cryptsetup's mapping");
+    }
+
+    let (ok, _) = run("cryptsetup", &["close", &name]);
+    assert!(ok, "cryptsetup close");
+    drop(loop_dev);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn cryptsetup_opens_a_luks1_volume_devmap_created() {
+    format_then_cryptsetup_opens("luks1");
+}
+
+#[test]
+fn cryptsetup_opens_a_luks2_volume_devmap_created() {
+    format_then_cryptsetup_opens("luks2");
+}
+
 #[test]
 fn dump_reports_header_fields_and_no_secrets() {
     if !have_cryptsetup() {
