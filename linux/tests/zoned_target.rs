@@ -17,7 +17,7 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::process::Command;
 
-use common::{ensure_module_loaded, open_control};
+use common::{Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::Zoned;
 
 /// Whether `name` resolves on `$PATH`. Used to skip if `dmzadm` isn't
@@ -139,9 +139,8 @@ fn zoned_formats_with_dmzadm_and_passes_data_through() {
         .expect("dmsetup remove probe device");
 
     let name = format!("devmap-test-zoned-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             usable_sectors,
@@ -152,9 +151,9 @@ fn zoned_formats_with_dmzadm_and_passes_data_through() {
         .expect("add zoned")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -168,7 +167,7 @@ fn zoned_formats_with_dmzadm_and_passes_data_through() {
     file.read_exact(&mut readback).expect("read back");
     assert_eq!(readback, pattern);
 
-    let status: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    let status: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(status.len(), 1);
     assert_eq!(status[0].type_name(), "zoned");
 }

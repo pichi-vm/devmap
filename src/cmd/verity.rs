@@ -10,7 +10,7 @@ use std::os::unix::fs::FileExt as _;
 
 use anyhow::{Context as _, Result, bail};
 use devmap_linux::targets::Verity;
-use devmap_linux::{Control, DevId, Device};
+use devmap_linux::{Control, DevId};
 use devmap_verity::{Superblock, VerityBuilder, VerityParams, feed_from_reader};
 
 use crate::cli::{
@@ -116,18 +116,17 @@ fn open(a: &VerityOpen) -> Result<()> {
     let length = sb.data_blocks * u64::from(sb.data_block_size) / SECTOR;
 
     let control = Control::open().context("open /dev/mapper/control")?;
-    let removed = control
+    let device = control
         .create(&a.name)
         .with_context(|| format!("create {}", a.name))?;
-    removed
+    device
         .builder()
         .read_only()
         .add(0, length, verity)
         .context("build verity table")?
         .load()
         .context("load verity table")?;
-    removed.resume().context("resume")?;
-    let _ = Device::from(removed);
+    device.resume().context("resume")?;
     Ok(())
 }
 

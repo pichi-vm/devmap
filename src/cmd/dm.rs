@@ -41,13 +41,13 @@ fn by_name(control: &Control, name: &str) -> Result<Device> {
 
 fn create(control: &Control, a: &Create) -> Result<()> {
     let rows = table_input::read_table(a.table.as_deref())?;
-    let removed = control
+    let device = control
         .create(&a.name)
         .with_context(|| format!("create {}", a.name))?;
     if let Some(uuid) = &a.uuid {
         control.set_uuid(&a.name, uuid).context("set uuid")?;
     }
-    let mut builder = removed.builder();
+    let mut builder = device.builder();
     if a.readonly {
         builder = builder.read_only();
     }
@@ -57,9 +57,7 @@ fn create(control: &Control, a: &Create) -> Result<()> {
             .with_context(|| format!("add {} target", row.target))?;
     }
     builder.load().context("load table")?;
-    removed.resume().context("resume")?;
-    // Disarm the removal guard so the device outlives this process.
-    let _ = Device::from(removed);
+    device.resume().context("resume")?;
     Ok(())
 }
 

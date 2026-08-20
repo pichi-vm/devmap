@@ -8,7 +8,7 @@ mod common;
 
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use common::{LoopDevice, ensure_module_loaded, open_control};
+use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::{Thin, ThinPool, thin, thin_pool};
 
 #[test]
@@ -24,9 +24,8 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     let data_device = control.by_node(&data.path).expect("by_node data");
 
     let pool_name = format!("devmap-test-thinpool-{}", std::process::id());
-    let pool_removed = control.create(&pool_name).expect("DM_DEV_CREATE pool");
-    pool_removed
-        .builder()
+    let pool = Owned::create(&control, &pool_name).expect("DM_DEV_CREATE pool");
+    pool.builder()
         .add(
             0,
             32 * 1024 * 1024 / 512,
@@ -35,24 +34,22 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .expect("add thin-pool")
         .load()
         .expect("DM_TABLE_LOAD pool");
-    pool_removed.resume().expect("resume pool");
+    pool.resume().expect("resume pool");
 
     // Provision the volume through the typed live-target handle rather
     // than a raw message string.
-    pool_removed
-        .target::<ThinPool>(0)
+    pool.target::<ThinPool>(0)
         .create_thin(0)
         .expect("create_thin");
 
     let thin_name = format!("devmap-test-thin-{}", std::process::id());
-    let thin_removed = control.create(&thin_name).expect("DM_DEV_CREATE thin");
-    thin_removed
-        .builder()
+    let thin = Owned::create(&control, &thin_name).expect("DM_DEV_CREATE thin");
+    thin.builder()
         .add(
             0,
             16 * 1024 * 1024 / 512,
             Thin {
-                pool: pool_removed.id(),
+                pool: pool.id(),
                 dev_id: 0,
                 external_origin: None,
             },
@@ -60,9 +57,9 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .expect("add thin")
         .load()
         .expect("DM_TABLE_LOAD thin");
-    thin_removed.resume().expect("resume thin");
+    thin.resume().expect("resume thin");
 
-    let minor = thin_removed.id().minor();
+    let minor = thin.id().minor();
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -80,7 +77,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     // The thin volume reports how much it has actually provisioned, which
     // is far less than its nominal size — that is the whole point of thin
     // provisioning.
-    let thin_info: Vec<_> = thin_removed.info().expect("thin info").collect();
+    let thin_info: Vec<_> = thin.info().expect("thin info").collect();
     assert_eq!(thin_info.len(), 1);
     let thin_status = thin_info[0].parse::<Thin>().expect("thin info parses");
     let thin::Info::Mapped { mapped_sectors, .. } = thin_status else {
@@ -93,7 +90,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
 
     // The pool's own status is the nine-field grammar, whose every field
     // the kernel terminates with a space — including the last.
-    let pool_info: Vec<_> = pool_removed.info().expect("pool info").collect();
+    let pool_info: Vec<_> = pool.info().expect("pool info").collect();
     assert_eq!(pool_info.len(), 1);
     let pool_status = pool_info[0]
         .parse::<ThinPool>()
@@ -120,9 +117,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
     );
 
     // Thin devices must be removed before their pool.
-    devmap_linux::Device::from(thin_removed)
-        .remove()
-        .expect("remove thin device");
+    thin.remove().expect("remove thin device");
 }
 
 #[test]
@@ -157,7 +152,7 @@ fn zero_metadata_lets_a_stale_metadata_device_self_format() {
         .expect("zero_metadata");
 
     let name = format!("devmap-test-thinpool-fmt-{}", std::process::id());
-    let fresh = control.create(&name).expect("DM_DEV_CREATE");
+    let fresh = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     fresh
         .builder()
         .add(0, 32 * 1024 * 1024 / 512, build())

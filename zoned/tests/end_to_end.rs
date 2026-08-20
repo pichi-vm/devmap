@@ -117,8 +117,8 @@ fn format_then_activate_dm_zoned_and_serve_io() {
     // dm-zoned over it.
     let zoned_dev = control.by_node(&dev.path).expect("by_node zoned");
     let name = format!("devmap-test-zoned-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
+    let mapped = control.create(&name).expect("DM_DEV_CREATE");
+    mapped
         .builder()
         .add(
             0,
@@ -130,10 +130,10 @@ fn format_then_activate_dm_zoned_and_serve_io() {
         .expect("add zoned target")
         .load()
         .expect("DM_TABLE_LOAD — the kernel must accept our metadata");
-    removed.resume().expect("resume dm-zoned");
+    mapped.resume().expect("resume dm-zoned");
 
     // Its status parses as zoned::Info and reports the zones we formatted.
-    let info: Vec<_> = removed.info().expect("dm-zoned info").collect();
+    let info: Vec<_> = mapped.info().expect("dm-zoned info").collect();
     assert_eq!(info.len(), 1);
     let status = info[0]
         .parse::<Zoned>()
@@ -145,7 +145,7 @@ fn format_then_activate_dm_zoned_and_serve_io() {
     );
 
     // Serve real I/O through the mapped device to prove it is live.
-    let minor = removed.id().minor();
+    let minor = mapped.id().minor();
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -158,4 +158,13 @@ fn format_then_activate_dm_zoned_and_serve_io() {
     let mut readback = [0u8; 4096];
     file.read_exact(&mut readback).expect("read back");
     assert_eq!(readback, pattern, "dm-zoned must serve the data written");
+
+    // Tear the mapping down before `dev` powers the null_blk device off.
+    // Deferred, because the node was open a moment ago and udev may still
+    // be scanning it; an immediate remove would race that and hit EBUSY.
+    // An assertion failure above returns early and leaks the mapping —
+    // acceptable here, since the name is pid-unique and a failed root test
+    // wants its wreckage left in place to inspect.
+    drop(file);
+    mapped.remove_deferred().expect("remove dm-zoned");
 }

@@ -11,6 +11,8 @@
 
 mod common;
 
+use common::Owned;
+
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 
 use devmap_linux::targets::Crypt;
@@ -36,18 +38,17 @@ fn crypt_maps_a_device_and_round_trips_data() {
 
     let sectors = 8192u64;
     let name = format!("devmap-test-crypt-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, sectors, target.clone())
         .expect("add crypt target")
         .load()
         .expect("DM_TABLE_LOAD — the kernel must accept our rendered row");
-    removed.resume().expect("resume dm-crypt");
+    dev.resume().expect("resume dm-crypt");
 
     // The table read back must parse as `Crypt` and match what we rendered,
     // except that the kernel masks the key unless asked for it.
-    let rows: Vec<_> = removed.table().expect("read table").collect();
+    let rows: Vec<_> = dev.table().expect("read table").collect();
     assert_eq!(rows.len(), 1);
     let reported = rows[0]
         .parse::<Crypt>()
@@ -72,7 +73,7 @@ fn crypt_maps_a_device_and_round_trips_data() {
     assert_eq!(strip_key(&reported.to_string()), strip_key(&rendered));
 
     // Serve real I/O through the mapping to prove it is live.
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)

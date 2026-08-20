@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use devmap_linux::targets::Zoned;
-use devmap_linux::{Control, DevId, Device};
+use devmap_linux::{Control, DevId};
 use devmap_zoned::{BLOCK_SIZE, FormatOptions, Superblock};
 
 use crate::cli::{ZonedCheck, ZonedCmd, ZonedFormat, ZonedStart, ZonedStatus, ZonedStop};
@@ -92,17 +92,16 @@ fn start(a: &ZonedStart) -> Result<()> {
     let name = a.name.clone().unwrap_or_else(|| default_name(&a.device));
 
     let control = Control::open().context("open /dev/mapper/control")?;
-    let removed = control
+    let mapped = control
         .create(&name)
         .with_context(|| format!("create {name}"))?;
-    removed
+    mapped
         .builder()
         .add(0, length, Zoned { device })
         .context("build zoned table")?
         .load()
         .context("load zoned table")?;
-    removed.resume().context("resume")?;
-    let _ = Device::from(removed);
+    mapped.resume().context("resume")?;
     println!("{name}");
     Ok(())
 }

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use zerocopy::IntoBytes;
 
-use crate::device::{DevId, Device, Removed, Status, check_version};
+use crate::device::{DevId, Device, Status, check_version};
 use crate::header::DmHeader;
 use crate::uapi::{DM_BUFFER_FULL_FLAG, DM_DEV_CREATE, DM_DEV_STATUS, DM_LIST_DEVICES};
 
@@ -102,15 +102,18 @@ impl Control {
     /// `InvalidInput` if `name` has a NUL byte or is too long, or
     /// `Unsupported` if the kernel dm-ioctl version differs.
     ///
-    /// The returned [`Removed`] removes the device when dropped — bind it to
-    /// a name; do not discard it with `let _ = ...`.
-    #[must_use = "the returned `Removed` removes the device when dropped; bind it to keep the device"]
-    pub fn create(&self, name: &str) -> io::Result<Removed> {
+    /// The device outlives the returned handle, and this process: it is
+    /// live kernel state until something removes it. Tear it down with
+    /// [`Device::remove`], or hand that job to the kernel with
+    /// [`Device::remove_deferred`].
+    pub fn create(&self, name: &str) -> io::Result<Device> {
         let mut header = DmHeader::by_name(name)?;
         DM_DEV_CREATE.ioctl(&*self.0, &mut header)?;
         check_version(&header)?;
-        let device = Device::new(DevId::from_dev_t(header.dev()), Arc::clone(&self.0));
-        Ok(Removed::from(device))
+        Ok(Device::new(
+            DevId::from_dev_t(header.dev()),
+            Arc::clone(&self.0),
+        ))
     }
 
     /// No syscall — wraps an already-known [`DevId`] (build one with

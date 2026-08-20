@@ -6,7 +6,7 @@ mod common;
 
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use common::{LoopDevice, ensure_module_loaded, open_control};
+use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::integrity::Mode;
 use devmap_linux::targets::writecache::Kind;
 use devmap_linux::targets::{Integrity, Writecache};
@@ -24,9 +24,8 @@ fn writecache_passes_data_through() {
     let cache_device = control.by_node(&cache.path).expect("by_node cache");
 
     let name = format!("devmap-test-writecache-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16 * 1024 * 1024 / 512,
@@ -35,9 +34,9 @@ fn writecache_passes_data_through() {
         .expect("add writecache")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -92,16 +91,15 @@ fn integrity_first_use_format_then_reload_sequence() {
 
     // Load the real table at the capacity the format reported.
     let name = format!("devmap-test-integrity-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, provided_data_sectors, target.clone())
         .expect("add integrity")
         .load()
         .expect("DM_TABLE_LOAD (real size)");
-    removed.resume().expect("resume (real size)");
+    dev.resume().expect("resume (real size)");
 
-    let status = removed.status().expect("DM_DEV_STATUS");
+    let status = dev.status().expect("DM_DEV_STATUS");
     assert_eq!(status.target_count(), 1);
 
     let real_length = provided_data_sectors;
@@ -121,7 +119,7 @@ fn integrity_first_use_format_then_reload_sequence() {
     // Those values depend on the device size, so assert that each field is
     // present rather than on the numbers. This asymmetry is why the table
     // read shape is a type of its own rather than `Integrity` itself.
-    let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    let rows: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].type_name(), "integrity");
 

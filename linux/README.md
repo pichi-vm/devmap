@@ -20,7 +20,7 @@ use devmap::{Control, targets::{Zero, Linear}, DevId};
 
 fn main() -> Result<(), devmap::Error> {
     let control = Control::open()?;              // /dev/mapper/control
-    let dev = control.create("my-device")?;     // a `Removed` guard
+    let dev = control.create("my-device")?;
 
     // Build a table one target at a time, straight into one load buffer.
     dev.builder()
@@ -33,8 +33,10 @@ fn main() -> Result<(), devmap::Error> {
     println!("{} — {} target(s), open_count {}",
              dev.id(), status.target_count(), status.open_count());
 
+    dev.remove()?;                              // teardown is always explicit
+
     Ok(())
-}   // `dev` drops here -> the device is removed
+}
 ```
 
 ## The model
@@ -44,9 +46,21 @@ fn main() -> Result<(), devmap::Error> {
 - **`Device`** — a plain handle identified by a **`DevId`** (`major:minor`).
   Everything else lives here: `builder`, `suspend`, `resume`, `remove`,
   `status`, `table`, `info`, `message`.
-- **`Removed`** — the auto-removing guard `Control::create` returns:
-  dropping it removes the device. Convert it into a plain `Device` to keep
-  the device alive.
+Dropping a `Device` does nothing to the kernel. A dm device is state that
+outlives the process that made it, so this crate offers no `Drop`-based
+autoremoval: a guard would fire on error paths and panics where the caller
+wanted the device kept, would have nowhere to report a failed removal, and
+would not run at all if the process were killed.
+
+Teardown is therefore explicit, and there are two of them:
+
+- **`Device::remove`** — remove now, and return the kernel's error if it
+  can't (`EBUSY` for a device that is still open).
+- **`Device::remove_deferred`** — `DM_DEFERRED_REMOVE`: remove now if
+  unused, otherwise have the kernel remove it once the last holder closes
+  it. This is the only autoremoval on offer, and it belongs to the kernel,
+  which is the only thing that can still honour it after this process is
+  gone.
 
 ## Building tables
 
