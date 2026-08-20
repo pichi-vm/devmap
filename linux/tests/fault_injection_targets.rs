@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{LoopDevice, ensure_module_loaded, open_control};
+use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::delay::Leg;
 use devmap_linux::targets::{Delay, Dust, Flakey, Unstriped};
 
@@ -44,9 +44,8 @@ fn delay_passes_data_through_unchanged() {
         .expect("by_node backing device");
 
     let name = format!("devmap-test-delay-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16384,
@@ -59,9 +58,9 @@ fn delay_passes_data_through_unchanged() {
         .expect("add delay")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     write_then_read_back(&format!("/dev/dm-{minor}"));
 }
 
@@ -78,9 +77,8 @@ fn flakey_behaves_normally_during_the_up_interval() {
         .expect("by_node backing device");
 
     let name = format!("devmap-test-flakey-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16384,
@@ -89,9 +87,9 @@ fn flakey_behaves_normally_during_the_up_interval() {
         .expect("add flakey")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     write_then_read_back(&format!("/dev/dm-{minor}"));
 }
 
@@ -108,9 +106,8 @@ fn dust_bypass_mode_passes_data_through_and_message_interface_works() {
         .expect("by_node backing device");
 
     let name = format!("devmap-test-dust-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16384,
@@ -123,13 +120,13 @@ fn dust_bypass_mode_passes_data_through_and_message_interface_works() {
         .expect("add dust")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // dust starts in "bypass" mode (all I/O passed through) until `enable`.
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     write_then_read_back(&format!("/dev/dm-{minor}"));
 
-    let reply = removed
+    let reply = dev
         .message(0, "countbadblocks")
         .expect("countbadblocks message");
     assert!(
@@ -151,9 +148,8 @@ fn unstriped_with_a_single_stripe_is_a_pure_passthrough() {
         .expect("by_node backing device");
 
     let name = format!("devmap-test-unstriped-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16384,
@@ -168,8 +164,8 @@ fn unstriped_with_a_single_stripe_is_a_pure_passthrough() {
         .expect("add unstriped")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     write_then_read_back(&format!("/dev/dm-{minor}"));
 }

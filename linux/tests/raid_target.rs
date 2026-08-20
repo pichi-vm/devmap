@@ -8,7 +8,7 @@ mod common;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::time::{Duration, Instant};
 
-use common::{LoopDevice, ensure_module_loaded, open_control};
+use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::Raid;
 use devmap_linux::targets::raid::{DeviceHealth, DevicePair, Type};
 
@@ -25,7 +25,7 @@ fn raid1_mirrors_writes_across_two_devices() {
     let disk1_device = control.by_node(&disk1.path).expect("by_node disk1");
 
     let name = format!("devmap-test-raid1-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     let length = 16 * 1024 * 1024 / 512;
     let target = Raid::new(
         Type::Raid1,
@@ -36,20 +36,19 @@ fn raid1_mirrors_writes_across_two_devices() {
         ],
     );
     let written = target.to_string();
-    removed
-        .builder()
+    dev.builder()
         .add(0, length, target)
         .expect("add raid")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // Wait for the initial sync to at least start reporting via status
     // (raid1 is usable immediately, but give the personality a moment to
     // initialize before exercising it).
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let status = removed.status().expect("DM_DEV_STATUS");
+        let status = dev.status().expect("DM_DEV_STATUS");
         if status.target_count() == 1 {
             break;
         }
@@ -60,7 +59,7 @@ fn raid1_mirrors_writes_across_two_devices() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -79,7 +78,7 @@ fn raid1_mirrors_writes_across_two_devices() {
     // constructor tokens, so this holds only while nothing is reshaping or
     // rebuilding — which devmap cannot initiate, since sync control and
     // rebuild indices are not exposed.
-    let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    let rows: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].type_name(), "raid");
     assert_eq!(rows[0].to_string(), format!("0 {length} raid {written}"));
@@ -87,7 +86,7 @@ fn raid1_mirrors_writes_across_two_devices() {
     // The INFO grammar is a different shape entirely: per-device health
     // characters packed into a single token whose length is set by the
     // device count preceding it, then sync progress and state.
-    let info: Vec<_> = removed.info().expect("DM_TABLE_STATUS (info)").collect();
+    let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
     assert_eq!(info.len(), 1);
     let status = info[0]
         .parse::<Raid>()

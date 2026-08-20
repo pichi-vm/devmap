@@ -96,11 +96,10 @@ fn convert_then_activate_dm_snapshot_and_read_back() {
 
     let sectors = (image_len / 512) as u64;
 
-    // Declaration order fixes teardown order (drops run in reverse): the
-    // COW loop detaches LAST, after the snapshot and origin it backs are
-    // removed; the snapshot (declared last) is removed FIRST, before the
-    // origin it depends on. Both dm devices are `Removed`, so dropping them
-    // tears the mappings down.
+    // The COW loop must detach last, after the mappings it backs are gone.
+    // Declaring it first puts its drop after theirs; the mappings
+    // themselves are removed explicitly at the end of the test, since dm
+    // devices are kernel state with no drop-based teardown.
     let cow_loop = LoopDevice::attach(cow_path);
     let cow_id = control.by_node(&cow_loop.path).expect("by_node cow").id();
 
@@ -151,4 +150,11 @@ fn convert_then_activate_dm_snapshot_and_read_back() {
     }
     assert!(read_ok, "mapped snapshot device becomes readable");
     assert_eq!(readback, image, "dm-snapshot must serve the original image");
+
+    // Teardown is ordered by dependency: the snapshot holds the origin
+    // open, so it goes first, and only then may `cow_loop` detach on drop.
+    // Deferred, because the nodes were open moments ago and udev may still
+    // hold them; the kernel reclaims each once released.
+    snap.remove_deferred().expect("remove snapshot");
+    origin.remove_deferred().expect("remove origin");
 }

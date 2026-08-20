@@ -15,7 +15,7 @@ mod common;
 
 use std::os::fd::AsFd as _;
 
-use common::open_control;
+use common::{Owned, open_control};
 use devmap_linux::Control;
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
@@ -56,7 +56,7 @@ fn arm_poll_drives_readiness_on_the_control_fd() {
 
     // DM_DEV_CREATE bumps the subsystem-wide counter.
     let name = format!("devmap-test-armpoll-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     assert!(
         poll_readable(&control, 1000),
@@ -80,7 +80,7 @@ fn arm_poll_drives_readiness_on_the_control_fd() {
     );
 
     // Removal is another global event, so the re-armed fd wakes again.
-    drop(removed);
+    drop(dev);
     assert!(
         poll_readable(&control, 1000),
         "removing a device must wake the re-armed fd"

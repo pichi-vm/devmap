@@ -152,13 +152,14 @@ impl Integrity {
 
         // One sector is enough to trigger the format without tripping the
         // "table longer than the device can provide" check.
-        {
-            let device = control.create(name)?;
-            device.builder().add(0, 1, self.clone())?.load()?;
-            device.resume()?;
-            // `device` drops here, removing the temporary mapping; the
-            // superblock it wrote persists on `backing`.
-        }
+        let device = control.create(name)?;
+        device.builder().add(0, 1, self.clone())?.load()?;
+        device.resume()?;
+        // The mapping existed only to make the kernel write the superblock;
+        // that persists on `backing`, so tear the mapping down before
+        // reading it back. Deferred, because a udev rule or a scanner may
+        // still hold the node open a moment after resume.
+        device.remove_deferred()?;
 
         // provided_data_sectors is a little-endian u64 at offset 16 of the
         // superblock — after magic[8], version, log2_interleave_sectors,

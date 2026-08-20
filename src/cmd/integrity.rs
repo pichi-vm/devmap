@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use devmap_linux::targets::integrity::{Builder, Integrity, Mode};
-use devmap_linux::{Control, DevId, Device};
+use devmap_linux::{Control, DevId};
 
 use crate::cli::{IntegrityClose, IntegrityCmd, IntegrityFormat, IntegrityOpen, IntegrityStatus};
 
@@ -77,17 +77,16 @@ fn open(a: &IntegrityOpen) -> Result<()> {
     let integrity = target(device, a.tag_size, &a.integrity, a.allow_discards);
 
     let control = Control::open().context("open /dev/mapper/control")?;
-    let removed = control
+    let mapped = control
         .create(&a.name)
         .with_context(|| format!("create {}", a.name))?;
-    removed
+    mapped
         .builder()
         .add(0, sectors, integrity)
         .context("build integrity table")?
         .load()
         .context("load integrity table")?;
-    removed.resume().context("resume")?;
-    let _ = Device::from(removed);
+    mapped.resume().context("resume")?;
     Ok(())
 }
 

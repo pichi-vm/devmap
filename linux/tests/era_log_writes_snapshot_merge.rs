@@ -8,7 +8,7 @@ mod common;
 
 use std::io::Write;
 
-use common::{LoopDevice, ensure_module_loaded, open_control};
+use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::snapshot::{self, Snapshot};
 use devmap_linux::targets::{Era, LogWrites};
 
@@ -25,9 +25,8 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
     let origin_device = control.by_node(&origin.path).expect("by_node origin");
 
     let name = format!("devmap-test-era-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16384,
@@ -40,16 +39,16 @@ fn era_tracks_writes_and_responds_to_checkpoint_message() {
         .expect("add era")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let status_before: Vec<_> = removed.info().expect("DM_TABLE_STATUS").collect();
+    let status_before: Vec<_> = dev.info().expect("DM_TABLE_STATUS").collect();
     assert_eq!(status_before.len(), 1);
     assert_eq!(status_before[0].type_name(), "era");
 
     // `checkpoint` may or may not bump the era counter on this call (the
     // kernel doc explicitly says not to assume it will), but it must not
     // error. Driven through the typed live-target handle.
-    removed.target::<Era>(0).checkpoint().expect("checkpoint");
+    dev.target::<Era>(0).checkpoint().expect("checkpoint");
 }
 
 #[test]
@@ -65,9 +64,8 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
     let log_device = control.by_node(&log.path).expect("by_node log");
 
     let name = format!("devmap-test-logwrites-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             16384,
@@ -79,9 +77,9 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
         .expect("add log-writes")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
-    let minor = removed.id().minor();
+    let minor = dev.id().minor();
     let path = format!("/dev/dm-{minor}");
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -92,8 +90,7 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
     file.sync_all().expect("fsync");
 
     // Marking a point in the log must succeed. Driven through the handle.
-    removed
-        .target::<LogWrites>(0)
+    dev.target::<LogWrites>(0)
         .mark("after-write")
         .expect("mark");
 }
@@ -128,8 +125,8 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     // 1. Origin device: dm-linear-equivalent passthrough (snapshot-origin
     //    with no snapshot yet just forwards I/O) to the backing device.
     let origin_name = format!("devmap-test-snapmerge-origin-{}", std::process::id());
-    let origin_removed = control.create(&origin_name).expect("DM_DEV_CREATE origin");
-    origin_removed
+    let origin = Owned::create(&control, &origin_name).expect("DM_DEV_CREATE origin");
+    origin
         .builder()
         .add(
             0,
@@ -141,19 +138,18 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .expect("add snapshot-origin")
         .load()
         .expect("DM_TABLE_LOAD origin");
-    origin_removed.resume().expect("resume origin");
+    origin.resume().expect("resume origin");
 
     // 2. Write a first pattern before any snapshot exists.
-    let origin_minor = origin_removed.id().minor();
+    let origin_minor = origin.id().minor();
     let origin_path = format!("/dev/dm-{origin_minor}");
     write_block(&origin_path, 0, 0xAA);
 
     // 3. A persistent snapshot of that origin, sharing the same COW
     //    device the eventual snapshot-merge target will take over.
     let snap_name = format!("devmap-test-snapmerge-snap-{}", std::process::id());
-    let snap_removed = control.create(&snap_name).expect("DM_DEV_CREATE snapshot");
-    snap_removed
-        .builder()
+    let snap = Owned::create(&control, &snap_name).expect("DM_DEV_CREATE snapshot");
+    snap.builder()
         .add(
             0,
             origin_len_sectors,
@@ -166,7 +162,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .expect("add snapshot")
         .load()
         .expect("DM_TABLE_LOAD snapshot");
-    snap_removed.resume().expect("resume snapshot");
+    snap.resume().expect("resume snapshot");
 
     // 4. Write a second pattern now that the snapshot is active. This is
     //    the divergence a merge undoes: dm-snapshot preserves the *old*
@@ -180,8 +176,8 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     //    suspend the old snapshot device (required precondition per
     //    dm-snap.c's snapshot_preresume), then resume the origin —
     //    activating the merge, which runs in the background.
-    origin_removed.suspend().expect("suspend origin");
-    origin_removed
+    origin.suspend().expect("suspend origin");
+    origin
         .builder()
         .add(
             0,
@@ -195,18 +191,17 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .expect("add snapshot-merge")
         .load()
         .expect("DM_TABLE_LOAD snapshot-merge");
-    snap_removed
-        .suspend()
+    snap.suspend()
         .expect("suspend old snapshot before handover");
-    origin_removed.resume().expect("resume as snapshot-merge");
+    origin.resume().expect("resume as snapshot-merge");
 
     // 6. Wait for the background merge to finish: sectors_allocated drops
     //    to exactly metadata_sectors once nothing is left to fold in.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let status = origin_removed.status().expect("DM_DEV_STATUS");
+        let status = origin.status().expect("DM_DEV_STATUS");
         assert_eq!(status.target_count(), 1);
-        let reported: Vec<_> = origin_removed.info().expect("DM_TABLE_STATUS").collect();
+        let reported: Vec<_> = origin.info().expect("DM_TABLE_STATUS").collect();
         // The merge is done once nothing but metadata is left allocated.
         if let Some(snapshot::Info::Usage {
             allocated_sectors,
@@ -235,11 +230,9 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
 
     // The old snapshot device is now a dead end (kernel returns -EIO on
     // access to it once merging has started) — remove it explicitly
-    // rather than relying on `Removed`'s best-effort drop, so a failure
+    // rather than relying on `Owned`'s best-effort drop, so a failure
     // here is visible instead of silently swallowed.
-    devmap_linux::Device::from(snap_removed)
-        .remove()
-        .expect("remove handed-over snapshot device");
+    snap.remove().expect("remove handed-over snapshot device");
 }
 
 fn write_block(path: &str, block_index: u64, byte: u8) {

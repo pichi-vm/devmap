@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! [`Device`]: a plain, non-destructive handle identified by `dev_t`.
-//! [`Removed`]: the auto-removing wrapper `Control::create` returns.
 //! [`Status`]: `DM_DEV_STATUS`'s fixed-size fields.
 
 use std::fmt;
@@ -125,8 +124,9 @@ pub(crate) fn check_version(header: &DmHeader) -> io::Result<()> {
 
 /// A handle to a device-mapper device, identified purely by its
 /// [`DevId`]. Plain and non-destructive: dropping a `Device` does nothing
-/// to the underlying kernel object. Use [`Removed`] (via `.into()`) to opt
-/// in to removal on drop.
+/// to the underlying kernel object — a dm device outlives the process that
+/// created it, and tearing one down is an explicit
+/// [`remove`](Device::remove) or [`remove_deferred`](Device::remove_deferred).
 ///
 /// `Clone` is cheap (a `DevId` plus a reference-counted control fd).
 /// Equality and hashing are by `DevId` identity only — two handles to the
@@ -213,26 +213,44 @@ impl Device {
         self.suspend_or_resume(false)
     }
 
-    fn remove_now(control: &File, dev_t: DevId, deferred: bool) -> io::Result<()> {
-        let mut header = DmHeader::by_dev(dev_t.to_dev_t());
-        // The drop guard defers so a busy device is still reclaimed once it's
-        // released; explicit `remove` asks for immediate removal (and its
-        // error).
+    fn remove_now(&self, deferred: bool) -> io::Result<()> {
+        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
         if deferred {
             header.set_deferred_remove();
         }
-        DM_DEV_REMOVE.ioctl(control, &mut header)?;
+        DM_DEV_REMOVE.ioctl(&self.control, &mut header)?;
         check_version(&header)
     }
 
-    /// `DM_DEV_REMOVE`. Explicit, observable-error removal.
+    /// `DM_DEV_REMOVE`. Immediate removal, and the kernel's error if it
+    /// can't be done now.
     ///
     /// # Errors
     ///
-    /// The kernel's `io::Error` if it rejects the removal (e.g. the
-    /// device is still open).
+    /// The kernel's `io::Error` if it rejects the removal — notably
+    /// `ResourceBusy` (`EBUSY`) if the device is still open. Use
+    /// [`remove_deferred`](Device::remove_deferred) when a busy device
+    /// should be reclaimed later rather than reported as an error.
     pub fn remove(self) -> io::Result<()> {
-        Self::remove_now(&self.control, self.dev_t, false)
+        self.remove_now(false)
+    }
+
+    /// `DM_DEV_REMOVE` with `DM_DEFERRED_REMOVE`: remove now if the device
+    /// is unused, otherwise ask the kernel to remove it as soon as the last
+    /// holder closes it.
+    ///
+    /// This is the only autoremoval this crate offers, and it is the
+    /// kernel's — the flag arms a device-mapper-side teardown that survives
+    /// this process exiting. A `Drop` impl could not offer the same
+    /// guarantee: it would not run on `abort`, on a signal, or on the
+    /// process being killed, and it would fire on error paths where the
+    /// caller wanted the half-built device left behind to inspect.
+    ///
+    /// # Errors
+    ///
+    /// The kernel's `io::Error` if it rejects the removal outright.
+    pub fn remove_deferred(self) -> io::Result<()> {
+        self.remove_now(true)
     }
 
     /// `DM_DEV_STATUS` using this device's own `dev_t`.
@@ -546,55 +564,6 @@ fn parse_message_reply(buf: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(&reply[..nul]).into_owned())
 }
 
-/// The auto-removing wrapper [`crate::Control::create`] returns. `Drop`
-/// removes the device, discarding errors, using `DM_DEFERRED_REMOVE` so a
-/// still-open device is reclaimed once released rather than leaking on
-/// `EBUSY`. Use `Device::from(removed).remove()` for immediate,
-/// observable-error removal, or `Device::from(removed)` (`.into()`) alone to
-/// opt out of removal entirely and keep using the device.
-///
-/// `#[must_use]`: dropping a `Removed` immediately removes the device, so a
-/// discarded value (`let _ = control.create(name)?;`) would silently tear
-/// down the device it just created. Bind it to a name to keep the device
-/// alive for the binding's scope.
-#[must_use = "dropping a `Removed` removes the device; bind it to keep the device alive"]
-pub struct Removed(Option<Device>);
-
-impl fmt::Debug for Removed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Removed").field(&self.0).finish()
-    }
-}
-
-impl From<Device> for Removed {
-    fn from(device: Device) -> Self {
-        Removed(Some(device))
-    }
-}
-
-impl From<Removed> for Device {
-    fn from(mut removed: Removed) -> Self {
-        removed.0.take().unwrap()
-    }
-}
-
-impl std::ops::Deref for Removed {
-    type Target = Device;
-    fn deref(&self) -> &Device {
-        self.0.as_ref().unwrap()
-    }
-}
-
-impl Drop for Removed {
-    fn drop(&mut self) {
-        if let Some(device) = self.0.take() {
-            // Deferred so a still-open device is reclaimed once released,
-            // rather than leaking when an immediate remove would hit EBUSY.
-            let _ = Device::remove_now(&device.control, device.dev_t, true);
-        }
-    }
-}
-
 /// `DM_DEV_STATUS`'s fixed-size fields. Read-only: obtained from
 /// [`Device::status`] / [`crate::Control::by_name`] / [`crate::Control::by_uuid`],
 /// never constructed by the caller. Fields are private behind accessors so
@@ -676,19 +645,17 @@ mod tests {
     }
 
     #[test]
-    fn removed_derefs_to_the_inner_device() {
-        let removed = Removed::from(Device::new(DevId::new(252, 5).unwrap(), dummy_control()));
-        // Reached through Deref<Target = Device>.
-        assert_eq!(removed.id(), DevId::new(252, 5).unwrap());
-    }
-
-    #[test]
-    fn converting_removed_into_device_yields_the_inner_device() {
-        // From<Removed> for Device takes the inner Device out (disarming the
-        // drop-based removal) and hands it back intact.
-        let removed = Removed::from(Device::new(DevId::new(252, 7).unwrap(), dummy_control()));
-        let device: Device = removed.into();
-        assert_eq!(device.id(), DevId::new(252, 7).unwrap());
+    fn dropping_a_device_handle_touches_no_kernel_state() {
+        // A `Device` is a handle, not an owner. The control fd here is
+        // `/dev/null`, which would reject a `DM_DEV_REMOVE` ioctl — so if a
+        // drop guard ever came back and swallowed its error, this test would
+        // still pass, and a live-device test would be the one to catch it.
+        // What it does pin down is that dropping a handle is infallible and
+        // silent: removal is only ever spelled `remove`/`remove_deferred`.
+        let device = Device::new(DevId::new(252, 5).unwrap(), dummy_control());
+        let id = device.id();
+        drop(device);
+        assert_eq!(id, DevId::new(252, 5).unwrap());
     }
 
     #[test]

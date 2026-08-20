@@ -13,19 +13,12 @@
 //! assigns a uuid; `lifecycle_ioctls.rs` covers it, attaching one first
 //! with `Control::set_uuid`.
 
+mod common;
+
 use std::io::Read as _;
 
-use devmap_linux::{Control, DevId, targets::Zero};
-
-/// Returns `None` (and prints a skip notice) if this process can't open
-/// `/dev/mapper/control` — i.e. isn't root / doesn't have `CAP_SYS_ADMIN`.
-fn open_control() -> Option<Control> {
-    if let Ok(control) = Control::open() {
-        return Some(control);
-    }
-    eprintln!("skip: requires root (or CAP_SYS_ADMIN) for /dev/mapper/control");
-    None
-}
+use common::{Owned, open_control};
+use devmap_linux::{DevId, targets::Zero};
 
 #[test]
 fn create_load_resume_read_zeros_remove() {
@@ -34,17 +27,16 @@ fn create_load_resume_read_zeros_remove() {
     };
 
     let name = format!("devmap-test-zero-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    removed
-        .builder()
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let id = removed.id();
+    let id = dev.id();
     let (major, minor) = (id.major(), id.minor());
     let path = format!("/dev/dm-{minor}");
     let mut file = std::fs::File::open(&path)
@@ -60,12 +52,13 @@ fn create_load_resume_read_zeros_remove() {
     // dm-zero has no `.status` callback at all, so the kernel emits an
     // empty params field for it — which is exactly what `NoInfo` accepts
     // and nothing else.
-    let info: Vec<_> = removed.info().expect("DM_TABLE_STATUS (info)").collect();
+    let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
     assert_eq!(info.len(), 1);
     assert_eq!(info[0].params(), "");
     assert_eq!(info[0].parse::<Zero>(), Some(devmap_linux::NoInfo));
 
-    // `removed` drops here: best-effort DM_DEV_REMOVE.
+    // The test harness's `Owned` guard drops here and removes the mapping;
+    // the library itself never removes anything implicitly.
 }
 
 #[test]
@@ -75,31 +68,30 @@ fn suspend_resume_round_trips() {
     };
 
     let name = format!("devmap-test-suspend-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    removed
-        .builder()
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let status = removed.status().expect("DM_DEV_STATUS");
+    let status = dev.status().expect("DM_DEV_STATUS");
     assert!(
         !status.is_suspended(),
         "device should not be suspended after resume()"
     );
 
-    removed.suspend().expect("DM_DEV_SUSPEND (suspend)");
-    let status = removed.status().expect("DM_DEV_STATUS");
+    dev.suspend().expect("DM_DEV_SUSPEND (suspend)");
+    let status = dev.status().expect("DM_DEV_STATUS");
     assert!(
         status.is_suspended(),
         "device should be suspended after suspend()"
     );
 
-    removed.resume().expect("DM_DEV_SUSPEND (resume again)");
-    let status = removed.status().expect("DM_DEV_STATUS");
+    dev.resume().expect("DM_DEV_SUSPEND (resume again)");
+    let status = dev.status().expect("DM_DEV_STATUS");
     assert!(
         !status.is_suspended(),
         "device should not be suspended after resuming again"
@@ -113,17 +105,16 @@ fn status_reports_sane_values_for_a_fresh_device() {
     };
 
     let name = format!("devmap-test-status-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    removed
-        .builder()
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let status = removed.status().expect("DM_DEV_STATUS");
+    let status = dev.status().expect("DM_DEV_STATUS");
     assert_eq!(status.target_count(), 1);
     assert!(status.open_count() >= 0);
 }
@@ -135,17 +126,16 @@ fn table_status_reports_back_the_loaded_target() {
     };
 
     let name = format!("devmap-test-tstatus-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    removed
-        .builder()
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let reported: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    let reported: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(reported.len(), 1);
     let row = &reported[0];
     assert_eq!(row.start(), 0);
@@ -161,21 +151,20 @@ fn list_reports_the_created_device() {
     };
 
     let name = format!("devmap-test-list-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let found = control
         .list()
         .expect("DM_LIST_DEVICES")
         .find(|(listed_name, _)| *listed_name == name)
         .unwrap_or_else(|| panic!("device {name} not found in DM_LIST_DEVICES output"));
-    assert_eq!(found.1.id(), removed.id());
+    assert_eq!(found.1.id(), dev.id());
 }
 
 #[test]
@@ -185,16 +174,15 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
     };
 
     let name = format!("devmap-test-attach-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let id = removed.id();
+    let id = dev.id();
     let (major, minor) = (id.major(), id.minor());
 
     let by_device = control.by_device(DevId::new(major, minor).expect("in range"));
@@ -218,49 +206,105 @@ fn by_name_finds_device_and_reports_status() {
     };
 
     let name = format!("devmap-test-byname-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let (device, status) = control.by_name(&name).expect("DM_DEV_STATUS by_name");
-    assert_eq!(device.id(), removed.id());
+    assert_eq!(device.id(), dev.id());
     assert_eq!(status.target_count(), 1);
 }
 
 #[test]
-fn dropping_guard_removes_the_device() {
+fn dropping_a_handle_leaves_the_device_alone() {
+    // The core of the no-autoremoval contract: a `Device` is a handle to
+    // kernel state, and letting it go must not touch that state. Anything
+    // else would mean an error path or a panic could tear down a device the
+    // caller still wants — and would silently do so, since `Drop` has
+    // nowhere to report a failure.
     let Some(control) = open_control() else {
         return;
     };
 
     let name = format!("devmap-test-drop-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = control.create(&name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("DM_DEV_SUSPEND (resume)");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    // Present before the guard drops.
-    control
+    drop(dev);
+    let (survivor, _) = control
         .by_name(&name)
-        .expect("device should exist before drop");
+        .expect("dropping a handle must not remove the device");
 
-    // Dropping the guard removes the device.
-    drop(removed);
-
-    // The device is gone, so a name lookup now fails.
+    // Removal is explicit, and it reports its own success.
+    survivor.remove().expect("DM_DEV_REMOVE");
     assert!(
         control.by_name(&name).is_err(),
-        "device should be gone after the guard drops"
+        "the device is gone once it is actually removed"
     );
+}
+
+#[test]
+fn deferred_removal_reclaims_a_device_that_is_still_open() {
+    // The kernel's autoremoval, and the reason a Drop guard isn't needed:
+    // `remove_deferred` succeeds against an open device and the kernel
+    // tears it down when the last holder closes it. An immediate `remove`
+    // in the same position returns EBUSY.
+    let Some(control) = open_control() else {
+        return;
+    };
+
+    let name = format!("devmap-test-deferred-{}", std::process::id());
+    let dev = control.create(&name).expect("DM_DEV_CREATE");
+    dev.builder()
+        .add(0, 8192, Zero)
+        .expect("add zero")
+        .load()
+        .expect("DM_TABLE_LOAD");
+    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+
+    let path = format!("/dev/dm-{}", dev.id().minor());
+    let holder = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("skip: {path} not available yet ({e})");
+            dev.remove_deferred().ok();
+            return;
+        }
+    };
+
+    // Held open, so an immediate removal must be refused rather than
+    // silently deferred.
+    let err = dev
+        .clone()
+        .remove()
+        .expect_err("an open device cannot be removed immediately");
+    assert_eq!(err.kind(), std::io::ErrorKind::ResourceBusy);
+
+    // Deferred removal is accepted, and the device survives until the
+    // holder lets go.
+    dev.remove_deferred().expect("DM_DEV_REMOVE (deferred)");
+    control
+        .by_name(&name)
+        .expect("still present while a holder has it open");
+
+    drop(holder);
+    let gone = (0..50).any(|_| {
+        if control.by_name(&name).is_err() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        false
+    });
+    assert!(gone, "the kernel must reclaim the device once it is closed");
 }
 
 #[test]
@@ -270,7 +314,7 @@ fn create_rejects_a_duplicate_name() {
     };
 
     let name = format!("devmap-test-dup-{}", std::process::id());
-    let _removed = control.create(&name).expect("DM_DEV_CREATE");
+    let _dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     let err = control
         .create(&name)

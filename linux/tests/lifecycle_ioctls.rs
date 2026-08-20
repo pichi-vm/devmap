@@ -10,7 +10,7 @@
 
 mod common;
 
-use common::{LoopDevice, open_control};
+use common::{LoopDevice, Owned, open_control};
 use devmap_linux::targets::{Linear, Zero};
 
 #[test]
@@ -23,9 +23,8 @@ fn deps_reports_the_devices_the_table_opens() {
     let backing_device = control.by_node(&backing.path).expect("by_node backing");
 
     let name = format!("devmap-test-deps-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(
             0,
             8 * 1024 * 1024 / 512,
@@ -37,10 +36,10 @@ fn deps_reports_the_devices_the_table_opens() {
         .expect("add linear")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // A linear mapping opens exactly the one device it maps.
-    let deps = removed.deps().expect("DM_TABLE_DEPS");
+    let deps = dev.deps().expect("DM_TABLE_DEPS");
     assert_eq!(
         deps,
         [backing_device.id()],
@@ -55,17 +54,16 @@ fn deps_is_empty_for_a_target_that_opens_no_devices() {
     };
 
     let name = format!("devmap-test-deps-zero-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // dm-zero is purely synthetic — it opens nothing.
-    assert_eq!(removed.deps().expect("DM_TABLE_DEPS"), []);
+    assert_eq!(dev.deps().expect("DM_TABLE_DEPS"), []);
 }
 
 #[test]
@@ -75,38 +73,35 @@ fn clear_inactive_table_discards_the_staged_table() {
     };
 
     let name = format!("devmap-test-clear-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     // Stage and activate a first table so the device has an active one.
-    removed
-        .builder()
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
     assert!(
-        removed.status().expect("status").has_active_table(),
+        dev.status().expect("status").has_active_table(),
         "the resumed table is active"
     );
 
     // Stage a second, larger table but do NOT resume it.
-    removed
-        .builder()
+    dev.builder()
         .add(0, 16384, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD (staged)");
     assert!(
-        removed.status().expect("status").has_inactive_table(),
+        dev.status().expect("status").has_inactive_table(),
         "the staged table is inactive"
     );
 
-    removed
-        .clear_inactive_table()
+    dev.clear_inactive_table()
         .expect("DM_TABLE_CLEAR must discard the staged table");
 
-    let status = removed.status().expect("status");
+    let status = dev.status().expect("status");
     assert!(
         !status.has_inactive_table(),
         "the staged table must be gone after a clear"
@@ -124,20 +119,18 @@ fn clear_inactive_table_is_a_no_op_with_nothing_staged() {
     };
 
     let name = format!("devmap-test-clear-noop-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // Nothing is staged; clearing must succeed rather than error.
-    removed
-        .clear_inactive_table()
+    dev.clear_inactive_table()
         .expect("clearing with nothing staged is not an error");
-    assert!(!removed.status().expect("status").has_inactive_table());
+    assert!(!dev.status().expect("status").has_inactive_table());
 }
 
 #[test]
@@ -148,15 +141,14 @@ fn rename_moves_the_device_to_the_new_name() {
 
     let old = format!("devmap-test-rename-old-{}", std::process::id());
     let new = format!("devmap-test-rename-new-{}", std::process::id());
-    let removed = control.create(&old).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &old).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
-    let id = removed.id();
+    dev.resume().expect("resume");
+    let id = dev.id();
 
     let renamed = control.rename(&old, &new).expect("DM_DEV_RENAME");
     assert_eq!(renamed.id(), id, "rename keeps the same dev_t");
@@ -178,14 +170,14 @@ fn rename_rejects_a_name_already_in_use() {
 
     let first = format!("devmap-test-rename-clash-a-{}", std::process::id());
     let second = format!("devmap-test-rename-clash-b-{}", std::process::id());
-    let a = control.create(&first).expect("create first");
+    let a = Owned::create(&control, &first).expect("create first");
     a.builder()
         .add(0, 8192, Zero)
         .expect("add")
         .load()
         .expect("load");
     a.resume().expect("resume");
-    let b = control.create(&second).expect("create second");
+    let b = Owned::create(&control, &second).expect("create second");
     b.builder()
         .add(0, 8192, Zero)
         .expect("add")
@@ -210,15 +202,14 @@ fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
     // be exercised against a real device at all.
     let name = format!("devmap-test-uuid-{}", std::process::id());
     let uuid = format!("devmap-test-uuid-value-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
-    let id = removed.id();
+    dev.resume().expect("resume");
+    let id = dev.id();
 
     control
         .set_uuid(&name, &uuid)
@@ -272,17 +263,16 @@ fn add_raw_loads_a_table_line_from_strings() {
     // typed target involved.
     let params = format!("{} 0", backing_device.id());
     let name = format!("devmap-test-addraw-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add_raw(0, 8 * 1024 * 1024 / 512, "linear", &params)
         .expect("add_raw linear")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // The kernel accepts it and reads the same line back.
-    let rows: Vec<_> = removed.table().expect("DM_TABLE_STATUS").collect();
+    let rows: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].type_name(), "linear");
     assert_eq!(rows[0].params(), params);
@@ -295,21 +285,20 @@ fn wait_event_returns_at_once_when_the_counter_already_differs() {
     };
 
     let name = format!("devmap-test-wait-{}", std::process::id());
-    let removed = control.create(&name).expect("DM_DEV_CREATE");
-    removed
-        .builder()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    dev.builder()
         .add(0, 8192, Zero)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
-    removed.resume().expect("resume");
+    dev.resume().expect("resume");
 
     // The kernel blocks only while the passed value EQUALS the device's
     // current counter, so a value that differs returns immediately. This
     // is the same path a caller hits when an event fired between reading
     // the status and waiting on it, and it keeps the test from hanging.
-    let event_nr = removed.status().expect("status").event_nr();
-    let status = removed
+    let event_nr = dev.status().expect("status").event_nr();
+    let status = dev
         .wait_event(event_nr.wrapping_add(1))
         .expect("DM_DEV_WAIT");
     assert_eq!(

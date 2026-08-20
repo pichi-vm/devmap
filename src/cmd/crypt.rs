@@ -22,7 +22,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 use devmap_linux::targets::Crypt;
 use devmap_linux::targets::crypt::{Key, KeyType};
-use devmap_linux::{Control, DevId, Device};
+use devmap_linux::{Control, DevId};
 use devmap_luks::format::{Entropy, FormatOptions, Version};
 use devmap_luks::kdf::Kdf;
 use devmap_luks::{Hash, Header, MasterKey};
@@ -202,17 +202,16 @@ fn open(a: &CryptOpen) -> Result<()> {
 /// Create, load, and resume the mapping.
 fn activate(name: &str, length_sectors: u64, target: Crypt) -> Result<()> {
     let control = Control::open().context("open /dev/mapper/control")?;
-    let removed = control
+    let device = control
         .create(name)
         .with_context(|| format!("create {name}"))?;
-    removed
+    device
         .builder()
         .add(0, length_sectors, target)
         .context("build the dm-crypt table")?
         .load()
         .context("load the dm-crypt table")?;
-    removed.resume().context("resume")?;
-    let _ = Device::from(removed);
+    device.resume().context("resume")?;
     Ok(())
 }
 
