@@ -129,17 +129,12 @@ fn zoned_persona_format_start_status() {
     let (ok, out) = run(BIN, &["zoned", "status", &name]);
     assert!(ok && out.contains("zones"), "status: {out}");
 
-    // Read/write through the mapped device to prove it is live.
-    let node = format!("/dev/mapper/{name}");
-    let mut ready = false;
-    for _ in 0..50 {
-        if fs::metadata(&node).is_ok() {
-            ready = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    assert!(ready, "mapped device node should appear");
+    // Read/write through the mapped device to prove it is live. The
+    // kernel's node exists as soon as the table is live, so unlike the
+    // /dev/mapper symlink there is nothing to wait for.
+    let control = Control::open().expect("open the control device");
+    let (mapped, _) = control.by_name(&name).expect("look the mapping up");
+    let node = mapped.node_path();
     let pattern = vec![0x5au8; 4096];
     fs::write(&node, &pattern).expect("write through dm-zoned");
     let readback = fs::read(&node).expect("read dm-zoned");

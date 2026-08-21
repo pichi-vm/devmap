@@ -59,12 +59,7 @@ fn thin_pool_provisions_a_volume_via_message_and_reads_writes() {
         .expect("DM_TABLE_LOAD thin");
     thin.resume().expect("resume thin");
 
-    let minor = thin.id().minor();
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(format!("/dev/dm-{minor}"))
-        .expect("open");
+    let mut file = thin.open_rw().expect("open");
     let pattern = [0x33u8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");

@@ -11,7 +11,7 @@
 //! whole-device wipe pass), so reading unwritten blocks would fail an
 //! integrity check — expected, not a persona bug.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::os::unix::fs::{FileExt as _, symlink};
 use std::path::PathBuf;
 use std::process::Command;
@@ -108,17 +108,12 @@ fn integrity_persona_format_open_roundtrip() {
     let (ok, out) = run(BIN, &["integrity", "status", &name]);
     assert!(ok && out.split_whitespace().count() == 3, "status: {out}");
 
-    // Round-trip a block through the mapped device.
-    let node = format!("/dev/mapper/{name}");
-    let mut mapped = None;
-    for _ in 0..50 {
-        if let Ok(f) = OpenOptions::new().read(true).write(true).open(&node) {
-            mapped = Some(f);
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    let file = mapped.expect("mapped integrity device opens");
+    // Round-trip a block through the mapped device. Going through the
+    // kernel's own node rather than the /dev/mapper symlink means there is
+    // no udev arrival to wait for.
+    let control = Control::open().expect("open the control device");
+    let (mapped, _) = control.by_name(&name).expect("look the mapping up");
+    let file = mapped.open_rw().expect("mapped integrity device opens");
     let pattern: Vec<u8> = (0..8192u32).map(|i| (i % 251) as u8).collect();
     file.write_all_at(&pattern, 0)
         .expect("write through integrity");

@@ -73,12 +73,7 @@ fn crypt_maps_a_device_and_round_trips_data() {
     assert_eq!(strip_key(&reported.to_string()), strip_key(&rendered));
 
     // Serve real I/O through the mapping to prove it is live.
-    let minor = dev.id().minor();
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(format!("/dev/dm-{minor}"))
-        .expect("open mapped dm-crypt device");
+    let mut file = dev.open_rw().expect("open mapped dm-crypt device");
     let pattern: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
     file.write_all(&pattern).expect("write through dm-crypt");
     file.flush().expect("flush");

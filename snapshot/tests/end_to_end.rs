@@ -136,19 +136,13 @@ fn convert_then_activate_dm_snapshot_and_read_back() {
     snap.resume().expect("resume snapshot");
 
     // Read the mapped snapshot back and compare to the original image.
-    let node = format!("/dev/dm-{}", snap.id().minor());
+    // The kernel's own node is there the moment `resume` returns — no wait
+    // for udev, because nothing here goes through /dev/mapper.
     let mut readback = vec![0u8; image_len];
-    let mut read_ok = false;
-    for _ in 0..50 {
-        if let Ok(mut f) = File::open(&node)
-            && f.read_exact(&mut readback).is_ok()
-        {
-            read_ok = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    assert!(read_ok, "mapped snapshot device becomes readable");
+    snap.open()
+        .expect("open mapped snapshot device")
+        .read_exact(&mut readback)
+        .expect("read the mapped snapshot back");
     assert_eq!(readback, image, "dm-snapshot must serve the original image");
 
     // Teardown is ordered by dependency: the snapshot holds the origin

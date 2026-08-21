@@ -145,12 +145,7 @@ fn format_then_activate_dm_zoned_and_serve_io() {
     );
 
     // Serve real I/O through the mapped device to prove it is live.
-    let minor = mapped.id().minor();
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(format!("/dev/dm-{minor}"))
-        .expect("open mapped dm-zoned device");
+    let mut file = mapped.open_rw().expect("open mapped dm-zoned device");
     let pattern = [0x5au8; 4096];
     file.write_all(&pattern).expect("write through dm-zoned");
     file.flush().expect("flush");

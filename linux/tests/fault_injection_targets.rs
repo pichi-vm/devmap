@@ -12,7 +12,7 @@ use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_linux::targets::delay::Leg;
 use devmap_linux::targets::{Delay, Dust, Flakey, Unstriped};
 
-fn write_then_read_back(path: &str) {
+fn write_then_read_back(path: &std::path::Path) {
     use std::io::{Read, Seek, SeekFrom, Write};
     let mut file = std::fs::OpenOptions::new()
         .read(true)
@@ -60,8 +60,7 @@ fn delay_passes_data_through_unchanged() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
 
-    let minor = dev.id().minor();
-    write_then_read_back(&format!("/dev/dm-{minor}"));
+    write_then_read_back(&dev.node_path());
 }
 
 #[test]
@@ -89,8 +88,7 @@ fn flakey_behaves_normally_during_the_up_interval() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
 
-    let minor = dev.id().minor();
-    write_then_read_back(&format!("/dev/dm-{minor}"));
+    write_then_read_back(&dev.node_path());
 }
 
 #[test]
@@ -123,8 +121,7 @@ fn dust_bypass_mode_passes_data_through_and_message_interface_works() {
     dev.resume().expect("resume");
 
     // dust starts in "bypass" mode (all I/O passed through) until `enable`.
-    let minor = dev.id().minor();
-    write_then_read_back(&format!("/dev/dm-{minor}"));
+    write_then_read_back(&dev.node_path());
 
     let reply = dev
         .message(0, "countbadblocks")
@@ -166,6 +163,5 @@ fn unstriped_with_a_single_stripe_is_a_pure_passthrough() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
 
-    let minor = dev.id().minor();
-    write_then_read_back(&format!("/dev/dm-{minor}"));
+    write_then_read_back(&dev.node_path());
 }
