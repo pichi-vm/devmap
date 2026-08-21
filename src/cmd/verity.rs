@@ -5,7 +5,6 @@
 //! ([`devmap_linux`]).
 
 use std::fs::{File, OpenOptions};
-use std::io::{Seek as _, SeekFrom};
 use std::os::unix::fs::FileExt as _;
 
 use anyhow::{Context as _, Result, bail};
@@ -16,10 +15,7 @@ use devmap_verity::{Superblock, VerityBuilder, VerityParams, feed_from_reader};
 use crate::cli::{
     VerityClose, VerityCmd, VerityDump, VerityFormat, VerityOpen, VerityStatus, VerityVerify,
 };
-use crate::{hex, urandom, uuid};
-
-/// Bytes per sector — the unit of a dm table's start/length.
-const SECTOR: u64 = 512;
+use crate::{hex, size, urandom, uuid};
 
 pub(crate) fn run(cmd: VerityCmd) -> Result<()> {
     match cmd {
@@ -62,8 +58,7 @@ fn format(a: &VerityFormat) -> Result<()> {
     // Stream the data device through the builder rather than loading it.
     let mut data =
         File::open(&a.data_dev).with_context(|| format!("open {}", a.data_dev.display()))?;
-    let size = data.seek(SeekFrom::End(0)).context("size data device")?;
-    data.rewind().context("rewind data device")?;
+    let size = size::of(&data).context("size data device")?;
 
     let dbs = params.data_block_size as usize;
     let mut builder = VerityBuilder::new(&params).context("init verity builder")?;
@@ -113,7 +108,7 @@ fn open(a: &VerityOpen) -> Result<()> {
         digest,
         salt: sb.salt,
     };
-    let length = sb.data_blocks * u64::from(sb.data_block_size) / SECTOR;
+    let length = sb.data_blocks * u64::from(sb.data_block_size) / size::SECTOR;
 
     let control = Control::open().context("open /dev/mapper/control")?;
     let device = control

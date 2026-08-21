@@ -7,21 +7,17 @@
 //! (i.e. not run as root), so `cargo test` stays green for unprivileged
 //! builds; run the binary under `sudo -n` to exercise it.
 
+mod common;
+
 use std::io::Write as _;
 use std::os::unix::fs::symlink;
 use std::process::{Command, Stdio};
 
-use devmap_linux::Control;
-
-/// Path to the freshly-built `devmap` binary, provided by cargo.
-const BIN: &str = env!("CARGO_BIN_EXE_devmap");
-
-/// True when we can talk to device-mapper (proxy for "running as root").
-fn have_dm() -> bool {
-    Control::open().is_ok()
-}
+use common::{BIN, have_dm};
 
 /// Run `devmap <args...>` feeding `stdin`, returning (success, stdout).
+/// Table loads are fed on stdin, so this persona needs its own runner
+/// rather than the harness's plain [`common::run`].
 fn run(argv0: &str, args: &[&str], stdin: &str) -> (bool, String) {
     let mut child = Command::new(argv0)
         .args(args)

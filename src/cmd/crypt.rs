@@ -16,7 +16,7 @@
 //! working, and the key is exposed for the shortest possible window.
 
 use std::fs::File;
-use std::io::{Read as _, Seek as _, SeekFrom};
+use std::io::Read as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
@@ -31,10 +31,7 @@ use keyutils::keytypes::{Logon, logon};
 use crate::cli::{
     CryptClose, CryptCmd, CryptDump, CryptFormat, CryptOpen, CryptStatus, LuksVersion,
 };
-use crate::uuid;
-
-/// Bytes per sector — dm-crypt table offsets and lengths are in sectors.
-const SECTOR: u64 = 512;
+use crate::{size, uuid};
 
 /// The logon-key subtype devmap publishes master keys under. Distinct from
 /// cryptsetup's `cryptsetup:` so the two can never resolve to each other's
@@ -120,13 +117,6 @@ fn read_passphrase(key_file: Option<&Path>) -> Result<Vec<u8>> {
     }
 }
 
-/// The size of a block device or file, in bytes.
-fn device_size(device: &Path) -> Result<u64> {
-    let mut file = File::open(device).with_context(|| format!("open {}", device.display()))?;
-    file.seek(SeekFrom::End(0))
-        .with_context(|| format!("size {}", device.display()))
-}
-
 /// Publish `key` into the thread keyring as a `logon` key that dm-crypt can
 /// look up, returning the handle so the caller can delete it again.
 ///
@@ -156,14 +146,16 @@ fn open(a: &CryptOpen) -> Result<()> {
         .context("unlock the volume")?;
 
     let payload_offset = header.payload_offset_bytes().context("payload offset")?;
-    let total = device_size(&a.device)?;
+    // The handle opened above is the same device, so size it rather than
+    // opening it a second time.
+    let total = size::of(&device_handle).with_context(|| format!("size {}", a.device.display()))?;
     if total <= payload_offset {
         bail!(
             "{} is {total} bytes, which leaves no payload after the {payload_offset}-byte header",
             a.device.display()
         );
     }
-    let length_sectors = (total - payload_offset) / SECTOR;
+    let length_sectors = (total - payload_offset) / size::SECTOR;
 
     // The table refers to the key by `<subtype>:<description>`, which is how
     // the kernel renders a logon key's description.
@@ -174,7 +166,7 @@ fn open(a: &CryptOpen) -> Result<()> {
     let sector_size = header.sector_size();
     let target = Crypt {
         iv_offset: header.iv_tweak(),
-        offset: payload_offset / SECTOR,
+        offset: payload_offset / size::SECTOR,
         sector_size: (sector_size != 512).then_some(sector_size),
         allow_discards: a.allow_discards,
         ..Crypt::new(
@@ -275,7 +267,7 @@ fn format(a: &CryptFormat) -> Result<()> {
     println!("  Key size:       \t{} bits", options.key_size * 8);
     println!(
         "  Payload offset: \t{} sectors",
-        formatted.payload_offset / SECTOR
+        formatted.payload_offset / size::SECTOR
     );
     Ok(())
 }
@@ -376,7 +368,7 @@ fn dump(a: &CryptDump) -> Result<()> {
     println!("MK bits:        \t{}", header.key_bytes() * 8);
     println!(
         "Payload offset: \t{} sectors",
-        header.payload_offset_bytes().context("payload offset")? / SECTOR
+        header.payload_offset_bytes().context("payload offset")? / size::SECTOR
     );
     println!("Sector size:    \t{}", header.sector_size());
     for slot in header.keyslot_summaries() {

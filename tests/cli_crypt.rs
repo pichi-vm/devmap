@@ -12,54 +12,22 @@
 //!
 //! Skips cleanly without root or without cryptsetup.
 
+mod common;
+
 use std::os::unix::fs::symlink;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
+use common::{BIN, LoopDevice, have_dm, run};
 use devmap_linux::Control;
 
-const BIN: &str = env!("CARGO_BIN_EXE_devmap");
 const PASSPHRASE: &str = "correct horse battery staple";
-
-fn have_dm() -> bool {
-    Control::open().is_ok()
-}
 
 fn have_cryptsetup() -> bool {
     Command::new("cryptsetup")
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
-}
-
-/// A backing file attached as a loop device; detaches and deletes on drop.
-struct LoopDevice {
-    path: String,
-    file_path: PathBuf,
-}
-
-impl LoopDevice {
-    fn attach(file_path: PathBuf) -> Self {
-        let out = Command::new("losetup")
-            .args(["-f", "--show"])
-            .arg(&file_path)
-            .output()
-            .expect("run losetup");
-        assert!(
-            out.status.success(),
-            "losetup failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let path = String::from_utf8(out.stdout).unwrap().trim().to_string();
-        Self { path, file_path }
-    }
-}
-
-impl Drop for LoopDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("losetup").args(["-d", &self.path]).status();
-        let _ = std::fs::remove_file(&self.file_path);
-    }
 }
 
 /// Run a command, feeding the passphrase on stdin; returns (ok, stdout).
@@ -80,18 +48,6 @@ fn run_with_passphrase(program: &str, args: &[&str]) -> (bool, String) {
             child.wait_with_output()
         })
         .expect("spawn");
-    if !out.status.success() {
-        eprintln!("stderr: {}", String::from_utf8_lossy(&out.stderr));
-    }
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
-}
-
-/// Plain command runner returning (ok, stdout).
-fn run(program: &str, args: &[&str]) -> (bool, String) {
-    let out = Command::new(program).args(args).output().expect("spawn");
     if !out.status.success() {
         eprintln!("stderr: {}", String::from_utf8_lossy(&out.stderr));
     }

@@ -4,13 +4,13 @@
 //! dm-thin metadata device, via [`devmap_persistent`].
 
 use std::fs::File;
-use std::io::Seek as _;
 
 use anyhow::{Context as _, Result, bail};
 use devmap_persistent::thin::Superblock;
 use devmap_persistent::{thin, thin_xml};
 
 use crate::cli::{ThinCheck, ThinCmd, ThinDump, ThinInfo, ThinRestore};
+use crate::size;
 
 pub(crate) fn run(cmd: ThinCmd) -> Result<()> {
     match cmd {
@@ -35,9 +35,7 @@ fn restore(a: &ThinRestore) -> Result<()> {
         .open(&a.output)
         .with_context(|| format!("open {}", a.output.display()))?;
     // The destination's own size bounds the allocator.
-    let len = out
-        .seek(std::io::SeekFrom::End(0))
-        .with_context(|| format!("size {}", a.output.display()))?;
+    let len = size::of(&out).with_context(|| format!("size {}", a.output.display()))?;
     let metadata_blocks = len / devmap_persistent::BLOCK_SIZE as u64;
 
     devmap_persistent::restore::restore(&pool, &mut out, metadata_blocks)

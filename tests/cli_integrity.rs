@@ -11,69 +11,13 @@
 //! whole-device wipe pass), so reading unwritten blocks would fail an
 //! integrity check — expected, not a persona bug.
 
-use std::fs::File;
+mod common;
+
 use std::os::unix::fs::{FileExt as _, symlink};
-use std::path::PathBuf;
 use std::process::Command;
 
+use common::{BIN, LoopDevice, have_dm, run};
 use devmap_linux::Control;
-
-/// Path to the freshly-built `devmap` binary, provided by cargo.
-const BIN: &str = env!("CARGO_BIN_EXE_devmap");
-
-fn have_dm() -> bool {
-    Control::open().is_ok()
-}
-
-/// A sparse backing file attached as a loop device; detaches on drop.
-struct LoopDevice {
-    path: String,
-    file_path: PathBuf,
-}
-
-impl LoopDevice {
-    fn create(size: u64) -> Self {
-        let file_path =
-            std::env::temp_dir().join(format!("devmap-it-integ-{}", std::process::id()));
-        File::create(&file_path)
-            .and_then(|f| f.set_len(size))
-            .expect("create backing file");
-        let out = Command::new("losetup")
-            .args(["-f", "--show"])
-            .arg(&file_path)
-            .output()
-            .expect("run losetup");
-        assert!(
-            out.status.success(),
-            "losetup failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let path = String::from_utf8(out.stdout).unwrap().trim().to_string();
-        Self { path, file_path }
-    }
-}
-
-impl Drop for LoopDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("losetup").args(["-d", &self.path]).status();
-        let _ = std::fs::remove_file(&self.file_path);
-    }
-}
-
-/// Run `argv0 args...`, returning (success, stdout).
-fn run(argv0: &str, args: &[&str]) -> (bool, String) {
-    let out = Command::new(argv0)
-        .args(args)
-        .output()
-        .expect("spawn devmap");
-    if !out.status.success() {
-        eprintln!("stderr: {}", String::from_utf8_lossy(&out.stderr));
-    }
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
-}
 
 #[test]
 fn integrity_persona_format_open_roundtrip() {
@@ -83,7 +27,7 @@ fn integrity_persona_format_open_roundtrip() {
     }
     let _ = Command::new("modprobe").arg("dm-integrity").status();
 
-    let dev = LoopDevice::create(32 * 1024 * 1024);
+    let dev = LoopDevice::sparse("integrity", 32 * 1024 * 1024);
 
     // format writes a superblock sized to the device.
     let (ok, out) = run(BIN, &["integrity", "format", &dev.path]);

@@ -15,6 +15,7 @@ mod cli;
 mod cmd;
 mod hex;
 mod multicall;
+mod size;
 mod table_input;
 mod urandom;
 mod uuid;
