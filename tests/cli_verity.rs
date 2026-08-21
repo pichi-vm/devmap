@@ -132,8 +132,12 @@ fn verity_persona_format_open_verify() {
     );
     assert!(ok, "open should succeed");
 
+    // Deliberately through /dev/mapper/<name> rather than the kernel's own
+    // node: that symlink is the surface the CLI documents, so one test
+    // holds it. udev creates it asynchronously, hence the poll — every
+    // other test reaches the mapping via `Device::node_path`, which is
+    // there the moment the table goes live.
     let node = format!("/dev/mapper/{name}");
-    // The /dev node is created by udev, asynchronously; poll briefly.
     let mut mapped = None;
     for _ in 0..50 {
         match std::fs::read(&node) {

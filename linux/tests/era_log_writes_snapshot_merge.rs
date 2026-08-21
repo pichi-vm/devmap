@@ -79,12 +79,7 @@ fn log_writes_counts_logged_entries_and_accepts_marks() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
 
-    let minor = dev.id().minor();
-    let path = format!("/dev/dm-{minor}");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .expect("open mapped device");
+    let mut file = dev.open_rw().expect("open mapped device");
     file.write_all(&[0xCDu8; 4096])
         .expect("write to logged device");
     file.sync_all().expect("fsync");
@@ -141,8 +136,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     origin.resume().expect("resume origin");
 
     // 2. Write a first pattern before any snapshot exists.
-    let origin_minor = origin.id().minor();
-    let origin_path = format!("/dev/dm-{origin_minor}");
+    let origin_path = origin.node_path();
     write_block(&origin_path, 0, 0xAA);
 
     // 3. A persistent snapshot of that origin, sharing the same COW
@@ -235,7 +229,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     snap.remove().expect("remove handed-over snapshot device");
 }
 
-fn write_block(path: &str, block_index: u64, byte: u8) {
+fn write_block(path: &std::path::Path, block_index: u64, byte: u8) {
     use std::io::{Seek, SeekFrom};
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -247,7 +241,7 @@ fn write_block(path: &str, block_index: u64, byte: u8) {
     file.sync_all().expect("fsync");
 }
 
-fn assert_block(path: &str, block_index: u64, expected_byte: u8) {
+fn assert_block(path: &std::path::Path, block_index: u64, expected_byte: u8) {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path).expect("open for assert_block");
     file.seek(SeekFrom::Start(block_index * 4096))

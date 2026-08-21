@@ -215,21 +215,10 @@ fn open_close_roundtrip(kind: &str) {
 
     // Data written through the mapping reads back, and the backing device
     // holds ciphertext rather than the plaintext.
-    let node = format!("/dev/mapper/{name}");
     let pattern: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
-    let mut opened = None;
-    for _ in 0..50 {
-        if let Ok(f) = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&node)
-        {
-            opened = Some(f);
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    let mapped = opened.expect("mapped crypt device opens");
+    let control = Control::open().expect("open the control device");
+    let (device, _) = control.by_name(&name).expect("look the mapping up");
+    let mapped = device.open_rw().expect("mapped crypt device opens");
     {
         use std::os::unix::fs::FileExt as _;
         mapped.write_all_at(&pattern, 0).expect("write");

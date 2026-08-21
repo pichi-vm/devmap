@@ -78,6 +78,21 @@ impl DevId {
         Ok(Self::from_dev_t(meta.rdev()))
     }
 
+    /// The kernel's own node for this device: `/dev/dm-<minor>`.
+    ///
+    /// This is the node devtmpfs creates, not the `/dev/mapper/<name>`
+    /// symlink — that one belongs to udev, is named rather than numbered,
+    /// and appears some milliseconds after the device does. The kernel node
+    /// is derived purely from the minor number, so it needs no lookup and
+    /// is readable as soon as the device has a live table (that is, after
+    /// [`Device::resume`], not merely after `DM_DEV_CREATE`).
+    ///
+    /// Pure string construction — no filesystem access, and no claim that
+    /// the node exists yet.
+    pub fn node_path(self) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("/dev/dm-{}", self.minor))
+    }
+
     /// Decode a Linux `dev_t` into `(major, minor)`, matching the classic
     /// 32-bit packed encoding device-mapper uses (and glibc's
     /// `gnu_dev_major`/`gnu_dev_minor` within that range): `dev` bits
@@ -168,6 +183,39 @@ impl Device {
     /// This device's `(major, minor)` identity.
     pub fn id(&self) -> DevId {
         self.dev_t
+    }
+
+    /// Where this device's block node lives: `/dev/dm-<minor>`. See
+    /// [`DevId::node_path`] for why this and not `/dev/mapper/<name>`.
+    ///
+    /// Pure string construction; [`open`](Device::open) and
+    /// [`open_rw`](Device::open_rw) are the ones that touch the filesystem.
+    pub fn node_path(&self) -> std::path::PathBuf {
+        self.dev_t.node_path()
+    }
+
+    /// Open this device's block node for reading.
+    ///
+    /// # Errors
+    ///
+    /// The underlying `io::Error`. `NotFound` most often means the device
+    /// has no live table yet — the node appears on
+    /// [`resume`](Device::resume), not on `DM_DEV_CREATE`.
+    pub fn open(&self) -> io::Result<File> {
+        File::open(self.node_path())
+    }
+
+    /// Open this device's block node for reading and writing.
+    ///
+    /// # Errors
+    ///
+    /// As [`open`](Device::open); additionally `PermissionDenied` if the
+    /// table was loaded read-only.
+    pub fn open_rw(&self) -> io::Result<File> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.node_path())
     }
 
     /// Begin building a table to `DM_TABLE_LOAD`. Add targets with

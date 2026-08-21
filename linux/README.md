@@ -46,6 +46,18 @@ fn main() -> Result<(), devmap::Error> {
 - **`Device`** — a plain handle identified by a **`DevId`** (`major:minor`).
   Everything else lives here: `builder`, `suspend`, `resume`, `remove`,
   `status`, `table`, `info`, `message`.
+
+### Reaching the block device
+
+`Device::open`/`open_rw` hand back the mapping's block device, and
+`node_path` (also on `DevId`) gives its path. Both point at the kernel's
+own `/dev/dm-<minor>`, which exists as soon as `resume` returns — unlike
+`/dev/mapper/<name>`, a symlink udev creates some milliseconds later. Reach
+for the kernel node and there is nothing to poll for.
+
+```rust
+let mut file = dev.open_rw()?;   // /dev/dm-<minor>, ready now
+```
 Dropping a `Device` does nothing to the kernel. A dm device is state that
 outlives the process that made it, so this crate offers no `Drop`-based
 autoremoval: a guard would fire on error paths and panics where the caller

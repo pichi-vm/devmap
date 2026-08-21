@@ -36,11 +36,9 @@ fn create_load_resume_read_zeros_remove() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let id = dev.id();
-    let (major, minor) = (id.major(), id.minor());
-    let path = format!("/dev/dm-{minor}");
-    let mut file = std::fs::File::open(&path)
-        .unwrap_or_else(|e| panic!("open {path} (major={major}, minor={minor}): {e}"));
+    let mut file = dev
+        .open()
+        .unwrap_or_else(|e| panic!("open {} ({}): {e}", dev.node_path().display(), dev.id()));
 
     let mut buf = [0xFFu8; 4096];
     file.read_exact(&mut buf).expect("read from dm-zero device");
@@ -194,8 +192,7 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
         1
     );
 
-    let path = format!("/dev/dm-{minor}");
-    let by_node = control.by_node(&path).expect("by_node");
+    let by_node = control.by_node(dev.node_path()).expect("by_node");
     assert_eq!(by_node.id(), id);
 }
 
@@ -271,11 +268,13 @@ fn deferred_removal_reclaims_a_device_that_is_still_open() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let path = format!("/dev/dm-{}", dev.id().minor());
-    let holder = match std::fs::File::open(&path) {
+    let holder = match dev.open() {
         Ok(file) => file,
         Err(e) => {
-            eprintln!("skip: {path} not available yet ({e})");
+            eprintln!(
+                "skip: {} not available yet ({e})",
+                dev.node_path().display()
+            );
             dev.remove_deferred().ok();
             return;
         }

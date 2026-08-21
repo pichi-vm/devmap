@@ -59,12 +59,7 @@ fn raid1_mirrors_writes_across_two_devices() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    let minor = dev.id().minor();
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(format!("/dev/dm-{minor}"))
-        .expect("open");
+    let mut file = dev.open_rw().expect("open");
     let pattern = [0x77u8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");

@@ -36,12 +36,7 @@ fn writecache_passes_data_through() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
 
-    let minor = dev.id().minor();
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(format!("/dev/dm-{minor}"))
-        .expect("open");
+    let mut file = dev.open_rw().expect("open");
     let pattern = [0x5Au8; 4096];
     file.write_all(&pattern).expect("write");
     file.flush().expect("flush");
