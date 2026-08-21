@@ -9,10 +9,11 @@ use std::os::unix::fs::FileExt as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
+use devmap_linux::DevId;
 use devmap_linux::targets::integrity::{Builder, Integrity, Mode};
-use devmap_linux::{Control, DevId};
 
 use crate::cli::{IntegrityClose, IntegrityCmd, IntegrityFormat, IntegrityOpen, IntegrityStatus};
+use crate::control;
 
 pub(crate) fn run(cmd: IntegrityCmd) -> Result<()> {
     match cmd {
@@ -54,7 +55,7 @@ fn format(a: &IntegrityFormat) -> Result<()> {
     let device = DevId::from_path(&a.device).context("resolve device")?;
     let integrity = target(device, a.tag_size, &a.integrity, a.allow_discards);
 
-    let control = Control::open().context("open /dev/mapper/control")?;
+    let control = control::open()?;
     // A throwaway name for the transient format mapping; it is removed
     // before this returns, leaving only the superblock on the device.
     let tmp = format!("devmap-integ-format-{}", std::process::id());
@@ -76,7 +77,7 @@ fn open(a: &IntegrityOpen) -> Result<()> {
     let sectors = provided_data_sectors(&a.device)?;
     let integrity = target(device, a.tag_size, &a.integrity, a.allow_discards);
 
-    let control = Control::open().context("open /dev/mapper/control")?;
+    let control = control::open()?;
     let mapped = control
         .create(&a.name)
         .with_context(|| format!("create {}", a.name))?;
@@ -91,20 +92,11 @@ fn open(a: &IntegrityOpen) -> Result<()> {
 }
 
 fn close(a: &IntegrityClose) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?
-        .0
-        .remove()
-        .context("remove")
+    control::remove(&a.name)
 }
 
 fn status(a: &IntegrityStatus) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    let (device, _) = control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?;
+    let device = control::by_name(&a.name)?;
     if let Some(info) = device
         .target::<Integrity>(0)
         .info()

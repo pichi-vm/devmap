@@ -13,6 +13,7 @@
 
 mod cli;
 mod cmd;
+mod control;
 mod hex;
 mod multicall;
 mod size;
