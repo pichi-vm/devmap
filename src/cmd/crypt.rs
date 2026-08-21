@@ -20,9 +20,9 @@ use std::io::Read as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
+use devmap_linux::DevId;
 use devmap_linux::targets::Crypt;
 use devmap_linux::targets::crypt::{Key, KeyType};
-use devmap_linux::{Control, DevId};
 use devmap_luks::format::{Entropy, FormatOptions, Version};
 use devmap_luks::kdf::Kdf;
 use devmap_luks::{Hash, Header, MasterKey};
@@ -31,7 +31,7 @@ use keyutils::keytypes::{Logon, logon};
 use crate::cli::{
     CryptClose, CryptCmd, CryptDump, CryptFormat, CryptOpen, CryptStatus, LuksVersion,
 };
-use crate::{size, uuid};
+use crate::{control, size, uuid};
 
 /// The logon-key subtype devmap publishes master keys under. Distinct from
 /// cryptsetup's `cryptsetup:` so the two can never resolve to each other's
@@ -193,7 +193,7 @@ fn open(a: &CryptOpen) -> Result<()> {
 
 /// Create, load, and resume the mapping.
 fn activate(name: &str, length_sectors: u64, target: Crypt) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
+    let control = control::open()?;
     let device = control
         .create(name)
         .with_context(|| format!("create {name}"))?;
@@ -306,20 +306,11 @@ fn read_new_passphrase(key_file: Option<&Path>) -> Result<Vec<u8>> {
 }
 
 fn close(a: &CryptClose) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?
-        .0
-        .remove()
-        .context("remove")
+    control::remove(&a.name)
 }
 
 fn status(a: &CryptStatus) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    let (device, status) = control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?;
+    let (device, status) = control::lookup(&a.name)?;
     let id = device.id();
     println!("{}", a.name);
     println!("  type:    dm-crypt");

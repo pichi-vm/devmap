@@ -9,12 +9,12 @@ use std::os::unix::fs::FileExt as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
+use devmap_linux::DevId;
 use devmap_linux::targets::Zoned;
-use devmap_linux::{Control, DevId};
 use devmap_zoned::{BLOCK_SIZE, FormatOptions, Superblock};
 
 use crate::cli::{ZonedCheck, ZonedCmd, ZonedFormat, ZonedStart, ZonedStatus, ZonedStop};
-use crate::{urandom, uuid};
+use crate::{control, urandom, uuid};
 
 /// 512-byte sectors per [`BLOCK_SIZE`] metadata block.
 const SECTORS_PER_BLOCK: u64 = BLOCK_SIZE as u64 / 512;
@@ -91,7 +91,7 @@ fn start(a: &ZonedStart) -> Result<()> {
     let device = DevId::from_path(&a.device).context("resolve zoned device")?;
     let name = a.name.clone().unwrap_or_else(|| default_name(&a.device));
 
-    let control = Control::open().context("open /dev/mapper/control")?;
+    let control = control::open()?;
     let mapped = control
         .create(&name)
         .with_context(|| format!("create {name}"))?;
@@ -107,20 +107,11 @@ fn start(a: &ZonedStart) -> Result<()> {
 }
 
 fn stop(a: &ZonedStop) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?
-        .0
-        .remove()
-        .context("remove")
+    control::remove(&a.name)
 }
 
 fn status(a: &ZonedStatus) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    let (device, _) = control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?;
+    let device = control::by_name(&a.name)?;
     if let Some(info) = device
         .target::<Zoned>(0)
         .info()

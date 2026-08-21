@@ -8,14 +8,14 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt as _;
 
 use anyhow::{Context as _, Result, bail};
+use devmap_linux::DevId;
 use devmap_linux::targets::Verity;
-use devmap_linux::{Control, DevId};
 use devmap_verity::{Superblock, VerityBuilder, VerityParams, feed_from_reader};
 
 use crate::cli::{
     VerityClose, VerityCmd, VerityDump, VerityFormat, VerityOpen, VerityStatus, VerityVerify,
 };
-use crate::{hex, size, urandom, uuid};
+use crate::{control, hex, size, urandom, uuid};
 
 pub(crate) fn run(cmd: VerityCmd) -> Result<()> {
     match cmd {
@@ -110,7 +110,7 @@ fn open(a: &VerityOpen) -> Result<()> {
     };
     let length = sb.data_blocks * u64::from(sb.data_block_size) / size::SECTOR;
 
-    let control = Control::open().context("open /dev/mapper/control")?;
+    let control = control::open()?;
     let device = control
         .create(&a.name)
         .with_context(|| format!("create {}", a.name))?;
@@ -126,13 +126,7 @@ fn open(a: &VerityOpen) -> Result<()> {
 }
 
 fn close(a: &VerityClose) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?
-        .0
-        .remove()
-        .context("remove")
+    control::remove(&a.name)
 }
 
 fn verify(a: &VerityVerify) -> Result<()> {
@@ -179,10 +173,7 @@ fn dump(a: &VerityDump) -> Result<()> {
 }
 
 fn status(a: &VerityStatus) -> Result<()> {
-    let control = Control::open().context("open /dev/mapper/control")?;
-    let (device, _) = control
-        .by_name(&a.name)
-        .with_context(|| format!("look up {}", a.name))?;
+    let device = control::by_name(&a.name)?;
     if let Some(info) = device
         .target::<Verity>(0)
         .info()
