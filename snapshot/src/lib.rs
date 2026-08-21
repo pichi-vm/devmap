@@ -423,9 +423,11 @@ pub fn convert<R: Read, W: Write + Seek>(
     cow.done()
 }
 
-/// Sparse-aware [`convert`] for a real file: uses `SEEK_DATA` / `SEEK_HOLE`
-/// to skip whole chunks inside a hole without reading them. Output is
-/// byte-identical to [`convert`] over the same logical content.
+/// Sparse-aware [`convert`] for an open file or block device: uses
+/// `SEEK_DATA` / `SEEK_HOLE` to skip whole chunks inside a hole without
+/// reading them, and reads straight through where those seeks aren't
+/// supported. Output is byte-identical to [`convert`] over the same logical
+/// content.
 ///
 /// # Errors
 ///
@@ -458,6 +460,15 @@ pub fn convert_sparse<W: Write + Seek>(
                 }
                 // No data at/after `pos` — the rest of the file is a hole.
                 Err(rustix::io::Errno::NXIO) => break,
+                // The input can't be probed for holes: a block device, or a
+                // filesystem without extent awareness. Nothing there is a
+                // hole, so read the rest of it. Skipping holes is only ever
+                // an optimisation — `push` still elides all-zero chunks, so
+                // the COW this produces is the same either way.
+                Err(rustix::io::Errno::INVAL | rustix::io::Errno::NOTSUP) => {
+                    data_start = pos;
+                    data_end = input_len;
+                }
                 Err(e) => return Err(std::io::Error::from(e).into()),
             }
         }

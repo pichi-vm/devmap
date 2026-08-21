@@ -10,19 +10,15 @@
 // Bare tool/device names (null_blk, dmzadm) read fine unquoted here.
 #![allow(clippy::doc_markdown)]
 
+mod common;
+
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
 
+use common::{BIN, have_dm, run};
 use devmap_linux::Control;
-
-/// Path to the freshly-built `devmap` binary, provided by cargo.
-const BIN: &str = env!("CARGO_BIN_EXE_devmap");
-
-fn have_dm() -> bool {
-    Control::open().is_ok()
-}
 
 /// A memory-backed null_blk zoned device via configfs, torn down on drop.
 struct NullBlkZoned {
@@ -73,21 +69,6 @@ impl Drop for NullBlkZoned {
         let _ = fs::write(dir.join("power"), "0");
         let _ = fs::remove_dir(&dir);
     }
-}
-
-/// Run `argv0 args...`, returning (success, stdout).
-fn run(argv0: &str, args: &[&str]) -> (bool, String) {
-    let out = Command::new(argv0)
-        .args(args)
-        .output()
-        .expect("spawn devmap");
-    if !out.status.success() {
-        eprintln!("stderr: {}", String::from_utf8_lossy(&out.stderr));
-    }
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
 }
 
 #[test]

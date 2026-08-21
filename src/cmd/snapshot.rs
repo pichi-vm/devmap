@@ -11,6 +11,7 @@ use std::os::unix::fs::FileTypeExt as _;
 use anyhow::{Context as _, Result};
 
 use crate::cli::{SnapshotCmd, SnapshotConvert};
+use crate::size;
 
 pub(crate) fn run(cmd: SnapshotCmd) -> Result<()> {
     match cmd {
@@ -20,10 +21,9 @@ pub(crate) fn run(cmd: SnapshotCmd) -> Result<()> {
 
 fn convert(a: &SnapshotConvert) -> Result<()> {
     let raw = std::fs::File::open(&a.raw).with_context(|| format!("open {}", a.raw.display()))?;
-    let raw_len = raw
-        .metadata()
-        .with_context(|| format!("stat {}", a.raw.display()))?
-        .len();
+    // Sized by seeking, not by `metadata().len()`: the source may be a
+    // block device, whose size is not recorded in its inode.
+    let raw_len = size::of(&raw).with_context(|| format!("size {}", a.raw.display()))?;
 
     // A regular file is truncated so no stale tail follows the COW; a block
     // device is written in place (it can't be truncated and is already sized).
@@ -40,7 +40,9 @@ fn convert(a: &SnapshotConvert) -> Result<()> {
     }
 
     let meta = devmap_snapshot::convert_sparse(&raw, raw_len, &mut cow, a.chunk_size)
-        .with_context(|| format!("write COW to {}", a.cow.display()))?;
+        // Both devices are named: the conversion reads one and writes the
+        // other, and the error alone doesn't say which end faulted.
+        .with_context(|| format!("convert {} into {}", a.raw.display(), a.cow.display()))?;
 
     let chunk_bytes = u64::from(a.chunk_size) * u64::from(devmap_snapshot::SECTOR_SIZE);
     println!("Converted {} -> {}", a.raw.display(), a.cow.display());

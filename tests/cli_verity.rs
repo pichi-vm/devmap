@@ -6,86 +6,11 @@
 //!
 //! Skips cleanly when device-mapper can't be opened (not root).
 
-use std::fs::File;
-use std::io::Write as _;
+mod common;
+
 use std::os::unix::fs::symlink;
-use std::path::PathBuf;
-use std::process::Command;
 
-use devmap_linux::Control;
-
-/// Path to the freshly-built `devmap` binary, provided by cargo.
-const BIN: &str = env!("CARGO_BIN_EXE_devmap");
-
-fn have_dm() -> bool {
-    Control::open().is_ok()
-}
-
-/// A sparse (or pre-filled) backing file attached as a loop device;
-/// detaches and deletes on drop.
-struct LoopDevice {
-    path: String,
-    file_path: PathBuf,
-}
-
-impl LoopDevice {
-    /// Attach a `size` byte file, optionally pre-filled with `fill`.
-    fn create(tag: &str, size: u64, fill: Option<&[u8]>) -> Self {
-        let backing = std::env::temp_dir().join(format!("devmap-vt-{tag}-{}", std::process::id()));
-        let mut handle = File::create(&backing).expect("create backing file");
-        if let Some(bytes) = fill {
-            let mut written = 0u64;
-            while written < size {
-                let remaining = usize::try_from(size - written).unwrap_or(usize::MAX);
-                let n = remaining.min(bytes.len());
-                handle.write_all(&bytes[..n]).expect("fill backing file");
-                written += n as u64;
-            }
-        } else {
-            handle.set_len(size).expect("size backing file");
-        }
-        handle.sync_all().ok();
-        drop(handle);
-
-        let out = Command::new("losetup")
-            .args(["-f", "--show"])
-            .arg(&backing)
-            .output()
-            .expect("run losetup");
-        assert!(
-            out.status.success(),
-            "losetup failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let path = String::from_utf8(out.stdout).unwrap().trim().to_string();
-        Self {
-            path,
-            file_path: backing,
-        }
-    }
-}
-
-impl Drop for LoopDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("losetup").args(["-d", &self.path]).status();
-        let _ = std::fs::remove_file(&self.file_path);
-    }
-}
-
-/// Run `argv0 args...`, returning (success, stdout).
-fn run(argv0: &str, args: &[&str]) -> (bool, String) {
-    let out = Command::new(argv0)
-        .args(args)
-        .output()
-        .expect("spawn devmap");
-    if !out.status.success() {
-        eprintln!("stderr: {}", String::from_utf8_lossy(&out.stderr));
-    }
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-    )
-}
+use common::{BIN, LoopDevice, have_dm, run};
 
 /// Extract the `Root hash:` value from `verity format` output.
 fn root_hash_of(format_output: &str) -> String {
@@ -106,8 +31,8 @@ fn verity_persona_format_open_verify() {
 
     // 256 KiB of a known byte pattern so we can compare a readback.
     let pattern: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
-    let data = LoopDevice::create("data", 256 * 1024, Some(&pattern));
-    let hash = LoopDevice::create("hash", 256 * 1024, None);
+    let data = LoopDevice::filled("verity-data", 256 * 1024, &pattern);
+    let hash = LoopDevice::sparse("verity-hash", 256 * 1024);
 
     // format, capturing the root hash.
     let (ok, out) = run(BIN, &["verity", "format", &data.path, &hash.path]);
