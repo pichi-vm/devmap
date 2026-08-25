@@ -24,7 +24,10 @@ pub trait Blocks {
     ///
     /// # Errors
     ///
-    /// [`Error::OutOfRange`] past the end, or the underlying I/O error.
+    /// [`Error::OutOfRange`] past the end — every implementation reports
+    /// that the same way, so a diagnostic names the offending block whether
+    /// the metadata was read from a device or from memory — or the
+    /// underlying I/O error.
     fn read_block(&self, nr: u64) -> Result<Vec<u8>, Error>;
 }
 
@@ -48,7 +51,19 @@ impl Blocks for std::fs::File {
             .checked_mul(BLOCK_SIZE as u64)
             .ok_or(Error::OutOfRange(nr))?;
         let mut buf = vec![0u8; BLOCK_SIZE];
-        self.read_exact_at(&mut buf, offset)?;
+        // A short read is how a file or block device spells "past the end",
+        // and it is the same fault the in-memory impl reports as
+        // `OutOfRange`. Left as the bare `io::Error` it becomes "failed to
+        // fill whole buffer", which names neither the block nor the cause —
+        // and a dangling pointer in damaged metadata is exactly when the
+        // block number is worth having.
+        self.read_exact_at(&mut buf, offset).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                Error::OutOfRange(nr)
+            } else {
+                Error::Io(e)
+            }
+        })?;
         Ok(buf)
     }
 }
@@ -202,5 +217,22 @@ mod tests {
             image.as_slice().read_block(u64::MAX),
             Err(Error::OutOfRange(_))
         ));
+    }
+
+    #[test]
+    fn a_file_reports_the_same_block_past_the_end_as_memory_does() {
+        // Every command reads through this impl, so a divergence here costs
+        // the block number in each real diagnostic while leaving the
+        // in-memory tests above perfectly happy.
+        use std::io::Write as _;
+        let mut file = tempfile::tempfile().expect("tempfile");
+        file.write_all(&vec![0u8; BLOCK_SIZE]).expect("write");
+        assert!(matches!(file.read_block(1), Err(Error::OutOfRange(1))));
+        assert!(file.read_block(0).is_ok(), "the block that is there");
+
+        // A block straddling the end has run past it just the same; a short
+        // read is not a partial block.
+        file.write_all(&vec![0u8; BLOCK_SIZE / 2]).expect("write");
+        assert!(matches!(file.read_block(1), Err(Error::OutOfRange(1))));
     }
 }
