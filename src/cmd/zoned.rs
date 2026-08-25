@@ -14,10 +14,11 @@ use devmap_linux::targets::Zoned;
 use devmap_zoned::{BLOCK_SIZE, FormatOptions, Superblock};
 
 use crate::cli::{ZonedCheck, ZonedCmd, ZonedFormat, ZonedStart, ZonedStatus, ZonedStop};
+use crate::size::SECTOR;
 use crate::{control, urandom, uuid};
 
-/// 512-byte sectors per [`BLOCK_SIZE`] metadata block.
-const SECTORS_PER_BLOCK: u64 = BLOCK_SIZE as u64 / 512;
+/// Sectors per [`BLOCK_SIZE`] metadata block.
+const SECTORS_PER_BLOCK: u64 = BLOCK_SIZE as u64 / SECTOR;
 
 pub(crate) fn run(cmd: ZonedCmd) -> Result<()> {
     match cmd {
