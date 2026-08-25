@@ -14,6 +14,7 @@ use std::path::Path;
 use std::process::Command;
 
 use devmap_persistent::block::{le32, le64, read_validated};
+use devmap_persistent::btree::ValueSize;
 use devmap_persistent::{BLOCK_SIZE, THIN_SUPERBLOCK_CSUM_XOR, btree};
 
 /// Thin superblock field offsets, from `struct thin_disk_superblock`.
@@ -113,7 +114,8 @@ fn walks_the_device_details_tree_thin_restore_wrote() {
 
     // The details tree is keyed by dev_id; the XML declared devices 1 and 2.
     let root = le64(&sb, OFF_DETAILS_ROOT);
-    let details = btree::collect(image.as_slice(), root, 16).expect("walk device details");
+    let details =
+        btree::collect(image.as_slice(), root, 16, ValueSize(24)).expect("walk device details");
     let ids: Vec<u64> = details.iter().map(|(k, _)| *k).collect();
     assert_eq!(ids, [1, 2], "one entry per device, in key order");
 
@@ -138,14 +140,15 @@ fn walks_the_two_level_mapping_tree_thin_restore_wrote() {
 
     // The top level maps dev_id -> the root of that device's mapping tree.
     let top = le64(&sb, OFF_DATA_MAPPING_ROOT);
-    let devices = btree::collect(image.as_slice(), top, 16).expect("walk top level");
+    let devices = btree::collect(image.as_slice(), top, 16, ValueSize(8)).expect("walk top level");
     let ids: Vec<u64> = devices.iter().map(|(k, _)| *k).collect();
     assert_eq!(ids, [1, 2]);
 
     // Device 1's own tree maps origin block -> (data block, time), packed
     // as a single u64: the low 24 bits are the time.
     let dev1_root = le64(&devices[0].1, 0);
-    let mappings = btree::collect(image.as_slice(), dev1_root, 16).expect("walk device 1");
+    let mappings =
+        btree::collect(image.as_slice(), dev1_root, 16, ValueSize(8)).expect("walk device 1");
     let origins: Vec<u64> = mappings.iter().map(|(k, _)| *k).collect();
     assert_eq!(
         origins,

@@ -18,6 +18,7 @@
 //! btree.
 
 use crate::block::{BLOCK_SIZE, Blocks, le32, le64, read_validated};
+use crate::btree::ValueSize;
 use crate::{BITMAP_CSUM_XOR, Error, INDEX_CSUM_XOR, btree};
 
 /// Byte size of a `disk_sm_root`, as embedded in a superblock.
@@ -30,6 +31,10 @@ const INDEX_ENTRY_SIZE: usize = 16;
 const METADATA_INDEX_HEADER: usize = 16;
 /// A metadata space map's index holds at most this many entries inline.
 const MAX_METADATA_BITMAPS: usize = 255;
+/// The overflow btree holds one `__le32` reference count per block.
+const OVERFLOW_ENTRY_SIZE: ValueSize = ValueSize(4);
+/// Depth bound for the index and overflow trees.
+const MAX_DEPTH: usize = 16;
 /// Blocks covered by one bitmap block: four 2-bit entries per byte.
 pub const ENTRIES_PER_BITMAP: u64 = (BLOCK_SIZE as u64 - BITMAP_HEADER_SIZE as u64) * 4;
 /// The bitmap value meaning "more than two references; see the btree".
@@ -142,10 +147,15 @@ impl SpaceMap {
                     })
                     .collect()
             }
-            Index::Btree => btree::collect(blocks, root.bitmap_root, 16)?
-                .iter()
-                .map(|(_, value)| IndexEntry::parse(value))
-                .collect(),
+            Index::Btree => btree::collect(
+                blocks,
+                root.bitmap_root,
+                MAX_DEPTH,
+                ValueSize(INDEX_ENTRY_SIZE),
+            )?
+            .iter()
+            .map(|(_, value)| IndexEntry::parse(value))
+            .collect(),
         };
         Ok(SpaceMap {
             root,
@@ -179,7 +189,12 @@ impl SpaceMap {
             return Ok(low);
         }
         // Counts above two live in the overflow btree, keyed by block.
-        for (key, value) in btree::collect(blocks, self.root.ref_count_root, 16)? {
+        for (key, value) in btree::collect(
+            blocks,
+            self.root.ref_count_root,
+            MAX_DEPTH,
+            OVERFLOW_ENTRY_SIZE,
+        )? {
             if key == block {
                 return Ok(le32(&value, 0));
             }

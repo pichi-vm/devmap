@@ -15,6 +15,7 @@
 //! copying before it can be written.
 
 use crate::block::{le32, le64, read_validated};
+use crate::btree::ValueSize;
 use crate::space_map::{self, Root};
 use crate::{Blocks, Error, THIN_SUPERBLOCK_CSUM_XOR, btree};
 
@@ -28,6 +29,9 @@ const TIME_BITS: u32 = 24;
 const TIME_MASK: u64 = (1 << TIME_BITS) - 1;
 /// Depth bound for the mapping and details trees.
 const MAX_DEPTH: usize = 16;
+/// Both levels of the mapping tree hold `u64` values: the outer level a
+/// device's tree root, the inner a packed data block and timestamp.
+const MAPPING_SIZE: ValueSize = ValueSize(8);
 
 // Superblock field offsets, from `struct thin_disk_superblock`.
 const OFF_UUID: usize = 16;
@@ -161,22 +165,15 @@ pub fn devices<B: Blocks + ?Sized>(
     blocks: &B,
     superblock: &Superblock,
 ) -> Result<Vec<(u64, DeviceDetails)>, Error> {
-    btree::collect(blocks, superblock.device_details_root, MAX_DEPTH)?
-        .iter()
-        .map(|(id, value)| {
-            if value.len() < DeviceDetails::SIZE {
-                return Err(Error::Malformed {
-                    block: superblock.device_details_root,
-                    reason: format!(
-                        "device {id} details are {} bytes, expected {}",
-                        value.len(),
-                        DeviceDetails::SIZE
-                    ),
-                });
-            }
-            Ok((*id, DeviceDetails::parse(value)))
-        })
-        .collect()
+    Ok(btree::collect(
+        blocks,
+        superblock.device_details_root,
+        MAX_DEPTH,
+        ValueSize(DeviceDetails::SIZE),
+    )?
+    .iter()
+    .map(|(id, value)| (*id, DeviceDetails::parse(value)))
+    .collect())
 }
 
 /// The mappings of device `dev_id`, in ascending origin-block order.
@@ -188,14 +185,21 @@ pub fn devices<B: Blocks + ?Sized>(
 ///
 /// # Panics
 ///
-/// Never: the timestamp is masked to 24 bits before the conversion.
+/// Never: both trees are walked expecting [`MAPPING_SIZE`], so every value
+/// is a whole `u64`, and the timestamp is masked to 24 bits before its
+/// conversion.
 pub fn mappings<B: Blocks + ?Sized>(
     blocks: &B,
     superblock: &Superblock,
     dev_id: u64,
 ) -> Result<Vec<Mapping>, Error> {
     // The outer tree maps a device id to the root of that device's tree.
-    let outer = btree::collect(blocks, superblock.data_mapping_root, MAX_DEPTH)?;
+    let outer = btree::collect(
+        blocks,
+        superblock.data_mapping_root,
+        MAX_DEPTH,
+        MAPPING_SIZE,
+    )?;
     let root = outer
         .iter()
         .find(|(id, _)| *id == dev_id)
@@ -206,15 +210,21 @@ pub fn mappings<B: Blocks + ?Sized>(
         })?;
 
     let mut out = Vec::new();
-    btree::walk(blocks, root, MAX_DEPTH, &mut |origin_block, value| {
-        let packed = le64(value, 0);
-        out.push(Mapping {
-            origin_block,
-            data_block: packed >> TIME_BITS,
-            time: u32::try_from(packed & TIME_MASK).expect("24 bits fit u32"),
-        });
-        Ok(())
-    })?;
+    btree::walk(
+        blocks,
+        root,
+        MAX_DEPTH,
+        MAPPING_SIZE,
+        &mut |origin_block, value| {
+            let packed = le64(value, 0);
+            out.push(Mapping {
+                origin_block,
+                data_block: packed >> TIME_BITS,
+                time: u32::try_from(packed & TIME_MASK).expect("24 bits fit u32"),
+            });
+            Ok(())
+        },
+    )?;
     Ok(out)
 }
 

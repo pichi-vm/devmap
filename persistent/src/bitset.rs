@@ -11,10 +11,13 @@
 //! Bit *n* lives in word `n / 64` at bit `n % 64`, with the words stored
 //! little-endian.
 
+use crate::btree::ValueSize;
 use crate::{Blocks, Error, array};
 
 /// Bits packed into each array entry.
 pub const BITS_PER_ENTRY: u64 = 64;
+/// A bitset entry is one packed 64-bit word.
+const ENTRY_SIZE: ValueSize = ValueSize(8);
 
 /// Read a bitset of `nr_bits` bits into a vector of booleans.
 ///
@@ -27,21 +30,16 @@ pub const BITS_PER_ENTRY: u64 = 64;
 ///
 /// # Panics
 ///
-/// Never: the length check above guards the 8-byte conversion.
+/// Never: the array yields entries of exactly [`ENTRY_SIZE`] bytes, which
+/// is what the conversion below reads.
 pub fn collect<B: Blocks + ?Sized>(
     blocks: &B,
     root: u64,
     nr_bits: u64,
 ) -> Result<Vec<bool>, Error> {
     let mut bits = Vec::new();
-    array::walk(blocks, root, &mut |_index, value| {
-        if value.len() < 8 {
-            return Err(Error::Malformed {
-                block: root,
-                reason: format!("bitset entry is {} bytes, expected 8", value.len()),
-            });
-        }
-        let word = u64::from_le_bytes(value[..8].try_into().expect("8 bytes"));
+    array::walk(blocks, root, ENTRY_SIZE, &mut |_index, value| {
+        let word = u64::from_le_bytes(value.try_into().expect("8-byte bitset word"));
         for bit in 0..BITS_PER_ENTRY {
             bits.push(word >> bit & 1 == 1);
         }

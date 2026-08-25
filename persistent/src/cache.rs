@@ -14,6 +14,7 @@
 //! by an older kernel is still perfectly valid.
 
 use crate::block::{le32, le64, read_validated};
+use crate::btree::ValueSize;
 use crate::space_map::Root;
 use crate::{Blocks, Error, array, bitset};
 
@@ -52,6 +53,8 @@ const M_VALID: u64 = 1;
 const M_DIRTY: u64 = 2;
 /// Bits of a mapping value given over to flags.
 const FLAG_BITS: u32 = 16;
+/// A mapping is one `u64`: an origin block above the flag bits.
+const MAPPING_SIZE: ValueSize = ValueSize(8);
 
 /// A parsed cache superblock.
 #[derive(Debug, Clone)]
@@ -162,7 +165,9 @@ pub struct Mapping {
 ///
 /// # Panics
 ///
-/// Never: a cache block index is bounded by `cache_blocks`, a `u32`.
+/// Never: the array is walked expecting [`MAPPING_SIZE`], so every value is
+/// a whole `u64`, and a cache block index is bounded by `cache_blocks`, a
+/// `u32`.
 pub fn mappings<B: Blocks + ?Sized>(
     blocks: &B,
     superblock: &Superblock,
@@ -179,34 +184,44 @@ pub fn mappings<B: Blocks + ?Sized>(
     };
 
     let mut out = Vec::new();
-    array::walk(blocks, superblock.mapping_root, &mut |index, value| {
-        let packed = le64(value, 0);
-        if packed & M_VALID == 0 {
-            return Ok(());
-        }
-        let dirty = match &dirty_bits {
-            Some(bits) => bits
-                .get(usize::try_from(index).expect("cache block index fits usize"))
-                .copied()
-                .unwrap_or(false),
-            // Version 1 carries the flag in the mapping itself.
-            None => packed & M_DIRTY != 0,
-        };
-        out.push(Mapping {
-            cache_block: index,
-            origin_block: packed >> FLAG_BITS,
-            dirty,
-        });
-        Ok(())
-    })?;
+    array::walk(
+        blocks,
+        superblock.mapping_root,
+        MAPPING_SIZE,
+        &mut |index, value| {
+            let packed = le64(value, 0);
+            if packed & M_VALID == 0 {
+                return Ok(());
+            }
+            let dirty = match &dirty_bits {
+                Some(bits) => bits
+                    .get(usize::try_from(index).expect("cache block index fits usize"))
+                    .copied()
+                    .unwrap_or(false),
+                // Version 1 carries the flag in the mapping itself.
+                None => packed & M_DIRTY != 0,
+            };
+            out.push(Mapping {
+                cache_block: index,
+                origin_block: packed >> FLAG_BITS,
+                dirty,
+            });
+            Ok(())
+        },
+    )?;
     Ok(out)
 }
 
 /// The policy hint for each cache block, in order.
 ///
+/// A hint is opaque to this reader — only the policy that wrote it knows
+/// what it means — but its width is not: the superblock records it, so the
+/// array is required to agree.
+///
 /// # Errors
 ///
-/// A structural error from the hint array.
+/// A structural error from the hint array, including a hint array whose
+/// values are not `policy_hint_size` bytes wide.
 pub fn hints<B: Blocks + ?Sized>(
     blocks: &B,
     superblock: &Superblock,
@@ -214,7 +229,8 @@ pub fn hints<B: Blocks + ?Sized>(
     if superblock.hint_root == 0 {
         return Ok(Vec::new());
     }
-    array::collect(blocks, superblock.hint_root)
+    let width = usize::try_from(superblock.policy_hint_size).unwrap_or(usize::MAX);
+    array::collect(blocks, superblock.hint_root, ValueSize(width))
 }
 
 #[cfg(test)]
