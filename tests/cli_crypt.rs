@@ -18,7 +18,7 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use common::{BIN, LoopDevice, have_dm, run};
+use common::{BIN, LoopDevice, have_dm, run, run_capturing};
 use devmap_linux::Control;
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -338,6 +338,51 @@ fn dump_reports_header_fields_and_no_secrets() {
         !out.to_lowercase().contains(&expected_key),
         "dump must not print the master key"
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn format_warns_when_the_device_cannot_hold_a_payload() {
+    // 2 MiB is a perfectly good place to put a LUKS2 header and an
+    // impossible place to put its payload, which starts 16 MiB in. The
+    // header is valid and the device may yet be grown — cryptsetup writes
+    // one here too — so this warns rather than fails. What it must not do
+    // is report a bare success for a volume nothing can be stored in.
+    let dir = std::env::temp_dir().join(format!("devmap-crypt-tiny-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let key_file = dir.join("passphrase");
+    std::fs::write(&key_file, PASSPHRASE).expect("write key file");
+
+    // One format only: at 500k pbkdf2 iterations each costs real seconds,
+    // and the boundary itself is covered by the unit tests on
+    // `no_payload_room`. What this adds is the wiring — that `format`
+    // consults it at all, and says so without failing.
+    let image = dir.join("tiny.img");
+    std::fs::File::create(&image)
+        .and_then(|f| f.set_len(2 * 1024 * 1024))
+        .expect("create backing file");
+    let (ok, stdout, stderr) = run_capturing(
+        BIN,
+        &[
+            "crypt",
+            "format",
+            &image.to_string_lossy(),
+            "--type",
+            "luks2",
+            "--pbkdf",
+            "pbkdf2",
+            "--key-file",
+            &key_file.to_string_lossy(),
+        ],
+    );
+    assert!(ok, "format still succeeds: {stderr}");
+    assert!(stdout.contains("Formatted"), "{stdout}");
+    assert!(
+        stderr.contains("no payload"),
+        "a device too small to open must be called out: {stderr}"
+    );
+
     std::fs::remove_dir_all(&dir).ok();
 }
 
