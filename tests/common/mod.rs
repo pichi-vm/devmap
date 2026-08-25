@@ -48,6 +48,20 @@ pub(crate) fn run(argv0: &str, args: &[&str]) -> (bool, String) {
     )
 }
 
+/// As [`run`], but returning stderr instead of echoing it — for the tests
+/// whose subject is a diagnostic rather than a result.
+pub(crate) fn run_capturing(argv0: &str, args: &[&str]) -> (bool, String, String) {
+    let out = Command::new(argv0)
+        .args(args)
+        .output()
+        .expect("spawn the command");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
 /// A backing file attached as a loop device, giving a test a real block
 /// device without touching real hardware. Detaches and deletes the
 /// backing file on drop, best-effort.

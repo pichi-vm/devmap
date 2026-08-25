@@ -117,6 +117,21 @@ fn read_passphrase(key_file: Option<&Path>) -> Result<Vec<u8>> {
     }
 }
 
+/// The complaint to make about a device with no room for a payload after
+/// its header, or `None` if it has room.
+///
+/// A LUKS2 payload starts 16 MiB in by default, so a small device can carry
+/// a perfectly valid header and still have nowhere to put data. `format`
+/// and `open` both have to notice, and say the same thing about it.
+fn no_payload_room(device: &Path, total: u64, payload_offset: u64) -> Option<String> {
+    (total <= payload_offset).then(|| {
+        format!(
+            "{} is {total} bytes, which leaves no payload after the {payload_offset}-byte header",
+            device.display()
+        )
+    })
+}
+
 /// Publish `key` into the thread keyring as a `logon` key that dm-crypt can
 /// look up, returning the handle so the caller can delete it again.
 ///
@@ -149,11 +164,8 @@ fn open(a: &CryptOpen) -> Result<()> {
     // The handle opened above is the same device, so size it rather than
     // opening it a second time.
     let total = size::of(&device_handle).with_context(|| format!("size {}", a.device.display()))?;
-    if total <= payload_offset {
-        bail!(
-            "{} is {total} bytes, which leaves no payload after the {payload_offset}-byte header",
-            a.device.display()
-        );
+    if let Some(complaint) = no_payload_room(&a.device, total, payload_offset) {
+        bail!(complaint);
     }
     let length_sectors = (total - payload_offset) / size::SECTOR;
 
@@ -253,6 +265,7 @@ fn format(a: &CryptFormat) -> Result<()> {
         .write(true)
         .open(&a.device)
         .with_context(|| format!("open {}", a.device.display()))?;
+    let total = size::of(&device).with_context(|| format!("size {}", a.device.display()))?;
     let mut entropy = UrandomEntropy::open()?;
     let formatted = devmap_luks::format::format(&mut device, &options, &passphrase, &mut entropy)
         .with_context(|| format!("format {}", a.device.display()))?;
@@ -269,6 +282,13 @@ fn format(a: &CryptFormat) -> Result<()> {
         "  Payload offset: \t{} sectors",
         formatted.payload_offset / size::SECTOR
     );
+    // The header is written and valid either way, and the device may yet be
+    // grown, so this is a warning rather than a refusal — but a bare
+    // "Formatted" on a volume nothing can ever be stored in is worse than
+    // no output at all.
+    if let Some(complaint) = no_payload_room(&a.device, total, formatted.payload_offset) {
+        eprintln!("devmap: warning: {complaint}, so it cannot be opened until the device grows");
+    }
     Ok(())
 }
 
@@ -373,4 +393,29 @@ fn dump(a: &CryptDump) -> Result<()> {
         println!("  AF stripes:   \t{}", slot.stripes);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_payload_needs_strictly_more_room_than_the_header() {
+        let dev = Path::new("/dev/loop0");
+        // A device exactly the size of the header holds no payload either:
+        // the first data sector would start one byte past the end.
+        assert!(no_payload_room(dev, 16 << 20, 16 << 20).is_some());
+        assert!(no_payload_room(dev, (16 << 20) - 1, 16 << 20).is_some());
+        assert!(no_payload_room(dev, (16 << 20) + 1, 16 << 20).is_none());
+    }
+
+    #[test]
+    fn the_complaint_names_the_device_and_both_sizes() {
+        // It is the whole diagnostic in both the warning and the refusal,
+        // so it has to carry enough to act on.
+        let complaint = no_payload_room(Path::new("/dev/loop0"), 2048, 4096).expect("too small");
+        assert!(complaint.contains("/dev/loop0"), "{complaint}");
+        assert!(complaint.contains("2048"), "{complaint}");
+        assert!(complaint.contains("4096"), "{complaint}");
+    }
 }
