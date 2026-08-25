@@ -21,6 +21,7 @@
 //! module validates through [`read_validated_at`](crate::block::read_validated_at).
 
 use crate::block::{BLOCK_SIZE, Blocks, le32, read_validated_at};
+use crate::btree::ValueSize;
 use crate::{ARRAY_CSUM_XOR, Error, btree};
 
 /// Byte size of an `array_block` header.
@@ -33,6 +34,8 @@ const OFF_NR_ENTRIES: usize = 8;
 const OFF_VALUE_SIZE: usize = 12;
 /// Depth bound for the index btree.
 const MAX_DEPTH: usize = 16;
+/// The index btree's values are array-block numbers, so `u64`.
+const INDEX_VALUE_SIZE: ValueSize = ValueSize(8);
 
 /// Values one array block holds, for a given value size.
 #[must_use]
@@ -85,6 +88,28 @@ impl ArrayBlock {
         })
     }
 
+    /// Check this block's values are the width the caller expects.
+    ///
+    /// An array block declares its own `value_size`, and nothing ties that
+    /// to what the array is an array *of*, so a caller decoding at a fixed
+    /// width states that width here rather than length-checking each value.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] if the block declares some other width.
+    pub fn check_values(&self, expect: ValueSize) -> Result<(), Error> {
+        if self.value_size != expect.0 {
+            return Err(Error::Malformed {
+                block: self.block,
+                reason: format!(
+                    "array block has {}-byte values, expected {}",
+                    self.value_size, expect.0
+                ),
+            });
+        }
+        Ok(())
+    }
+
     /// The value at `index` within this block.
     #[must_use]
     pub fn value(&self, index: usize) -> Option<&[u8]> {
@@ -99,10 +124,13 @@ impl ArrayBlock {
 /// Visit every value of the array rooted at `root`, in index order,
 /// calling `visit(index, value)`.
 ///
+/// Every value handed to `visit` is exactly `expect` bytes long; an array
+/// block declaring any other width is rejected before its values are read.
+///
 /// # Errors
 ///
 /// The first structural error encountered, or whatever `visit` returns.
-pub fn walk<B, F>(blocks: &B, root: u64, visit: &mut F) -> Result<(), Error>
+pub fn walk<B, F>(blocks: &B, root: u64, expect: ValueSize, visit: &mut F) -> Result<(), Error>
 where
     B: Blocks + ?Sized,
     F: FnMut(u64, &[u8]) -> Result<(), Error>,
@@ -110,19 +138,26 @@ where
     // The index btree maps array-block number to the block holding it, so
     // walking it in key order walks the array in index order.
     let mut index = 0u64;
-    btree::walk(blocks, root, MAX_DEPTH, &mut |_key, value| {
-        let block = crate::block::le64(value, 0);
-        let ab = ArrayBlock::read(blocks, block)?;
-        for i in 0..ab.nr_entries {
-            let value = ab.value(i).ok_or_else(|| Error::Malformed {
-                block,
-                reason: format!("value {i} runs past the block"),
-            })?;
-            visit(index, value)?;
-            index += 1;
-        }
-        Ok(())
-    })
+    btree::walk(
+        blocks,
+        root,
+        MAX_DEPTH,
+        INDEX_VALUE_SIZE,
+        &mut |_key, value| {
+            let block = crate::block::le64(value, 0);
+            let ab = ArrayBlock::read(blocks, block)?;
+            ab.check_values(expect)?;
+            for i in 0..ab.nr_entries {
+                let value = ab.value(i).ok_or_else(|| Error::Malformed {
+                    block,
+                    reason: format!("value {i} runs past the block"),
+                })?;
+                visit(index, value)?;
+                index += 1;
+            }
+            Ok(())
+        },
+    )
 }
 
 /// Collect every value of the array rooted at `root`.
@@ -130,9 +165,13 @@ where
 /// # Errors
 ///
 /// As [`walk`].
-pub fn collect<B: Blocks + ?Sized>(blocks: &B, root: u64) -> Result<Vec<Vec<u8>>, Error> {
+pub fn collect<B: Blocks + ?Sized>(
+    blocks: &B,
+    root: u64,
+    expect: ValueSize,
+) -> Result<Vec<Vec<u8>>, Error> {
     let mut out = Vec::new();
-    walk(blocks, root, &mut |_index, value| {
+    walk(blocks, root, expect, &mut |_index, value| {
         out.push(value.to_vec());
         Ok(())
     })?;
@@ -153,7 +192,7 @@ pub fn blocks_used<B: Blocks + ?Sized>(blocks: &B, root: u64) -> Result<Vec<u64>
         used.push(node.block);
         Ok(())
     })?;
-    for (_, value) in btree::collect(blocks, root, MAX_DEPTH)? {
+    for (_, value) in btree::collect(blocks, root, MAX_DEPTH, INDEX_VALUE_SIZE)? {
         used.push(crate::block::le64(&value, 0));
     }
     Ok(used)
@@ -226,6 +265,37 @@ mod tests {
         image[0..4].copy_from_slice(&csum.to_le_bytes());
         assert!(matches!(
             ArrayBlock::read(image.as_slice(), 0),
+            Err(Error::Malformed { .. })
+        ));
+    }
+
+    /// A one-block array: an index btree at block 0 whose single value
+    /// points at the array block in block 1.
+    fn array_image(value_size: usize, values: &[Vec<u8>]) -> Vec<u8> {
+        let mut image = vec![0u8; BLOCK_SIZE * 2];
+        let index = btree::node_block(0, true, 8, &[(0, 1u64.to_le_bytes().to_vec())]);
+        image[..BLOCK_SIZE].copy_from_slice(&index);
+        image[BLOCK_SIZE..].copy_from_slice(&array_block(1, value_size, values));
+        image
+    }
+
+    #[test]
+    fn walks_an_array_of_the_expected_width() {
+        let values: Vec<Vec<u8>> = (0..3u64).map(|i| i.to_le_bytes().to_vec()).collect();
+        let image = array_image(8, &values);
+        let got = collect(image.as_slice(), 0, ValueSize(8)).expect("walk");
+        assert_eq!(got, values);
+    }
+
+    #[test]
+    fn rejects_an_array_block_of_the_wrong_width() {
+        // The block declares 4-byte values; a caller decoding a u64 out of
+        // one would index past its end. That must be reported, not
+        // panicked — dumping corrupt metadata is the whole use case.
+        let values: Vec<Vec<u8>> = (0..3u32).map(|i| i.to_le_bytes().to_vec()).collect();
+        let image = array_image(4, &values);
+        assert!(matches!(
+            collect(image.as_slice(), 0, ValueSize(8)),
             Err(Error::Malformed { .. })
         ));
     }

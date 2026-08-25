@@ -29,6 +29,20 @@ const INTERNAL_NODE: u32 = 1;
 /// `LEAF_NODE` — values are the tree's payload.
 const LEAF_NODE: u32 = 1 << 1;
 
+/// The byte width a caller expects each leaf value to have.
+///
+/// A leaf declares its own `value_size` on disk, and nothing in the format
+/// ties that to what the tree is a tree *of* — a corrupt or hostile leaf can
+/// claim four bytes where the caller means to read eight. Every caller
+/// already knows the width it is about to decode, so it states it here and
+/// [`walk`] rejects a leaf that disagrees, rather than each caller
+/// remembering to length-check every value.
+///
+/// A newtype rather than a bare `usize` because it sits beside `max_depth`,
+/// which is also a `usize`: transposed, the two would still compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValueSize(pub usize);
+
 /// One btree node, borrowed from its block.
 #[derive(Debug)]
 pub struct Node {
@@ -135,6 +149,27 @@ impl Node {
     pub fn value_size(&self) -> usize {
         self.value_size
     }
+
+    /// Check this node's values are the width the caller expects.
+    ///
+    /// Only meaningful for a leaf: an internal node's values are child
+    /// pointers, already pinned to 8 bytes at parse time.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] if a leaf declares some other width.
+    pub fn check_values(&self, expect: ValueSize) -> Result<(), Error> {
+        if self.leaf && self.value_size != expect.0 {
+            return Err(Error::Malformed {
+                block: self.block,
+                reason: format!(
+                    "leaf has {}-byte values, expected {}",
+                    self.value_size, expect.0
+                ),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Read and validate the btree node at `block`.
@@ -150,6 +185,10 @@ pub fn read_node<B: Blocks + ?Sized>(blocks: &B, block: u64) -> Result<Node, Err
 /// Walk every leaf entry of the tree rooted at `root`, in key order,
 /// calling `visit(key, value)`.
 ///
+/// Every value handed to `visit` is exactly `expect` bytes long: a leaf
+/// declaring any other width is rejected before its values are read, so a
+/// caller may decode at a fixed width without length-checking each one.
+///
 /// Depth is bounded by `max_depth` so a corrupt tree with a cycle or an
 /// absurd height cannot loop forever — an unbounded walk over attacker- or
 /// corruption-controlled pointers would hang instead of reporting.
@@ -157,7 +196,13 @@ pub fn read_node<B: Blocks + ?Sized>(blocks: &B, block: u64) -> Result<Node, Err
 /// # Errors
 ///
 /// The first structural error encountered, or whatever `visit` returns.
-pub fn walk<B, F>(blocks: &B, root: u64, max_depth: usize, visit: &mut F) -> Result<(), Error>
+pub fn walk<B, F>(
+    blocks: &B,
+    root: u64,
+    max_depth: usize,
+    expect: ValueSize,
+    visit: &mut F,
+) -> Result<(), Error>
 where
     B: Blocks + ?Sized,
     F: FnMut(u64, &[u8]) -> Result<(), Error>,
@@ -169,6 +214,7 @@ where
         });
     }
     let node = read_node(blocks, root)?;
+    node.check_values(expect)?;
     for index in 0..node.keys.len() {
         if node.leaf {
             let value = node.value(index).ok_or_else(|| Error::Malformed {
@@ -181,7 +227,7 @@ where
                 block: root,
                 reason: format!("child pointer {index} runs past the block"),
             })?;
-            walk(blocks, child, max_depth - 1, visit)?;
+            walk(blocks, child, max_depth - 1, expect, visit)?;
         }
     }
     Ok(())
@@ -233,51 +279,57 @@ pub fn collect<B: Blocks + ?Sized>(
     blocks: &B,
     root: u64,
     max_depth: usize,
+    expect: ValueSize,
 ) -> Result<Vec<(u64, Vec<u8>)>, Error> {
     let mut out = Vec::new();
-    walk(blocks, root, max_depth, &mut |key, value| {
+    walk(blocks, root, max_depth, expect, &mut |key, value| {
         out.push((key, value.to_vec()));
         Ok(())
     })?;
     Ok(out)
 }
 
+/// Build a btree node block, for tests across this crate.
+///
+/// Takes `value_size` explicitly so a test can build the wrong-width leaves
+/// [`Node::check_values`] exists to reject; [`array`](crate::array) uses it
+/// to assemble an index tree.
+#[cfg(test)]
+pub(crate) fn node_block(
+    block: u64,
+    leaf: bool,
+    value_size: usize,
+    entries: &[(u64, Vec<u8>)],
+) -> Vec<u8> {
+    let mut raw = vec![0u8; BLOCK_SIZE];
+    let max_entries = (BLOCK_SIZE - HEADER_SIZE) / (8 + value_size);
+    raw[OFF_FLAGS..OFF_FLAGS + 4]
+        .copy_from_slice(&(if leaf { LEAF_NODE } else { INTERNAL_NODE }).to_le_bytes());
+    raw[8..16].copy_from_slice(&block.to_le_bytes());
+    raw[OFF_NR_ENTRIES..OFF_NR_ENTRIES + 4].copy_from_slice(
+        &u32::try_from(entries.len())
+            .expect("test entry count fits u32")
+            .to_le_bytes(),
+    );
+    raw[OFF_MAX_ENTRIES..OFF_MAX_ENTRIES + 4]
+        .copy_from_slice(&u32::try_from(max_entries).expect("fits u32").to_le_bytes());
+    raw[OFF_VALUE_SIZE..OFF_VALUE_SIZE + 4]
+        .copy_from_slice(&u32::try_from(value_size).expect("fits u32").to_le_bytes());
+    let values_at = HEADER_SIZE + max_entries * 8;
+    for (i, (key, value)) in entries.iter().enumerate() {
+        raw[HEADER_SIZE + i * 8..HEADER_SIZE + i * 8 + 8].copy_from_slice(&key.to_le_bytes());
+        let at = values_at + i * value_size;
+        raw[at..at + value_size].copy_from_slice(value);
+    }
+    let csum = crate::checksum(&raw, BTREE_CSUM_XOR);
+    raw[0..4].copy_from_slice(&csum.to_le_bytes());
+    raw
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::checksum;
-
-    /// Build a btree node block.
-    fn node_block(
-        block: u64,
-        leaf: bool,
-        value_size: usize,
-        entries: &[(u64, Vec<u8>)],
-    ) -> Vec<u8> {
-        let mut raw = vec![0u8; BLOCK_SIZE];
-        let max_entries = (BLOCK_SIZE - HEADER_SIZE) / (8 + value_size);
-        raw[OFF_FLAGS..OFF_FLAGS + 4]
-            .copy_from_slice(&(if leaf { LEAF_NODE } else { INTERNAL_NODE }).to_le_bytes());
-        raw[8..16].copy_from_slice(&block.to_le_bytes());
-        raw[OFF_NR_ENTRIES..OFF_NR_ENTRIES + 4].copy_from_slice(
-            &u32::try_from(entries.len())
-                .expect("test entry count fits u32")
-                .to_le_bytes(),
-        );
-        raw[OFF_MAX_ENTRIES..OFF_MAX_ENTRIES + 4]
-            .copy_from_slice(&u32::try_from(max_entries).expect("fits u32").to_le_bytes());
-        raw[OFF_VALUE_SIZE..OFF_VALUE_SIZE + 4]
-            .copy_from_slice(&u32::try_from(value_size).expect("fits u32").to_le_bytes());
-        let values_at = HEADER_SIZE + max_entries * 8;
-        for (i, (key, value)) in entries.iter().enumerate() {
-            raw[HEADER_SIZE + i * 8..HEADER_SIZE + i * 8 + 8].copy_from_slice(&key.to_le_bytes());
-            let at = values_at + i * value_size;
-            raw[at..at + value_size].copy_from_slice(value);
-        }
-        let csum = checksum(&raw, BTREE_CSUM_XOR);
-        raw[0..4].copy_from_slice(&csum.to_le_bytes());
-        raw
-    }
 
     /// A one-leaf tree at block 0.
     fn single_leaf() -> Vec<u8> {
@@ -296,7 +348,7 @@ mod tests {
     #[test]
     fn walks_a_single_leaf_in_key_order() {
         let image = single_leaf();
-        let got = collect(image.as_slice(), 0, 8).expect("walk");
+        let got = collect(image.as_slice(), 0, 8, ValueSize(8)).expect("walk");
         let keys: Vec<u64> = got.iter().map(|(k, _)| *k).collect();
         assert_eq!(keys, [10, 20, 30]);
         assert_eq!(
@@ -324,7 +376,7 @@ mod tests {
         image[BLOCK_SIZE..BLOCK_SIZE * 2].copy_from_slice(&leaf_a);
         image[BLOCK_SIZE * 2..].copy_from_slice(&leaf_b);
 
-        let got = collect(image.as_slice(), 0, 8).expect("walk");
+        let got = collect(image.as_slice(), 0, 8, ValueSize(8)).expect("walk");
         let keys: Vec<u64> = got.iter().map(|(k, _)| *k).collect();
         assert_eq!(keys, [1, 5], "leaves visited in key order");
     }
@@ -379,8 +431,50 @@ mod tests {
         // walk would never return.
         let image = node_block(0, false, 8, &[(1, 0u64.to_le_bytes().to_vec())]);
         assert!(matches!(
-            collect(image.as_slice(), 0, 4),
+            collect(image.as_slice(), 0, 4, ValueSize(8)),
             Err(Error::Malformed { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_a_leaf_narrower_than_the_caller_expects() {
+        // A leaf may legally declare any width that fits the block, so a
+        // caller decoding a u64 out of a 4-byte value would index past its
+        // end. Reported, not panicked: a dump of corrupt metadata is
+        // exactly when this happens.
+        let image = node_block(
+            0,
+            true,
+            4,
+            &[
+                (10, 1u32.to_le_bytes().to_vec()),
+                (20, 2u32.to_le_bytes().to_vec()),
+            ],
+        );
+        assert!(matches!(
+            collect(image.as_slice(), 0, 8, ValueSize(8)),
+            Err(Error::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_a_leaf_wider_than_the_caller_expects() {
+        // The other direction is corruption too: a caller reading 8 bytes
+        // out of a 24-byte record would silently decode the wrong field.
+        let image = node_block(0, true, 24, &[(10, vec![0u8; 24])]);
+        assert!(matches!(
+            collect(image.as_slice(), 0, 8, ValueSize(8)),
+            Err(Error::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn accepts_a_leaf_of_the_expected_width() {
+        // The check must not be so tight that it rejects a valid tree of
+        // some width other than 8.
+        let image = node_block(0, true, 24, &[(10, vec![7u8; 24])]);
+        let got = collect(image.as_slice(), 0, 8, ValueSize(24)).expect("walk");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].1, vec![7u8; 24]);
     }
 }

@@ -22,12 +22,15 @@
 
 use std::collections::HashMap;
 
+use crate::btree::ValueSize;
 use crate::space_map::{self, SpaceMap};
 use crate::thin::{self, Superblock};
-use crate::{Blocks, Error, btree};
+use crate::{Blocks, Error, btree, era};
 
 /// Depth bound for every tree walked here.
 const MAX_DEPTH: usize = 16;
+/// The top level of a mapping tree holds a `u64` root per device.
+const MAPPING_SIZE: ValueSize = ValueSize(8);
 
 /// What a check found.
 #[derive(Debug, Default)]
@@ -175,7 +178,12 @@ fn count_trees<B: Blocks + ?Sized>(
     );
 
     // Each device's own mapping tree, plus the data blocks it maps.
-    let devices = match btree::collect(blocks, superblock.data_mapping_root, MAX_DEPTH) {
+    let devices = match btree::collect(
+        blocks,
+        superblock.data_mapping_root,
+        MAX_DEPTH,
+        MAPPING_SIZE,
+    ) {
         Ok(devices) => devices,
         Err(e) => {
             report.errors.push(format!("mapping tree (top level): {e}"));
@@ -362,7 +370,12 @@ pub fn check_era<B: Blocks + ?Sized>(blocks: &B) -> Result<Report, Error> {
         for block in hits {
             counts.hit_metadata(block, &mut report.errors);
         }
-        match btree::collect(blocks, superblock.writeset_tree_root, MAX_DEPTH) {
+        match btree::collect(
+            blocks,
+            superblock.writeset_tree_root,
+            MAX_DEPTH,
+            era::WRITESET_SIZE,
+        ) {
             Ok(writesets) => {
                 for (era, value) in writesets {
                     let root = crate::block::le64(&value, 4);

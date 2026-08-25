@@ -13,6 +13,7 @@
 //! not been archived yet.
 
 use crate::block::{le32, le64, read_validated};
+use crate::btree::ValueSize;
 use crate::space_map::Root;
 use crate::{Blocks, Error, array, bitset, btree};
 
@@ -35,6 +36,10 @@ const OFF_ERA_ARRAY_ROOT: usize = 208;
 const OFF_METADATA_SNAP: usize = 216;
 /// Depth bound for the writeset tree.
 const MAX_DEPTH: usize = 16;
+/// A `writeset_disk` is a `__le32` bit count then a `__le64` bitset root.
+pub(crate) const WRITESET_SIZE: ValueSize = ValueSize(12);
+/// The era array holds one `__le32` era per origin block.
+const ERA_SIZE: ValueSize = ValueSize(4);
 
 /// A parsed era superblock.
 #[derive(Debug, Clone)]
@@ -118,7 +123,12 @@ pub fn writesets<B: Blocks + ?Sized>(
     superblock: &Superblock,
 ) -> Result<Vec<Writeset>, Error> {
     let mut out = Vec::new();
-    for (era, value) in btree::collect(blocks, superblock.writeset_tree_root, MAX_DEPTH)? {
+    for (era, value) in btree::collect(
+        blocks,
+        superblock.writeset_tree_root,
+        MAX_DEPTH,
+        WRITESET_SIZE,
+    )? {
         // A writeset_disk is a bit count followed by its bitset root.
         let nr_bits = u64::from(le32(&value, 0));
         let root = le64(&value, 4);
@@ -152,10 +162,15 @@ pub fn era_array<B: Blocks + ?Sized>(
     superblock: &Superblock,
 ) -> Result<Vec<u32>, Error> {
     let mut out = Vec::new();
-    array::walk(blocks, superblock.era_array_root, &mut |_index, value| {
-        out.push(le32(value, 0));
-        Ok(())
-    })?;
+    array::walk(
+        blocks,
+        superblock.era_array_root,
+        ERA_SIZE,
+        &mut |_index, value| {
+            out.push(le32(value, 0));
+            Ok(())
+        },
+    )?;
     out.truncate(usize::try_from(superblock.nr_blocks).unwrap_or(usize::MAX));
     Ok(out)
 }
