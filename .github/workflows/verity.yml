@@ -1,0 +1,40 @@
+name: verity
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: install veritysetup
+        run: sudo apt-get update && sudo apt-get install --yes cryptsetup-bin
+      - name: require veritysetup
+        run: command -v veritysetup
+      - name: format
+        run: cargo fmt --all --check
+      - name: test all features
+        run: cargo test -p devmap-verity --all-features --all-targets
+      - name: test documentation
+        run: cargo test -p devmap-verity --all-features --doc
+      - name: test feature isolation
+        run: |
+          for feature in blake2 futures-io ripemd sha1 sha2 sha3 sm3 streebog whirlpool; do
+            cargo test -p devmap-verity --no-default-features --features "$feature" --test metadata
+          done
+      - name: clippy
+        run: cargo clippy -p devmap-verity --all-features --all-targets -- -D warnings
+      - name: package
+        run: cargo package -p devmap-verity

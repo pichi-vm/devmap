@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: cargo doc
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs
       - name: redirect root to crate
