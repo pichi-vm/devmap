@@ -2,20 +2,51 @@
 name = "devmap-verity"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "Apache-2.0"
-description = "Builder for the dm-verity v1 on-disk hash tree and cryptsetup-compatible superblock."
+readme = "README.md"
+description = "Validated dm-verity superblocks and a streaming on-disk hash-tree writer."
 repository = "https://github.com/pichi-vm/devmap"
 homepage = "https://github.com/pichi-vm/devmap"
 keywords = ["dm-verity", "verity", "device-mapper", "hash-tree", "cryptsetup"]
 categories = ["filesystem", "cryptography"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["sha2"]
+
 [dependencies]
-sha2 = "0.10"
-thiserror = "2"
+blake2 = { version = "0.10", optional = true }
+digest = "0.10"
+futures-io = { version = "0.3", optional = true }
+ripemd = { version = "0.1", optional = true }
+sha1 = { version = "0.10", optional = true }
+sha2 = { version = "0.10", optional = true }
+sha3 = { version = "0.10", optional = true }
+sm3 = { version = "0.4", optional = true }
+streebog = { version = "0.10", optional = true }
+whirlpool = { version = "0.10", optional = true }
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
+futures = "0.3"
 hex = "0.4"
 tempfile = "3"
+
+[[test]]
+name = "api"
+required-features = ["sha2"]
+
+[[test]]
+name = "async"
+required-features = ["futures-io", "sha2"]
+
+[[test]]
+name = "veritysetup"
+required-features = ["sha2"]
 
 [lints]
 workspace = true

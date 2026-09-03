@@ -5,17 +5,22 @@
 //! ([`devmap_linux`]).
 
 use std::fs::{File, OpenOptions};
-use std::os::unix::fs::FileExt as _;
+use std::io::{Read as _, Seek as _, SeekFrom};
+use std::num::{NonZeroU32, NonZeroU64};
 
 use anyhow::{Context as _, Result, bail};
 use devmap_linux::DevId;
 use devmap_linux::targets::Verity;
-use devmap_verity::{Superblock, VerityBuilder, VerityParams, feed_from_reader};
+use devmap_verity::{HashType, TreeWriter, Unverified, Verified};
 
 use crate::cli::{
     VerityClose, VerityCmd, VerityDump, VerityFormat, VerityOpen, VerityStatus, VerityVerify,
 };
 use crate::{control, hex, size, urandom, uuid};
+
+mod seek_sink;
+
+use seek_sink::SeekSink;
 
 pub(crate) fn run(cmd: VerityCmd) -> Result<()> {
     match cmd {
@@ -28,17 +33,25 @@ pub(crate) fn run(cmd: VerityCmd) -> Result<()> {
     }
 }
 
-/// Read the 512-byte superblock from the start of a hash device.
-fn read_superblock(hash_dev: &std::path::Path) -> Result<Superblock> {
-    let file = File::open(hash_dev).with_context(|| format!("open {}", hash_dev.display()))?;
-    let mut sb = [0u8; devmap_verity::VERITY_SB_SIZE];
-    file.read_exact_at(&mut sb, 0)
+/// Read the superblock from the start of a hash device.
+fn read_superblock(hash_dev: &std::path::Path) -> Result<Verified> {
+    let mut file = File::open(hash_dev).with_context(|| format!("open {}", hash_dev.display()))?;
+    let mut bytes = Unverified::default();
+    file.read_exact(bytes.as_mut())
         .with_context(|| format!("read superblock from {}", hash_dev.display()))?;
-    Superblock::from_bytes(&sb).context("parse verity superblock")
+    let superblock = Verified::try_from(bytes)
+        .with_context(|| format!("validate superblock from {}", hash_dev.display()))?;
+    let padding = superblock.padding();
+    let copied = std::io::copy(&mut file.take(padding), &mut std::io::sink())
+        .with_context(|| format!("read superblock padding from {}", hash_dev.display()))?;
+    if copied != padding {
+        bail!("truncated superblock padding in {}", hash_dev.display());
+    }
+    Ok(superblock)
 }
 
 fn format(a: &VerityFormat) -> Result<()> {
-    let salt = match &a.salt {
+    let salt_bytes = match &a.salt {
         Some(hexstr) => hex::decode(hexstr).context("parse --salt")?,
         None => urandom::bytes(32).context("read random salt")?,
     };
@@ -48,54 +61,73 @@ fn format(a: &VerityFormat) -> Result<()> {
         let bytes = urandom::bytes(16).context("read random uuid")?;
         bytes.try_into().expect("urandom(16) is 16 bytes")
     };
-    let params = VerityParams {
-        data_block_size: a.data_block_size,
-        hash_block_size: a.hash_block_size,
-        salt,
-        uuid: uuid_bytes,
-    };
-
-    // Stream the data device through the builder rather than loading it.
     let mut data =
         File::open(&a.data_dev).with_context(|| format!("open {}", a.data_dev.display()))?;
     let size = size::of(&data).context("size data device")?;
-
-    let dbs = params.data_block_size as usize;
-    let mut builder = VerityBuilder::new(&params).context("init verity builder")?;
-    feed_from_reader(&mut data, &mut builder, dbs).context("hash data device")?;
-    let out = builder.finalize();
-
-    // Write the tree blob at the hash device offset (default 0).
-    let hash = OpenOptions::new()
+    let data_block_size =
+        NonZeroU32::new(a.data_block_size).context("invalid verity data block size")?;
+    let data_blocks = NonZeroU64::new(size.div_ceil(u64::from(data_block_size.get())))
+        .context("verity data device is empty")?;
+    let builder = Verified::builder()
+        .hash_type(HashType::Normal)
+        .data_block_size(a.data_block_size)
+        .context("invalid verity data block size")?
+        .hash_block_size(a.hash_block_size)
+        .context("invalid verity hash block size")?;
+    let superblock = builder
+        .salt(&salt_bytes)
+        .context("set salt")?
+        .build(uuid_bytes, data_blocks)
+        .context("construct verity superblock")?;
+    let mut hash = OpenOptions::new()
         .write(true)
         .open(&a.hash_dev)
         .with_context(|| format!("open {}", a.hash_dev.display()))?;
-    hash.write_all_at(&out.blob, a.hash_offset)
-        .context("write hash tree")?;
+    hash.seek(SeekFrom::Start(a.hash_offset))
+        .context("seek to hash tree offset")?;
+    let bytes = Unverified::from(&superblock);
+    std::io::Write::write_all(&mut hash, bytes.as_ref()).context("write verity superblock")?;
+    std::io::copy(
+        &mut std::io::repeat(0).take(superblock.padding()),
+        &mut hash,
+    )
+    .context("write verity superblock padding")?;
+    let root_hash = {
+        let mut tree =
+            TreeWriter::new(&mut hash, superblock).context("select verity hash implementation")?;
+        std::io::copy(&mut data, &mut tree).context("hash data device")?;
+        std::io::Write::flush(&mut tree).context("finish hash tree")?;
+        tree.digest().context("read root digest")?.to_vec()
+    };
     hash.sync_all().context("sync hash device")?;
 
-    let data_blocks = size.div_ceil(u64::from(params.data_block_size));
     println!("VERITY header information for {}", a.hash_dev.display());
-    println!("UUID:            \t{}", uuid::format(&params.uuid));
-    println!("Hash type:       \t1");
+    println!("UUID:            \t{}", uuid::format(&uuid_bytes));
+    println!("Hash type:       \t{}", HashType::Normal);
     println!("Data blocks:     \t{data_blocks}");
-    println!("Data block size: \t{}", params.data_block_size);
-    println!("Hash block size: \t{}", params.hash_block_size);
+    println!("Data block size: \t{}", a.data_block_size);
+    println!("Hash block size: \t{}", a.hash_block_size);
     println!("Hash algorithm:  \tsha256");
-    println!("Salt:            \t{}", hex::encode(&params.salt));
-    println!("Root hash:       \t{}", hex::encode(&out.root_hash));
+    println!("Salt:            \t{}", hex::encode(&salt_bytes));
+    println!("Root hash:       \t{}", hex::encode(root_hash.as_ref()));
     Ok(())
 }
 
 fn open(a: &VerityOpen) -> Result<()> {
     let sb = read_superblock(&a.hash_dev)?;
+    if sb.hash_type() != HashType::Normal {
+        bail!(
+            "unsupported verity hash type {}; only normal (1) is supported",
+            sb.hash_type()
+        );
+    }
     // The Verity table type locks both block sizes to 4096; a superblock
     // outside that can't be represented, so refuse rather than misload.
-    if sb.data_block_size != 4096 || sb.hash_block_size != 4096 {
+    let data_block_size = sb.data_block_size();
+    let hash_block_size = sb.hash_block_size();
+    if data_block_size != 4096 || hash_block_size != 4096 {
         bail!(
-            "unsupported block sizes (data {}, hash {}); only 4096 is supported",
-            sb.data_block_size,
-            sb.hash_block_size
+            "unsupported block sizes (data {data_block_size}, hash {hash_block_size}); only 4096 is supported"
         );
     }
     let digest = hex::decode(&a.root_hash).context("parse root hash")?;
@@ -103,12 +135,12 @@ fn open(a: &VerityOpen) -> Result<()> {
     let verity = Verity {
         data_dev: DevId::from_path(&a.data_dev).context("resolve data device")?,
         hash_dev: DevId::from_path(&a.hash_dev).context("resolve hash device")?,
-        num_data_blocks: sb.data_blocks,
-        algorithm: sb.algorithm,
+        num_data_blocks: sb.data_blocks().get(),
+        algorithm: sb.algorithm().to_string(),
         digest,
-        salt: sb.salt,
+        salt: sb.salt().to_vec(),
     };
-    let length = sb.data_blocks * u64::from(sb.data_block_size) / size::SECTOR;
+    let length = sb.data_blocks().get() * u64::from(data_block_size) / size::SECTOR;
 
     let control = control::open()?;
     let device = control
@@ -131,29 +163,32 @@ fn close(a: &VerityClose) -> Result<()> {
 
 fn verify(a: &VerityVerify) -> Result<()> {
     let sb = read_superblock(&a.hash_dev)?;
-    let params = VerityParams {
-        data_block_size: sb.data_block_size,
-        hash_block_size: sb.hash_block_size,
-        salt: sb.salt,
-        // The uuid never enters the hash-tree computation; only the salt
-        // does. A zero uuid keeps the recomputed root hash correct.
-        uuid: [0u8; 16],
+    if sb.hash_type() != HashType::Normal {
+        bail!(
+            "unsupported verity hash type {}; only normal (1) is supported",
+            sb.hash_type()
+        );
+    }
+    let data = File::open(&a.data_dev).with_context(|| format!("open {}", a.data_dev.display()))?;
+    let data_size = sb.data_blocks().get() * u64::from(sb.data_block_size());
+    let mut data = data.take(data_size);
+    let mut sink = SeekSink::default();
+    let computed = {
+        let mut tree =
+            TreeWriter::new(&mut sink, sb).context("select verity hash implementation")?;
+        std::io::copy(&mut data, &mut tree).context("hash data device")?;
+        std::io::Write::flush(&mut tree).context("finish hash tree")?;
+        tree.digest().context("read root digest")?.to_vec()
     };
-    let mut data =
-        File::open(&a.data_dev).with_context(|| format!("open {}", a.data_dev.display()))?;
-    let dbs = params.data_block_size as usize;
-    let mut builder = VerityBuilder::new(&params).context("init verity builder")?;
-    feed_from_reader(&mut data, &mut builder, dbs).context("hash data device")?;
-    let computed = builder.finalize().root_hash;
 
     let expected = hex::decode(&a.root_hash).context("parse root hash")?;
-    if expected == computed {
+    if expected.as_slice() == computed.as_slice() {
         println!("Verification successful.");
         Ok(())
     } else {
         bail!(
             "verification failed: computed root hash {} does not match {}",
-            hex::encode(&computed),
+            hex::encode(computed.as_ref()),
             a.root_hash
         );
     }
@@ -162,13 +197,13 @@ fn verify(a: &VerityVerify) -> Result<()> {
 fn dump(a: &VerityDump) -> Result<()> {
     let sb = read_superblock(&a.hash_dev)?;
     println!("VERITY header information for {}", a.hash_dev.display());
-    println!("UUID:            \t{}", uuid::format(&sb.uuid));
-    println!("Hash type:       \t{}", sb.hash_type);
-    println!("Data blocks:     \t{}", sb.data_blocks);
-    println!("Data block size: \t{}", sb.data_block_size);
-    println!("Hash block size: \t{}", sb.hash_block_size);
-    println!("Hash algorithm:  \t{}", sb.algorithm);
-    println!("Salt:            \t{}", hex::encode(&sb.salt));
+    println!("UUID:            \t{}", uuid::format(sb.uuid()));
+    println!("Hash type:       \t{}", sb.hash_type());
+    println!("Data blocks:     \t{}", sb.data_blocks());
+    println!("Data block size: \t{}", sb.data_block_size());
+    println!("Hash block size: \t{}", sb.hash_block_size());
+    println!("Hash algorithm:  \t{}", sb.algorithm());
+    println!("Salt:            \t{}", hex::encode(sb.salt()));
     Ok(())
 }
 
