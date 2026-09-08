@@ -51,7 +51,6 @@ impl<W: Write + Seek> TreeWriter<W> {
 
     fn prepare_for_input(&mut self) -> Result<(), Failure> {
         self.initialize()?;
-        self.tree.prepare_input()?;
         self.drain(Drain::Full)
     }
 
@@ -63,7 +62,7 @@ impl<W: Write + Seek> TreeWriter<W> {
                 )));
             }
             Phase::Complete(_) => return self.output.flush().map_err(Failure::Fatal),
-            #[cfg(feature = "futures-io")]
+            #[cfg(feature = "tokio")]
             Phase::Draining(_) | Phase::SeekingEnd { .. } | Phase::FlushingOutput(_) => {
                 return Err(Failure::Recoverable(io::Error::new(
                     io::ErrorKind::WouldBlock,
@@ -74,7 +73,7 @@ impl<W: Write + Seek> TreeWriter<W> {
         }
 
         self.initialize()?;
-        let mode = self.tree.begin_flush()?;
+        let mode = self.tree.begin_flush();
         if mode == FlushMode::Final {
             self.phase = Phase::Sealed;
         }

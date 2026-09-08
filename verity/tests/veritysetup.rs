@@ -140,11 +140,11 @@ fn matches_veritysetup_with_multiple_tree_levels() {
 
 #[test]
 fn chrome_os_fanout_matches_veritysetup() {
-    for (blocks, algorithm) in [
-        (129, Algorithm::Sha1),
-        (129, Algorithm::Sha224),
-        (65, Algorithm::Sha384),
-    ] {
+    #[allow(unused_mut)]
+    let mut algorithms = vec![(129, Algorithm::Sha224), (65, Algorithm::Sha384)];
+    #[cfg(feature = "sha1")]
+    algorithms.push((129, Algorithm::Sha1));
+    for (blocks, algorithm) in algorithms {
         assert_matches_veritysetup(blocks, HashType::ChromeOs, algorithm, true);
     }
 }

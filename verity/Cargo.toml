@@ -21,7 +21,7 @@ default = ["sha2"]
 [dependencies]
 blake2 = { version = "0.10", optional = true }
 digest = "0.10"
-futures-io = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["io-util"], optional = true }
 ripemd = { version = "0.1", optional = true }
 sha1 = { version = "0.10", optional = true }
 sha2 = { version = "0.10", optional = true }
@@ -32,7 +32,7 @@ whirlpool = { version = "0.10", optional = true }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
-futures = "0.3"
+tokio = { version = "1", features = ["io-util", "macros", "rt"] }
 hex = "0.4"
 tempfile = "3"
 
@@ -42,7 +42,7 @@ required-features = ["sha2"]
 
 [[test]]
 name = "async"
-required-features = ["futures-io", "sha2"]
+required-features = ["tokio", "sha2"]
 
 [[test]]
 name = "veritysetup"

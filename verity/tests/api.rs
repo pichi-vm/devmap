@@ -792,17 +792,18 @@ fn accepting_the_complete_final_block_seals_the_writer() {
 }
 
 #[test]
-fn an_early_partial_flush_fails_without_poisoning_the_writer() {
+fn an_early_partial_flush_is_conventional_and_does_not_seal() {
     let superblock = Format::default().build(3);
     let mut output = Cursor::new(Vec::new());
     let mut tree = TreeWriter::new(&mut output, superblock).unwrap();
 
     tree.write_all(&[0; 4095]).unwrap();
+    tree.flush().unwrap();
     assert_eq!(
-        tree.flush().unwrap_err().kind(),
-        io::ErrorKind::InvalidInput
+        tree.digest().unwrap_err().kind(),
+        io::ErrorKind::UnexpectedEof
     );
-    tree.write_all(&[0; 4096 + 2]).unwrap();
+    tree.write_all(&[0; 2 * 4096 + 1]).unwrap();
     tree.flush().unwrap();
     assert_eq!(tree.digest().unwrap().len(), 32);
     assert_eq!(
@@ -954,11 +955,11 @@ fn arbitrary_input_chunks_match_a_single_write_on_block_boundary() {
 }
 
 #[test]
-fn arbitrary_input_chunks_match_a_single_write_with_a_partial_final_block() {
+fn arbitrary_fragments_match_a_single_write_for_complete_blocks() {
     let salt = vec![0u8; 32];
     let uuid = [0x5a; 16];
     let format = Format::default().salt(&salt).uuid(uuid);
-    for &n in &[4097usize, 8191, 12289] {
+    for &n in &[4096usize, 8192, 12288] {
         let data: Vec<u8> = (0u32..).map(|i| (i & 0xFF) as u8).take(n).collect();
         let direct = compute(&format, &data);
         let streamed = compute_in_chunks(&format, &data, 777);
@@ -971,16 +972,19 @@ fn arbitrary_input_chunks_match_a_single_write_with_a_partial_final_block() {
 }
 
 #[test]
-fn a_partial_final_block_matches_explicit_zero_padding() {
-    let format = Format::default();
-    let partial = vec![0xa5; 4097];
-    let mut padded = partial.clone();
-    padded.resize(8192, 0);
-
-    let partial = compute(&format, &partial);
-    let padded = compute(&format, &padded);
-    assert_eq!(partial.blob, padded.blob);
-    assert_eq!(partial.root_hash, padded.root_hash);
+fn a_partial_final_block_is_not_implicitly_padded() {
+    let superblock = Format::default().build(2);
+    let mut output = Cursor::new(Vec::new());
+    let mut tree = TreeWriter::new(&mut output, superblock).unwrap();
+    tree.write_all(&vec![0xa5; 4097]).unwrap();
+    tree.flush().unwrap();
+    assert_eq!(
+        tree.digest().unwrap_err().kind(),
+        io::ErrorKind::UnexpectedEof
+    );
+    tree.write_all(&vec![0; 4095]).unwrap();
+    tree.flush().unwrap();
+    assert_eq!(tree.digest().unwrap().len(), 32);
 }
 
 #[test]

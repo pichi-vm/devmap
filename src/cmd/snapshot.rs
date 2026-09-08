@@ -9,6 +9,7 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::FileTypeExt as _;
 
 use anyhow::{Context as _, Result};
+use devmap_snapshot::ChunkSize;
 
 use crate::cli::{SnapshotCmd, SnapshotConvert};
 use crate::size;
@@ -39,16 +40,19 @@ fn convert(a: &SnapshotConvert) -> Result<()> {
         cow.set_len(0).context("truncate COW output")?;
     }
 
-    let meta = devmap_snapshot::convert_sparse(&raw, raw_len, &mut cow, a.chunk_size)
+    let chunk_size = ChunkSize::from_sectors(a.chunk_size).context("chunk size")?;
+    let converted = devmap_snapshot::convert_sparse(&raw, raw_len, &mut cow, chunk_size)
         // Both devices are named: the conversion reads one and writes the
         // other, and the error alone doesn't say which end faulted.
         .with_context(|| format!("convert {} into {}", a.raw.display(), a.cow.display()))?;
 
-    let chunk_bytes = u64::from(a.chunk_size) * u64::from(devmap_snapshot::SECTOR_SIZE);
     println!("Converted {} -> {}", a.raw.display(), a.cow.display());
-    println!("  Chunk size:      {} sectors", meta.chunk_size_sectors);
-    println!("  Input chunks:    {}", raw_len.div_ceil(chunk_bytes));
-    println!("  Exceptions:      {}", meta.exception_count);
-    println!("  COW size:        {} bytes", meta.total_bytes);
+    println!("  Chunk size:      {} sectors", chunk_size.sectors());
+    println!(
+        "  Input chunks:    {}",
+        raw_len.div_ceil(chunk_size.bytes().get())
+    );
+    println!("  Exceptions:      {}", converted.exception_count);
+    println!("  COW size:        {} bytes", converted.cow_bytes);
     Ok(())
 }

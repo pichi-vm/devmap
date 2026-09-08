@@ -37,7 +37,7 @@ workspace = true
 
 [workspace]
 resolver = "3"
-members = ["core", "linux", "verity", "zoned", "snapshot", "luks", "persistent"]
+members = ["linux", "verity", "zoned", "snapshot", "luks", "persistent"]
 
 # Shared lints for every member. Kept here so a new member picks them up
 # with `[lints] workspace = true` rather than duplicating the block.

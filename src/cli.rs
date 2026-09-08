@@ -440,7 +440,7 @@ pub(crate) struct SnapshotConvert {
     /// COW output — a file (truncated) or a block device (written in place).
     pub(crate) cow: PathBuf,
     /// COW chunk size in 512-byte sectors (power of two, >= 8).
-    #[arg(long, default_value_t = devmap_snapshot::DEFAULT_CHUNK_SIZE_SECTORS)]
+    #[arg(long, default_value_t = devmap_snapshot::ChunkSize::DEFAULT.sectors())]
     pub(crate) chunk_size: u32,
 }
 
