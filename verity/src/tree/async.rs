@@ -4,7 +4,7 @@ use std::io::{self, SeekFrom};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures_io::{AsyncSeek, AsyncWrite};
+use tokio::io::{AsyncSeek, AsyncWrite};
 
 use super::{
     AfterDrain, AfterFlush, BlockWrite, Drain, DrainStep, Draining, Failure, FlushMode,
@@ -16,11 +16,18 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
         if self.output_range.is_some() {
             return Poll::Ready(Ok(()));
         }
-        let start = match Pin::new(&mut self.output).poll_seek(cx, SeekFrom::Current(0)) {
+        if !self.initializing {
+            if let Err(error) = Pin::new(&mut self.output).start_seek(SeekFrom::Current(0)) {
+                return Poll::Ready(Err(Failure::Fatal(error)));
+            }
+            self.initializing = true;
+        }
+        let start = match Pin::new(&mut self.output).poll_complete(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Err(error)) => return Poll::Ready(Err(Failure::Fatal(error))),
             Poll::Ready(Ok(start)) => start,
         };
+        self.initializing = false;
         let Some(end) = start.checked_add(self.tree.tree_size()) else {
             return Poll::Ready(Err(Failure::Fatal(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -36,7 +43,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
             let phase = std::mem::replace(&mut self.phase, Phase::Failed);
             let progress = match phase {
                 Phase::Draining(draining) => self.poll_draining(cx, draining),
-                Phase::SeekingEnd { digest } => self.poll_seek_end(cx, digest),
+                Phase::SeekingEnd { digest, started } => self.poll_seek_end(cx, digest, started),
                 Phase::FlushingOutput(after) => self.poll_output_flush(cx, after),
                 phase => {
                     self.phase = phase;
@@ -58,7 +65,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
         match std::mem::replace(&mut draining.step, DrainStep::Next) {
             DrainStep::Next => {
                 if let Some(block) = self.tree.take_pending(draining.mode) {
-                    draining.step = DrainStep::Writing(BlockWrite::Seeking(block));
+                    draining.step = DrainStep::Writing(BlockWrite::Starting(block));
                     self.phase = Phase::Draining(draining);
                     return Poll::Ready(Ok(Progress::Continue));
                 }
@@ -78,7 +85,10 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
                                 "complete verity input did not produce a root digest",
                             ))));
                         };
-                        self.phase = Phase::SeekingEnd { digest };
+                        self.phase = Phase::SeekingEnd {
+                            digest,
+                            started: false,
+                        };
                         Poll::Ready(Ok(Progress::Continue))
                     }
                 }
@@ -94,7 +104,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
         write: BlockWrite,
     ) -> Poll<Result<Progress, Failure>> {
         match write {
-            BlockWrite::Seeking(block) => {
+            BlockWrite::Starting(block) => {
                 let Some(range) = &self.output_range else {
                     return Poll::Ready(Err(Failure::Fatal(io::Error::other(
                         "hash tree output is not initialized",
@@ -106,21 +116,26 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
                         "hash tree output offset overflows",
                     ))));
                 };
-                match Pin::new(&mut self.output).poll_seek(cx, SeekFrom::Start(offset)) {
-                    Poll::Pending => {
-                        draining.step = DrainStep::Writing(BlockWrite::Seeking(block));
-                        self.phase = Phase::Draining(draining);
-                        Poll::Pending
-                    }
-                    Poll::Ready(Err(error)) => Poll::Ready(Err(Failure::Fatal(error))),
-                    Poll::Ready(Ok(_)) => {
-                        draining.step =
-                            DrainStep::Writing(BlockWrite::Writing { block, written: 0 });
-                        self.phase = Phase::Draining(draining);
-                        Poll::Ready(Ok(Progress::Continue))
-                    }
+                if let Err(error) = Pin::new(&mut self.output).start_seek(SeekFrom::Start(offset)) {
+                    return Poll::Ready(Err(Failure::Fatal(error)));
                 }
+                draining.step = DrainStep::Writing(BlockWrite::Seeking(block));
+                self.phase = Phase::Draining(draining);
+                Poll::Ready(Ok(Progress::Continue))
             }
+            BlockWrite::Seeking(block) => match Pin::new(&mut self.output).poll_complete(cx) {
+                Poll::Pending => {
+                    draining.step = DrainStep::Writing(BlockWrite::Seeking(block));
+                    self.phase = Phase::Draining(draining);
+                    Poll::Pending
+                }
+                Poll::Ready(Err(error)) => Poll::Ready(Err(Failure::Fatal(error))),
+                Poll::Ready(Ok(_)) => {
+                    draining.step = DrainStep::Writing(BlockWrite::Writing { block, written: 0 });
+                    self.phase = Phase::Draining(draining);
+                    Poll::Ready(Ok(Progress::Continue))
+                }
+            },
             BlockWrite::Writing { block, written } => {
                 match Pin::new(&mut self.output).poll_write(cx, &block.bytes()[written..]) {
                     Poll::Pending => {
@@ -167,15 +182,29 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
         &mut self,
         cx: &mut Context<'_>,
         digest: Box<[u8]>,
+        started: bool,
     ) -> Poll<Result<Progress, Failure>> {
         let Some(range) = &self.output_range else {
             return Poll::Ready(Err(Failure::Fatal(io::Error::other(
                 "hash tree output is not initialized",
             ))));
         };
-        match Pin::new(&mut self.output).poll_seek(cx, SeekFrom::Start(range.end)) {
+        if !started {
+            if let Err(error) = Pin::new(&mut self.output).start_seek(SeekFrom::Start(range.end)) {
+                return Poll::Ready(Err(Failure::Fatal(error)));
+            }
+            self.phase = Phase::SeekingEnd {
+                digest,
+                started: true,
+            };
+            return Poll::Ready(Ok(Progress::Continue));
+        }
+        match Pin::new(&mut self.output).poll_complete(cx) {
             Poll::Pending => {
-                self.phase = Phase::SeekingEnd { digest };
+                self.phase = Phase::SeekingEnd {
+                    digest,
+                    started: true,
+                };
                 Poll::Pending
             }
             Poll::Ready(Err(error)) => Poll::Ready(Err(Failure::Fatal(error))),
@@ -227,7 +256,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
     }
 }
 
-#[cfg_attr(docsrs, doc(cfg(feature = "futures-io")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 impl<W: AsyncWrite + AsyncSeek + Unpin> AsyncWrite for TreeWriter<W> {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -258,11 +287,6 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> AsyncWrite for TreeWriter<W> {
             }
             Poll::Ready(Ok(())) => {}
         }
-        if let Err(failure) = this.tree.prepare_input() {
-            this.phase = Phase::Failed;
-            return Poll::Ready(Err(failure.into_error()));
-        }
-
         this.phase = Phase::Draining(Draining {
             mode: Drain::Full,
             after: AfterDrain::AcceptInput,
@@ -320,14 +344,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> AsyncWrite for TreeWriter<W> {
             }
             Poll::Ready(Ok(())) => {}
         }
-        let mode = match this.tree.begin_flush() {
-            Ok(mode) => mode,
-            Err(Failure::Recoverable(error)) => return Poll::Ready(Err(error)),
-            Err(Failure::Fatal(error)) => {
-                this.phase = Phase::Failed;
-                return Poll::Ready(Err(error));
-            }
-        };
+        let mode = this.tree.begin_flush();
         this.phase = Phase::Draining(Draining {
             mode: mode.drain(),
             after: match mode {
@@ -344,7 +361,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> AsyncWrite for TreeWriter<W> {
         }
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         {
             let this = self.as_mut().get_mut();
             if matches!(this.phase, Phase::Failed) {
@@ -359,7 +376,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> AsyncWrite for TreeWriter<W> {
                     Poll::Ready(Ok(_)) => {}
                 }
             }
-            if matches!(this.phase, Phase::Open) && !this.tree.in_final_block() {
+            if matches!(this.phase, Phase::Open) && !this.tree.reached_end() {
                 return Poll::Ready(Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "verity input has not reached its final data block",
@@ -373,7 +390,7 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> AsyncWrite for TreeWriter<W> {
             Poll::Ready(Ok(())) => {}
         }
         let this = self.get_mut();
-        match Pin::new(&mut this.output).poll_close(cx) {
+        match Pin::new(&mut this.output).poll_shutdown(cx) {
             Poll::Ready(Err(error)) => {
                 this.phase = Phase::Failed;
                 Poll::Ready(Err(error))

@@ -2,15 +2,21 @@
 name = "devmap-snapshot"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "Apache-2.0"
-description = "Writer and reader for the dm-snapshot persistent COW (exception store) on-disk format."
+readme = "README.md"
+description = "Reader, writer, and merger for the dm-snapshot persistent COW on-disk format."
 repository = "https://github.com/pichi-vm/devmap"
 homepage = "https://github.com/pichi-vm/devmap"
 keywords = ["dm-snapshot", "snapshot", "device-mapper", "copy-on-write", "cow"]
 categories = ["filesystem"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
-thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util"], optional = true }
 
 # The sparse-aware converter uses SEEK_DATA / SEEK_HOLE to skip holes in a
 # raw image; the rest of the crate (the format itself) stays portable.
@@ -18,10 +24,18 @@ thiserror = "2"
 rustix = { version = "1", features = ["fs"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt"] }
 tempfile = "3"
 # The end-to-end test activates dm-snapshot over our COW to prove the
 # kernel accepts the format.
 devmap-linux = { path = "../linux" }
+
+[features]
+tokio = ["dep:tokio"]
+
+[[test]]
+name = "async"
+required-features = ["tokio"]
 
 [lints]
 workspace = true

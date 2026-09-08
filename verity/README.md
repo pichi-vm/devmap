@@ -4,8 +4,8 @@
 trees. Superblocks are validated before use, and tree data is streamed to a
 seekable output.
 
-The same types support synchronous `std::io` and asynchronous `futures-io`.
-Enable the `futures-io` feature for asynchronous tree writing. Hash
+The same types support synchronous `std::io` and asynchronous Tokio I/O.
+Enable the `tokio` feature for asynchronous tree writing. Hash
 implementations are selected with the optional `sha1`, `sha2`, `sha3`,
 `ripemd`, `whirlpool`, `streebog`, `sm3`, and `blake2` features. `sha2` is
 enabled by default.

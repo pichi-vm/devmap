@@ -14,7 +14,7 @@
 //! separate data device.
 //!
 //! Synchronous and asynchronous I/O use the same crate types and follow the
-//! same steps. Only the I/O traits differ. Enable `futures-io` for asynchronous
+//! same steps. Only the I/O traits differ. Enable `tokio` for asynchronous
 //! tree writing.
 //!
 //! This crate does not create or activate device-mapper devices.
@@ -55,7 +55,7 @@
 //!
 //! ```
 //! use devmap_verity::{Unverified, Verified};
-//! use futures::io::{self as futures_io, AsyncRead, AsyncReadExt};
+//! use tokio::io::{self as tokio_io, AsyncRead, AsyncReadExt};
 //! use std::io;
 //!
 //! async fn read_superblock<R>(mut reader: R) -> io::Result<(Verified, R)>
@@ -71,9 +71,9 @@
 //!
 //!     // Skip the rest of the hash block.
 //!     let padding = superblock.padding();
-//!     let read = futures_io::copy(
+//!     let read = tokio_io::copy(
 //!         &mut (&mut reader).take(padding),
-//!         &mut futures_io::sink(),
+//!         &mut tokio_io::sink(),
 //!     )
 //!     .await?;
 //!     if read != padding {
@@ -88,10 +88,9 @@
 //!
 //! Build a [`Verified`] value, write its [`Unverified`] form and padding, then
 //! copy the data-device contents into its [`TreeWriter`]. Flush the tree writer
-//! before calling [`TreeWriter::digest`]. A partial final data block is padded
-//! with zeroes. The backing data device must contain the same padding so that
-//! its size is at least `data_blocks * data_block_size`. Dropping a tree writer
-//! does not flush it.
+//! before calling [`TreeWriter::digest`]. The input must contain exactly
+//! `data_blocks * data_block_size` bytes; `flush` never pads or seals partial
+//! input. Dropping a tree writer does not flush it.
 //!
 //! The examples use the builder defaults: SHA-256, normal hash layout, and
 //! 4096-byte data and hash blocks. Use a new UUID and salt for each persistent
@@ -145,7 +144,7 @@
 //!         &mut hash_device,
 //!     )?;
 //!
-//!     // Write the tree and finish the final data block.
+//!     // Write exactly the declared data and drain the tree output.
 //!     let digest = {
 //!         let mut tree = TreeWriter::new(&mut hash_device, superblock)?;
 //!         io::copy(&mut contents, &mut tree)?;
@@ -161,18 +160,18 @@
 //!
 //! ## Asynchronous
 //!
-//! Enable the `futures-io` feature for asynchronous tree writing.
+//! Enable the `tokio` feature for asynchronous tree writing.
 //!
 //! ```
 //! use devmap_verity::{TreeWriter, Unverified, Verified};
-//! use futures::io::{
-//!     self as futures_io, AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite,
+//! use tokio::io::{
+//!     self as tokio_io, AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite,
 //!     AsyncWriteExt,
 //! };
 //! use std::io::{self, SeekFrom};
 //! use std::num::NonZeroU64;
 //!
-//! # #[cfg(feature = "futures-io")]
+//! # #[cfg(feature = "tokio")]
 //! async fn write_hash_device<R, W>(
 //!     mut contents: R,
 //!     mut hash_device: W,
@@ -209,16 +208,16 @@
 //!     // Write the superblock and its padding.
 //!     let bytes = Unverified::from(&superblock);
 //!     hash_device.write_all(bytes.as_ref()).await?;
-//!     futures_io::copy(
-//!         &mut futures_io::repeat(0).take(superblock.padding()),
+//!     tokio_io::copy(
+//!         &mut tokio_io::repeat(0).take(superblock.padding()),
 //!         &mut hash_device,
 //!     )
 //!     .await?;
 //!
-//!     // Write the tree and finish the final data block.
+//!     // Write exactly the declared data and drain the tree output.
 //!     let digest = {
 //!         let mut tree = TreeWriter::new(&mut hash_device, superblock)?;
-//!         futures_io::copy(&mut contents, &mut tree).await?;
+//!         tokio_io::copy(&mut contents, &mut tree).await?;
 //!         tree.flush().await?;
 //!
 //!         // The root digest is available after the final flush.

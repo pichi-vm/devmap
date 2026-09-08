@@ -2,26 +2,26 @@
 
 use std::io;
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 use state::PendingBlock;
 use state::State;
 
 use crate::Verified;
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 mod r#async;
 mod state;
 mod sync;
 
 /// Writes a dm-verity hash tree to a seekable output.
 ///
-/// Write the number of data blocks declared by the superblock. The final block
-/// may be short; `flush` pads it with zeroes. Before the final block, `flush`
-/// succeeds only at a data-block boundary. No more data can be written after
-/// the final block is complete. If the final block is short, the backing data
-/// device must contain the same zero padding.
+/// Write exactly the number of complete data blocks declared by the
+/// superblock. Input slices may have any length; only fragments are copied
+/// into the internal block buffer. Complete aligned blocks are hashed directly.
 ///
-/// Call [`digest`](Self::digest) after the final `flush`. Dropping the writer
+/// `flush` has its conventional meaning: it drains available hash output but
+/// neither pads nor seals incomplete input. Call [`digest`](Self::digest)
+/// after the exact input length has been written and flushed. Dropping the writer
 /// does not flush it. The writer cannot be used after an output error.
 #[allow(missing_debug_implementations)]
 #[must_use = "dropping a tree writer does not finish the hash tree"]
@@ -30,6 +30,8 @@ pub struct TreeWriter<W> {
     tree: State,
     output_range: Option<OutputRange>,
     phase: Phase,
+    #[cfg(feature = "tokio")]
+    initializing: bool,
 }
 
 impl<W> TreeWriter<W> {
@@ -56,6 +58,8 @@ impl<W> TreeWriter<W> {
             tree: State::new(superblock, hasher)?,
             output_range: None,
             phase: Phase::Open,
+            #[cfg(feature = "tokio")]
+            initializing: false,
         })
     }
 
@@ -76,7 +80,7 @@ impl<W> TreeWriter<W> {
                 io::ErrorKind::WouldBlock,
                 "verity tree must be flushed before its digest is available",
             )),
-            #[cfg(feature = "futures-io")]
+            #[cfg(feature = "tokio")]
             Phase::Draining(draining) => match draining.after {
                 AfterDrain::Finish => Err(io::Error::new(
                     io::ErrorKind::WouldBlock,
@@ -87,14 +91,14 @@ impl<W> TreeWriter<W> {
                     "verity input has not reached its final data block",
                 )),
             },
-            #[cfg(feature = "futures-io")]
+            #[cfg(feature = "tokio")]
             Phase::SeekingEnd { .. } | Phase::FlushingOutput(AfterFlush::Complete(_)) => {
                 Err(io::Error::new(
                     io::ErrorKind::WouldBlock,
                     "verity tree must be flushed before its digest is available",
                 ))
             }
-            #[cfg(feature = "futures-io")]
+            #[cfg(feature = "tokio")]
             Phase::FlushingOutput(AfterFlush::Open) => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "verity input has not reached its final data block",
@@ -112,7 +116,7 @@ impl<W> TreeWriter<W> {
             Phase::Failed => Err(io::Error::other(
                 "cannot use a tree writer after an output failure",
             )),
-            #[cfg(feature = "futures-io")]
+            #[cfg(feature = "tokio")]
             Phase::Draining(_) | Phase::SeekingEnd { .. } | Phase::FlushingOutput(_) => {
                 Err(io::Error::new(
                     io::ErrorKind::WouldBlock,
@@ -141,13 +145,14 @@ struct OutputRange {
 enum Phase {
     Open,
     Sealed,
-    #[cfg(feature = "futures-io")]
+    #[cfg(feature = "tokio")]
     Draining(Draining),
-    #[cfg(feature = "futures-io")]
+    #[cfg(feature = "tokio")]
     SeekingEnd {
         digest: Box<[u8]>,
+        started: bool,
     },
-    #[cfg(feature = "futures-io")]
+    #[cfg(feature = "tokio")]
     FlushingOutput(AfterFlush),
     Complete(Box<[u8]>),
     Failed,
@@ -187,14 +192,14 @@ impl Failure {
     }
 }
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 struct Draining {
     mode: Drain,
     after: AfterDrain,
     step: DrainStep,
 }
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 #[derive(Clone, Copy)]
 enum AfterDrain {
     AcceptInput,
@@ -202,25 +207,26 @@ enum AfterDrain {
     Finish,
 }
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 enum DrainStep {
     Next,
     Writing(BlockWrite),
 }
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 enum BlockWrite {
+    Starting(PendingBlock),
     Seeking(PendingBlock),
     Writing { block: PendingBlock, written: usize },
 }
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 enum AfterFlush {
     Open,
     Complete(Box<[u8]>),
 }
 
-#[cfg(feature = "futures-io")]
+#[cfg(feature = "tokio")]
 enum Progress {
     Continue,
     Input,

@@ -153,13 +153,14 @@ For fixed binary records:
 
 Use the standard I/O traits as the public protocol.
 
-- Implement `Read`, `Write`, and `Seek`, or their `futures-io` counterparts,
+- Implement `Read`, `Write`, and `Seek`, or their Tokio counterparts,
   when a type behaves like an I/O adapter.
 - Give synchronous and asynchronous users the same types and workflow. The
   implemented traits should differ, not the conceptual API.
-- Prefer the runtime-neutral `futures-io` traits for library-facing async I/O.
-  Do not add parallel sync and async inherent-method APIs for the same
-  operation.
+- Prefer Tokio's I/O traits for library-facing asynchronous I/O. Tokio supplies
+  concrete file operations, including `File::sync_data`, rather than only an
+  abstract byte-stream protocol. Do not add parallel sync and async
+  inherent-method APIs for the same operation.
 - Separate representation and validation from transport. If a fixed record can
   be exposed as bytes, let callers use the appropriate sync or async I/O trait
   to transfer those bytes.
@@ -172,6 +173,10 @@ Use the standard I/O traits as the public protocol.
 - Prefer `io::copy`, `repeat`, `take`, and `sink` to allocation or manual
   buffer loops when they express the operation directly.
 - Use `read_exact` and `write_all` for fixed fields.
+- Keep transport flushing and persistence separate. `Write::flush` drains
+  writer buffering; a format that needs stable-storage ordering should expose
+  a narrowly named capability such as `SyncData` and implement it for concrete
+  storage types.
 - Do not use `expect`, `unwrap`, or runtime assertions for values derived from
   input or I/O. Return an error.
 
@@ -179,8 +184,9 @@ Use the standard I/O traits as the public protocol.
 
 - Make stream completion observable. If a root digest is meaningful only after
   completion, return it only then.
-- `flush` may complete a final partial block when that is the format's natural
-  meaning. Document when this seals the writer and prevents later writes.
+- Keep `flush` conventional: drain accepted output without inferring end of
+  input, padding a partial record, or sealing the stream. Make completion
+  observable from the declared length or an explicit finishing operation.
 - Never rely on `Drop` for a fallible finalization step. Dropping an unfinished
   adapter must not pretend that output was completed.
 - After a downstream output failure, poison the adapter if continuing could

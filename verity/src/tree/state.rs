@@ -95,13 +95,6 @@ impl State {
         })
     }
 
-    pub(super) fn prepare_input(&mut self) -> Result<(), Failure> {
-        if self.data_used == self.data_block.len() {
-            self.process_data_block().map_err(Failure::Fatal)?;
-        }
-        Ok(())
-    }
-
     pub(super) fn accept(&mut self, input: &[u8]) -> Result<usize, Failure> {
         if input.is_empty() {
             return Ok(0);
@@ -125,43 +118,34 @@ impl State {
             )));
         }
 
-        let available = self.data_block.len() - self.data_used;
-        let copied = available.min(input.len());
+        let block_size = self.data_block.len();
+        if self.data_used == 0 && input.len() >= block_size {
+            self.process_block(&input[..block_size])
+                .map_err(Failure::Fatal)?;
+            self.written += block_size as u64;
+            return Ok(block_size);
+        }
+
+        let copied = (block_size - self.data_used).min(input.len());
         self.data_block[self.data_used..self.data_used + copied].copy_from_slice(&input[..copied]);
         self.data_used += copied;
         self.written += copied as u64;
+        if self.data_used == block_size {
+            self.process_data_block().map_err(Failure::Fatal)?;
+        }
         Ok(copied)
     }
 
-    pub(super) fn begin_flush(&mut self) -> Result<FlushMode, Failure> {
-        let block_size = self.data_block.len() as u64;
-        let final_block_start = self.maximum_size - block_size;
-        let mode = if self.reached_end() || self.written > final_block_start {
+    pub(super) const fn begin_flush(&self) -> FlushMode {
+        if self.reached_end() {
             FlushMode::Final
-        } else if self.written % block_size == 0 {
-            FlushMode::Intermediate
         } else {
-            return Err(Failure::Recoverable(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot flush partway through a non-final data block",
-            )));
-        };
-
-        if self.data_used == self.data_block.len()
-            || mode == FlushMode::Final && self.data_used != 0
-        {
-            self.process_data_block().map_err(Failure::Fatal)?;
+            FlushMode::Intermediate
         }
-        Ok(mode)
     }
 
     pub(super) const fn reached_end(&self) -> bool {
         self.written == self.maximum_size
-    }
-
-    #[cfg(feature = "futures-io")]
-    pub(super) fn in_final_block(&self) -> bool {
-        self.written > self.maximum_size - self.data_block.len() as u64
     }
 
     pub(super) fn take_pending(&mut self, mode: Drain) -> Option<PendingBlock> {
@@ -250,6 +234,22 @@ impl State {
         }
         self.data_block.fill(0);
         self.data_used = 0;
+        Ok(())
+    }
+
+    fn process_block(&mut self, block: &[u8]) -> io::Result<()> {
+        Self::hash(
+            self.hasher.as_mut(),
+            &mut self.digest,
+            self.superblock.hash_type(),
+            self.superblock.salt(),
+            block,
+        )?;
+        if self.levels.is_empty() {
+            self.root = Some(std::mem::take(&mut self.digest));
+        } else {
+            self.levels[0].push(&self.digest, self.slot_size)?;
+        }
         Ok(())
     }
 
