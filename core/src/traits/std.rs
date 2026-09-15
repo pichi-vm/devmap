@@ -44,6 +44,54 @@ pub trait Geometry {
     }
 }
 
+impl<T: Geometry + ?Sized> Geometry for &mut T {
+    fn block_size(&self) -> io::Result<NonZeroU32> {
+        T::block_size(self)
+    }
+
+    fn count(&mut self) -> io::Result<u64> {
+        T::count(self)
+    }
+}
+
+impl<T: Geometry + ?Sized> Geometry for Box<T> {
+    fn block_size(&self) -> io::Result<NonZeroU32> {
+        T::block_size(self)
+    }
+
+    fn count(&mut self) -> io::Result<u64> {
+        T::count(self)
+    }
+}
+
+/// Persists data accepted by a synchronous I/O object.
+///
+/// On success, writes completed before the call no longer depend on volatile
+/// caches when the underlying object has persistent storage. This is stronger
+/// than [`io::Write::flush`], which only drains writer buffering. Objects
+/// without a persistence boundary may implement this operation as a no-op.
+pub trait SyncData {
+    /// Waits for previously completed data writes to become persistent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persistence cannot be completed. Failure does not
+    /// indicate which earlier writes reached persistent storage.
+    fn sync_data(&mut self) -> io::Result<()>;
+}
+
+impl<T: SyncData + ?Sized> SyncData for &mut T {
+    fn sync_data(&mut self) -> io::Result<()> {
+        T::sync_data(self)
+    }
+}
+
+impl<T: SyncData + ?Sized> SyncData for Box<T> {
+    fn sync_data(&mut self) -> io::Result<()> {
+        T::sync_data(self)
+    }
+}
+
 /// Presents a device using larger logical blocks.
 pub trait Scale: Geometry + Sized {
     /// Multiplies the logical block size while preserving the byte extent.
@@ -150,22 +198,6 @@ impl<T: Geometry + Seek> Slice<RangeFull> for T {
         let block_size = self.block_size()?;
         Region::from_sync(self, 0, count, count, block_size)
     }
-}
-
-/// Persists data accepted by a synchronous I/O object.
-///
-/// On success, writes completed before the call no longer depend on volatile
-/// caches when the underlying object has persistent storage. This is stronger
-/// than [`io::Write::flush`], which only drains writer buffering. Objects
-/// without a persistence boundary may implement this operation as a no-op.
-pub trait SyncData {
-    /// Waits for previously completed data writes to become persistent.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if persistence cannot be completed. Failure does not
-    /// indicate which earlier writes reached persistent storage.
-    fn sync_data(&mut self) -> io::Result<()>;
 }
 
 /// Selects an aligned byte range without changing the device's block size.

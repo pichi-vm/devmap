@@ -3,7 +3,7 @@
 mod common;
 
 use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
-use devmap_core::DevId;
+use devmap_core::parse::DevId;
 use devmap_core::traits::std::SyncData as _;
 use devmap_verity::{
     Formatter, HashType, Hashes, dm,

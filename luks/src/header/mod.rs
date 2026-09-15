@@ -100,7 +100,7 @@ impl Header {
     #[cfg_attr(docsrs, doc(cfg(feature = "devmap-crypt")))]
     pub fn crypt_target(
         &self,
-        device: devmap_core::DevId,
+        device: devmap_core::parse::DevId,
         key: devmap_crypt::dm::Key,
     ) -> Result<devmap_crypt::dm::CryptTarget, Error> {
         let offset = self.payload_offset_sectors()?;

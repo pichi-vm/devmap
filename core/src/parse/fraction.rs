@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use super::ParseError;
+use super::Error;
 
 /// Two values encoded as `a/b` in a device-mapper field.
 ///
@@ -12,9 +12,9 @@ use super::ParseError;
 /// between them belong to the target that interprets the field.
 ///
 /// ```
-/// use devmap_core::Fraction;
+/// use devmap_core::parse::Fraction;
 ///
-/// # fn main() -> Result<(), devmap_core::ParseError> {
+/// # fn main() -> Result<(), devmap_core::parse::Error> {
 /// let fraction: Fraction<u64> = "12/64".parse()?;
 /// let (used, total) = fraction.into();
 /// assert_eq!((used, total), (12, 64));
@@ -26,20 +26,20 @@ use super::ParseError;
 pub struct Fraction<T>(T, T);
 
 impl<T: FromStr> FromStr for Fraction<T> {
-    type Err = ParseError;
+    type Err = Error;
 
     /// Splits at the first slash and parses both components without trimming.
     ///
     /// # Errors
     ///
-    /// Returns [`ParseError`] if the separator is absent or either component
+    /// Returns [`Error`] if the separator is absent or either component
     /// cannot be parsed as `T`. Integer components reject empty values, extra
     /// separators, whitespace, and overflow.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (first, second) = s.split_once('/').ok_or(ParseError)?;
+        let (first, second) = s.split_once('/').ok_or(Error)?;
         Ok(Self(
-            first.parse().map_err(|_| ParseError)?,
-            second.parse().map_err(|_| ParseError)?,
+            first.parse().map_err(|_| Error)?,
+            second.parse().map_err(|_| Error)?,
         ))
     }
 }

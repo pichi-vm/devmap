@@ -17,7 +17,8 @@ use crate::uapi::{
     DM_TABLE_CLEAR, DM_UEVENT_GENERATED_FLAG,
 };
 
-use devmap_core::{DevId, Target};
+use devmap_core::Target;
+use devmap_core::parse::DevId;
 
 /// Decode the kernel's 32-bit `dev_t` stored in its 64-bit ioctl field.
 #[allow(clippy::cast_possible_truncation)]

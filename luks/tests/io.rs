@@ -74,7 +74,7 @@ fn reader_rejects_unbounded_header_allocations() {
 #[test]
 fn crypt_parameters_come_from_the_header() {
     let header = Header::open(Cursor::new(luks1())).unwrap();
-    let id = devmap_core::DevId::new(7, 1).unwrap();
+    let id = devmap_core::parse::DevId::new(7, 1).unwrap();
     let key = devmap_crypt::dm::Key::Keyring {
         size: 64,
         kind: devmap_crypt::dm::KeyType::Logon,

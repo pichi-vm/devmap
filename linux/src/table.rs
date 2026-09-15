@@ -29,7 +29,8 @@ use crate::device::check_version;
 use crate::header::DmHeader;
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TABLE_LOAD, DM_TARGET_SPEC_SIZE, dm_target_spec_raw};
 
-use devmap_core::{DevId, Target};
+use devmap_core::Target;
+use devmap_core::parse::DevId;
 
 /// Mode markers distinguishing the two `DM_TABLE_STATUS` payloads.
 pub mod mode {
@@ -386,7 +387,7 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
 #[allow(clippy::cast_possible_truncation)] // test fixtures: sizes are tiny, never near u32::MAX
 mod tests {
     use super::*;
-    use devmap_core::ParseError;
+    use devmap_core::parse::Error;
     use devmap_crypt::dm::CryptTarget;
 
     /// An `Arc<File>` for a `TableBuilder` that never issues a real ioctl:
@@ -719,9 +720,9 @@ mod tests {
     #[derive(Debug)]
     struct Unreadable;
     impl FromStr for Unreadable {
-        type Err = ParseError;
+        type Err = Error;
         fn from_str(_: &str) -> Result<Self, Self::Err> {
-            Err(ParseError)
+            Err(Error)
         }
     }
 
@@ -786,13 +787,13 @@ mod tests {
         }
     }
     impl FromStr for CustomTarget {
-        type Err = ParseError;
+        type Err = Error;
         fn from_str(s: &str) -> Result<Self, Self::Err> {
             let value = s
                 .strip_prefix("1 2 ")
-                .ok_or(ParseError)?
+                .ok_or(Error)?
                 .parse()
-                .map_err(|_| ParseError)?;
+                .map_err(|_| Error)?;
             Ok(CustomTarget { value })
         }
     }

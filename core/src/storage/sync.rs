@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use std::io::{self, Seek, SeekFrom};
+use std::num::NonZeroU32;
+
+use crate::traits::std::{Geometry, SyncData};
+
+const BYTE: NonZeroU32 = NonZeroU32::MIN;
+
+impl Geometry for std::fs::File {
+    fn block_size(&self) -> io::Result<NonZeroU32> {
+        #[cfg(target_os = "linux")]
+        {
+            super::linux::block_size(self)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(BYTE)
+        }
+    }
+
+    fn count(&mut self) -> io::Result<u64> {
+        let position = self.stream_position()?;
+        let length = self.seek(SeekFrom::End(0))?;
+        self.seek(SeekFrom::Start(position))?;
+        let block_size = u64::from(self.block_size()?.get());
+        if length % block_size != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "device length is not a multiple of its block size",
+            ));
+        }
+        Ok(length / block_size)
+    }
+}
+
+impl<T: AsRef<[u8]>> Geometry for std::io::Cursor<T> {
+    fn block_size(&self) -> io::Result<NonZeroU32> {
+        Ok(BYTE)
+    }
+
+    fn count(&mut self) -> io::Result<u64> {
+        u64::try_from(self.get_ref().as_ref().len())
+            .map_err(|_| io::Error::other("device length exceeds u64"))
+    }
+}
+
+impl SyncData for std::fs::File {
+    fn sync_data(&mut self) -> io::Result<()> {
+        std::fs::File::sync_data(self)
+    }
+}
+
+impl<T> SyncData for std::io::Cursor<T> {
+    fn sync_data(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}

@@ -5,9 +5,9 @@ use std::{
     str::FromStr,
 };
 
-use devmap_core::ParseError;
+use devmap_core::parse::Error;
 
-fn row<T: FromStr<Err = ParseError> + Display + Debug + PartialEq>(
+fn row<T: FromStr<Err = Error> + Display + Debug + PartialEq>(
     text: &str,
     allowed_prefixes: &[usize],
 ) {
@@ -22,14 +22,14 @@ fn row<T: FromStr<Err = ParseError> + Display + Debug + PartialEq>(
             "prefix {prefix:?} of {text:?}"
         );
     }
-    assert_eq!(format!("{text} unexpected").parse::<T>(), Err(ParseError));
+    assert_eq!(format!("{text} unexpected").parse::<T>(), Err(Error));
     assert_eq!(
         format!(" \t{}\n", fields.join("\t")).parse::<T>(),
         Ok(parsed)
     );
 }
 
-fn reject<T: FromStr<Err = ParseError>>(cases: &[&str]) {
+fn reject<T: FromStr<Err = Error>>(cases: &[&str]) {
     for text in cases {
         assert!(
             text.parse::<T>().is_err(),

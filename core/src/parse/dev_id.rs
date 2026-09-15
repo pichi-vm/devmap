@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::ParseError;
+use super::Error;
 #[cfg(target_os = "linux")]
 use std::io;
 use std::{fmt, str::FromStr};
@@ -71,14 +71,14 @@ impl From<DevId> for u64 {
     }
 }
 impl FromStr for DevId {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (major, minor) = value.split_once(':').ok_or(ParseError)?;
+        let (major, minor) = value.split_once(':').ok_or(Error)?;
         Self::new(
-            major.parse().map_err(|_| ParseError)?,
-            minor.parse().map_err(|_| ParseError)?,
+            major.parse().map_err(|_| Error)?,
+            minor.parse().map_err(|_| Error)?,
         )
-        .ok_or(ParseError)
+        .ok_or(Error)
     }
 }
 impl fmt::Display for DevId {

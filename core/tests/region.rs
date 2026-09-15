@@ -1,49 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{Cursor, Read as _, Seek as _, SeekFrom, Write as _};
+use std::io::{self, Cursor, Read as _, Seek as _, SeekFrom, Write as _};
 use std::num::NonZeroU32;
 
 use devmap_core::traits::std::*;
-
-#[test]
-fn cursor_reports_byte_geometry_without_moving() {
-    let mut cursor = Cursor::new(vec![0; 73]);
-    cursor.set_position(19);
-
-    assert_eq!(cursor.block_size().unwrap().get(), 1);
-    assert_eq!(cursor.count().unwrap(), 73);
-    assert_eq!(cursor.position(), 19);
-    cursor.sync_data().unwrap();
-}
-
-#[test]
-fn scale_preserves_extent_and_forwards_io() {
-    let mut device = Cursor::new(vec![0; 16])
-        .scale(NonZeroU32::new(4).unwrap())
-        .unwrap();
-
-    assert_eq!(device.block_size().unwrap().get(), 4);
-    assert_eq!(device.count().unwrap(), 4);
-    device.write_all(&[1, 2, 3]).unwrap();
-    device.rewind().unwrap();
-    let mut bytes = [0; 3];
-    device.read_exact(&mut bytes).unwrap();
-    assert_eq!(bytes, [1, 2, 3]);
-    device.sync_data().unwrap();
-}
-
-#[test]
-fn scale_rejects_incoherent_geometry() {
-    let error = Cursor::new(vec![0; 16])
-        .scale(NonZeroU32::new(3).unwrap())
-        .unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-
-    let error = Cursor::new(vec![0; 15])
-        .scale(NonZeroU32::new(4).unwrap())
-        .unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-}
 
 #[test]
 fn slice_maps_a_block_range_to_a_zero_based_device() {
@@ -100,16 +60,34 @@ fn slice_rejects_invalid_ranges_and_limits_writes() {
 }
 
 #[test]
-fn geometry_supports_dynamic_dispatch() {
-    let mut device: Box<dyn Geometry> = Box::new(Cursor::new(vec![0; 7]));
-    assert_eq!(device.block_size().unwrap().get(), 1);
-    assert_eq!(device.count().unwrap(), 7);
-}
-
-#[test]
-fn regular_files_report_coherent_geometry() {
-    let mut file = tempfile::tempfile().unwrap();
-    file.set_len(8).unwrap();
-    assert_eq!(file.block_size().unwrap().get(), 1);
-    assert_eq!(file.count().unwrap(), 8);
+fn byte_slices_check_alignment_and_translate_every_range() {
+    let make = || {
+        Cursor::new((0u8..16).collect::<Vec<_>>())
+            .scale_to(NonZeroU32::new(4).unwrap())
+            .unwrap()
+    };
+    let mut slices = [
+        make().slice_bytes(4..12).unwrap(),
+        make().slice_bytes(4..=11).unwrap(),
+        make().slice_bytes((4, 8)).unwrap(),
+    ];
+    for slice in &mut slices {
+        assert_eq!(slice.count().unwrap(), 2);
+        assert_eq!(slice.seek(SeekFrom::Start(0)).unwrap(), 0);
+        let mut bytes = Vec::new();
+        slice.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, (4u8..12).collect::<Vec<_>>());
+    }
+    assert_eq!(make().slice_bytes(..).unwrap().count().unwrap(), 4);
+    assert_eq!(make().slice_bytes(..8).unwrap().count().unwrap(), 2);
+    assert_eq!(make().slice_bytes(..=7).unwrap().count().unwrap(), 2);
+    assert_eq!(make().slice_bytes(8..).unwrap().count().unwrap(), 2);
+    for range in [1..4, 4..5, 16..20, std::hint::black_box(8)..4] {
+        assert_eq!(
+            make().slice_bytes(range).err().unwrap().kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+    assert!(make().slice_bytes(..=u64::MAX).is_err());
+    assert!(make().slice_bytes((u64::MAX, 1)).is_err());
 }

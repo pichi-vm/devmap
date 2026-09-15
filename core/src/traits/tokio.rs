@@ -58,6 +58,51 @@ pub trait Geometry {
     }
 }
 
+impl<T: Geometry + ?Sized> Geometry for &mut T {
+    fn block_size(&self) -> io::Result<NonZeroU32> {
+        T::block_size(self)
+    }
+
+    fn count(&mut self) -> Pin<Box<dyn Future<Output = io::Result<u64>> + Send + '_>> {
+        T::count(self)
+    }
+}
+
+impl<T: Geometry + ?Sized> Geometry for Box<T> {
+    fn block_size(&self) -> io::Result<NonZeroU32> {
+        T::block_size(self)
+    }
+
+    fn count(&mut self) -> Pin<Box<dyn Future<Output = io::Result<u64>> + Send + '_>> {
+        T::count(self)
+    }
+}
+
+/// Persists data accepted by an asynchronous I/O object.
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
+pub trait SyncData {
+    /// Waits for previously completed data writes to become persistent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persistence cannot be completed. Failure or
+    /// cancellation does not indicate which earlier writes reached persistent
+    /// storage.
+    fn sync_data(&mut self) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>>;
+}
+
+impl<T: SyncData + ?Sized> SyncData for &mut T {
+    fn sync_data(&mut self) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
+        T::sync_data(self)
+    }
+}
+
+impl<T: SyncData + ?Sized> SyncData for Box<T> {
+    fn sync_data(&mut self) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
+        T::sync_data(self)
+    }
+}
+
 /// Presents a device using larger logical blocks.
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 pub trait Scale: Geometry + Sized {
@@ -196,19 +241,6 @@ where
         let block_size = self.block_size()?;
         Region::from_async(self, 0, count, count, block_size).await
     }
-}
-
-/// Persists data accepted by an asynchronous I/O object.
-#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
-pub trait SyncData {
-    /// Waits for previously completed data writes to become persistent.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if persistence cannot be completed. Failure or
-    /// cancellation does not indicate which earlier writes reached persistent
-    /// storage.
-    fn sync_data(&mut self) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>>;
 }
 
 /// Selects an aligned byte range without changing the device's block size.

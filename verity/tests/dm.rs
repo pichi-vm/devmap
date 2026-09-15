@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use devmap_core::DevId;
+use devmap_core::parse::DevId;
 use devmap_verity::{
     HashType, Hashes,
     dm::{Builder, CorruptionPolicy as C, Fec, Info, IoErrorPolicy as E, VerityTarget},

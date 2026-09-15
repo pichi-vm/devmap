@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-use devmap_core::{DevId, Fraction, NoInfo, ParseError};
+use devmap_core::parse::{DevId, Error, Fraction, NoInfo};
 
 #[test]
 fn identifiers_round_trip_without_a_linux_dependency() {
@@ -47,15 +47,15 @@ fn integer_fractions_reject_malformed_fields_and_overflow() {
         "", "1", "/", "/1", "1/", "1/2/3", "x/2", "1/x", "-1/2", "1/-2", " 1/2", "1/2 ", "1 /2",
         "1/ 2", "1\n/2", "1/2\0",
     ] {
-        assert_eq!(text.parse::<Fraction<u32>>(), Err(ParseError), "{text:?}");
-        assert_eq!(text.parse::<Fraction<u64>>(), Err(ParseError), "{text:?}");
+        assert_eq!(text.parse::<Fraction<u32>>(), Err(Error), "{text:?}");
+        assert_eq!(text.parse::<Fraction<u64>>(), Err(Error), "{text:?}");
     }
     for text in ["4294967296/0", "0/4294967296"] {
-        assert_eq!(text.parse::<Fraction<u32>>(), Err(ParseError));
+        assert_eq!(text.parse::<Fraction<u32>>(), Err(Error));
         assert!(text.parse::<Fraction<u64>>().is_ok());
     }
     for text in ["18446744073709551616/0", "0/18446744073709551616"] {
-        assert_eq!(text.parse::<Fraction<u64>>(), Err(ParseError));
+        assert_eq!(text.parse::<Fraction<u64>>(), Err(Error));
     }
 }
 

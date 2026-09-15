@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::ParseError;
+use super::Error;
 use std::{fmt, str::FromStr};
 
 /// The [`Target::Info`](crate::Target::Info) of a target with no runtime status: the kernel
@@ -13,12 +13,12 @@ use std::{fmt, str::FromStr};
 pub struct NoInfo;
 
 impl FromStr for NoInfo {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.trim().is_empty() {
             Ok(NoInfo)
         } else {
-            Err(ParseError)
+            Err(Error)
         }
     }
 }

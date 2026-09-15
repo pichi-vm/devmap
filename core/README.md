@@ -10,11 +10,11 @@ byte range, `byte_size()` reports the device extent, and `SyncData` provides
 a persistence boundary. `scale()` and `slice()` work in multipliers and
 logical blocks respectively.
 
-The crate exports `Target`, `DevId`, `Fraction`, `NoInfo`, and `ParseError`
-directly from `devmap_core`. Concrete targets implement `Target` in their
-owning crates; `devmap-linux` uses these descriptions to load tables and parse
-replies. A finite zero-filled source is available separately as
-`devmap_zero::Zero`.
+The crate exports `Target`, `Region`, and `Scaled` at its root. The `parse`
+module supplies `DevId`, `Fraction`, `NoInfo`, and `Error` for target parameters
+and status. Concrete targets implement `Target` in their owning crates;
+`devmap-linux` uses these descriptions to load tables and parse replies.
+A finite zero-filled source is available separately as `devmap_zero::Zero`.
 
 Target crates parse their fields through `FromStr`; `Fraction<T>` handles the
 shared `a/b` syntax used for counts and progress. It does not impose a

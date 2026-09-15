@@ -5,7 +5,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 
 use super::{CorruptionPolicy, Fec, IoErrorPolicy, VerityTarget};
 use crate::{Algorithm, HashType, Header};
-use devmap_core::DevId;
+use devmap_core::parse::DevId;
 
 const BLOCK: NonZeroU32 = NonZeroU32::new(4096).unwrap();
 

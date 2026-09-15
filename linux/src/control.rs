@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use zerocopy::IntoBytes;
 
-use devmap_core::DevId;
+use devmap_core::parse::DevId;
 
 use crate::device::{Device, Status, check_version, decode_dev_t};
 use crate::header::DmHeader;

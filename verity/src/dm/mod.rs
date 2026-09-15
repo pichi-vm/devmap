@@ -13,7 +13,8 @@
 //! performs no device-mapper ioctls and is available without hashing dependencies.
 
 use crate::{HashType, Header};
-use devmap_core::{DevId, ParseError, Target};
+use devmap_core::Target;
+use devmap_core::parse::{DevId, Error};
 use std::{
     fmt, io,
     num::{NonZeroU32, NonZeroU64},
@@ -168,20 +169,20 @@ impl fmt::Display for Info {
     }
 }
 impl FromStr for Info {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut fields = s.split_whitespace();
-        let corrupted = match fields.next().ok_or(ParseError)? {
+        let corrupted = match fields.next().ok_or(Error)? {
             "C" => true,
             "V" => false,
-            _ => return Err(ParseError),
+            _ => return Err(Error),
         };
-        let fec_corrected = match fields.next().ok_or(ParseError)? {
+        let fec_corrected = match fields.next().ok_or(Error)? {
             "-" => None,
             n => Some(n.parse()?),
         };
         if fields.next().is_some() {
-            return Err(ParseError);
+            return Err(Error);
         }
         Ok(Self {
             corrupted,
