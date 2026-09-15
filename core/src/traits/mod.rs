@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Storage capabilities and ecosystem-specific operations.
+//! Storage geometry, persistence, and adapter construction.
+//!
+//! Choose `std` for synchronous I/O or `tokio` for Tokio streams.
 
 /// Traits for standard-library synchronous I/O.
 pub mod std;

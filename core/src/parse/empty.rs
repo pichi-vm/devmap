@@ -3,12 +3,11 @@
 use super::Error;
 use std::{fmt, str::FromStr};
 
-/// The [`Target::Info`](crate::Target::Info) of a target with no runtime status: the kernel
-/// emits an empty params field for it.
+/// An empty parameter or status field.
 ///
-/// Parsing accepts empty or whitespace-only text and rejects other status
-/// text. Formatting emits an empty string. Use [`String`] as the associated
-/// status type when arbitrary text should be retained without validation.
+/// Accepts empty or whitespace-only input; rejects other text. Formats as an
+/// empty string. Use as [`Target::Info`](crate::Target::Info) for targets with
+/// no runtime status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Empty;
 

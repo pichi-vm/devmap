@@ -6,10 +6,8 @@ use super::Error;
 
 /// Two values encoded as `a/b` in a device-mapper field.
 ///
-/// Targets use this syntax for usage counts and progress. The values are not
-/// reduced or interpreted as a mathematical ratio: zero and a first value
-/// larger than the second are permitted. Their units and any relationship
-/// between them belong to the target that interprets the field.
+/// A pair, not a reduced ratio: `0/0` and `12/8` are valid. The target defines
+/// the units and any relationship between the values.
 ///
 /// ```
 /// use devmap_core::parse::Fraction;

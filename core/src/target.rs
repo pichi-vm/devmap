@@ -2,20 +2,17 @@
 
 use std::str::FromStr;
 
-/// Describes a kernel device-mapper target's table and status grammars.
+/// Associates a kernel target name with its table and runtime-status types.
 ///
-/// A backend uses [`NAME`](Self::NAME) to identify the target and selects
-/// [`Table`](Self::Table) or [`Info`](Self::Info) to parse its reply. Keeping
-/// these associations on the target lets the backend accept targets from
-/// other crates without knowing each format's parameter syntax.
-///
-/// Implement `Display` to encode target-specific arguments without NUL.
-/// Row start/length and whole-table access mode are not target arguments.
-/// The kernel may normalize parameters when reporting a loaded table.
+/// Implement [`Display`](std::fmt::Display) to encode target arguments without
+/// NUL bytes. Row ranges and table access mode belong to the backend, not these
+/// arguments.
 pub trait Target: Sized {
     /// Nonempty kernel target name, shorter than 16 bytes, without NUL or whitespace.
     const NAME: &'static str;
     /// Parsed construction parameters returned by table read-back.
+    ///
+    /// The kernel may normalize these from the original input.
     type Table: FromStr;
     /// Parsed runtime status returned by a status query.
     ///

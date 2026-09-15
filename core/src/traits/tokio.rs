@@ -78,7 +78,7 @@ impl<T: Geometry + ?Sized> Geometry for Box<T> {
     }
 }
 
-/// Persists data accepted by an asynchronous I/O object.
+/// Asynchronous persistence with the guarantees of [`crate::traits::std::SyncData`].
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 pub trait SyncData {
     /// Waits for previously completed data writes to become persistent.
