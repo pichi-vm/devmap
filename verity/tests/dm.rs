@@ -205,9 +205,6 @@ impl devmap_core::TableBuilder for Table {
         self.params = target.to_string();
         Ok(self)
     }
-    fn load(self) -> io::Result<()> {
-        Ok(())
-    }
 }
 
 #[test]

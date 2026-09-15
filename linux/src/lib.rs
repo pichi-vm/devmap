@@ -101,10 +101,8 @@
 //! original target value. [`Row::params`] always exposes the raw text.
 //!
 //! [`Device::target`] selects a [`LiveTarget`]. Its [`LiveTarget::info`] method
-//! reads typed runtime status. For target-specific messages, import the target
-//! crate's `dm::Commands` extension trait. [`Device::message`] is the raw
-//! message interface. These operations use the shared
-//! [`devmap_core::TargetEndpoint`] contract.
+//! reads typed runtime status. [`Device::message`] sends raw target messages
+//! to a selected sector and returns any textual reply.
 //!
 //! [`Device::wait_event`] blocks for one device's event. [`Control::arm_poll`]
 //! arms the control fd for subsystem events; use [`AsFd`](std::os::fd::AsFd)

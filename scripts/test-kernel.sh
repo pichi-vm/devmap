@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Tests use private loop/configfs devices and never unload shared modules.
+# Tests use private loop devices and never unload shared modules.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

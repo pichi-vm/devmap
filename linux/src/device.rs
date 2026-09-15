@@ -407,19 +407,8 @@ impl Device {
 /// A handle to one target within a live device's active table, at a known
 /// sector and of a known kind `T`. Obtained from [`Device::target`].
 ///
-/// [`info`](LiveTarget::info) reads typed runtime status. To send typed
-/// messages, import the target crate's `dm::Commands` extension trait. It
-/// operates through [`devmap_core::TargetEndpoint`], which this handle
-/// implements. Targets without messages need no command trait.
-///
-/// ```no_run
-/// use devmap_linux::Device;
-/// use devmap_raid::dm::{Commands as _, Target};
-///
-/// fn start_scrub(device: &Device) -> std::io::Result<()> {
-///     device.target::<Target>(0).check()
-/// }
-/// ```
+/// [`info`](LiveTarget::info) reads typed runtime status. Send raw target
+/// messages through [`Device::message`] using the selected sector.
 #[derive(Debug)]
 pub struct LiveTarget<'d, T> {
     device: &'d Device,
@@ -440,12 +429,6 @@ impl<'d, T> LiveTarget<'d, T> {
     #[must_use]
     pub fn sector(&self) -> u64 {
         self.sector
-    }
-
-    /// Send a raw message to this target. The typed verbs in
-    /// the target crates are thin wrappers over this.
-    pub(crate) fn send(&self, message: &str) -> io::Result<Option<String>> {
-        self.device.message(self.sector, message)
     }
 }
 
@@ -596,28 +579,6 @@ impl Status {
     /// (`DM_UEVENT_GENERATED_FLAG`).
     pub fn uevent_generated(self) -> bool {
         self.flags & DM_UEVENT_GENERATED_FLAG != 0
-    }
-}
-
-impl devmap_core::Device for Device {
-    type TableBuilder = TableBuilder;
-    fn builder(&self) -> TableBuilder {
-        Device::builder(self)
-    }
-    fn resume(&self) -> io::Result<()> {
-        Device::resume(self)
-    }
-    fn remove(self) -> io::Result<()> {
-        Device::remove(self)
-    }
-    fn remove_deferred(self) -> io::Result<()> {
-        Device::remove_deferred(self)
-    }
-}
-impl<T: Target> devmap_core::TargetEndpoint for LiveTarget<'_, T> {
-    type Target = T;
-    fn message(&self, command: &str) -> io::Result<Option<String>> {
-        self.send(command)
     }
 }
 

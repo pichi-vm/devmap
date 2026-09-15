@@ -207,15 +207,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc32c"
-version = "0.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
-dependencies = [
- "rustc_version",
-]
-
-[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -233,27 +224,11 @@ dependencies = [
  "clap",
  "devmap-core",
  "devmap-crypt",
- "devmap-delay",
- "devmap-dust",
- "devmap-era",
- "devmap-error",
- "devmap-flakey",
- "devmap-integrity",
- "devmap-linear",
  "devmap-linux",
- "devmap-log-writes",
  "devmap-luks",
- "devmap-persistent",
- "devmap-raid",
  "devmap-snapshot",
- "devmap-striped",
- "devmap-thin",
- "devmap-thin-pool",
- "devmap-unstriped",
  "devmap-verity",
- "devmap-writecache",
  "devmap-zero",
- "devmap-zoned",
  "keyutils",
  "rpassword",
  "rustix",
@@ -277,75 +252,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "devmap-delay"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-dust"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-era"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-error"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-flakey"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-integrity"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
- "tempfile",
-]
-
-[[package]]
-name = "devmap-linear"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
 name = "devmap-linux"
 version = "0.1.0"
 dependencies = [
  "devmap-core",
- "devmap-error",
- "devmap-linear",
- "devmap-raid",
+ "devmap-crypt",
  "devmap-verity",
  "devmap-zero",
  "iocuddle",
  "rustix",
  "zerocopy",
-]
-
-[[package]]
-name = "devmap-log-writes"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
 ]
 
 [[package]]
@@ -370,23 +286,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "devmap-persistent"
-version = "0.1.0"
-dependencies = [
- "base64",
- "crc32c",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "devmap-raid"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
 name = "devmap-snapshot"
 version = "0.1.0"
 dependencies = [
@@ -394,34 +293,6 @@ dependencies = [
  "devmap-zero",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "devmap-striped"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-thin"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-thin-pool"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
-name = "devmap-unstriped"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
 ]
 
 [[package]]
@@ -444,26 +315,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "devmap-writecache"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
-]
-
-[[package]]
 name = "devmap-zero"
 version = "0.1.0"
 dependencies = [
  "devmap-core",
  "tokio",
-]
-
-[[package]]
-name = "devmap-zoned"
-version = "0.1.0"
-dependencies = [
- "devmap-core",
- "libc",
 ]
 
 [[package]]
@@ -724,15 +580,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustc_version"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
-dependencies = [
- "semver",
-]
-
-[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -744,12 +591,6 @@ dependencies = [
  "linux-raw-sys",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "semver"
-version = "1.0.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"

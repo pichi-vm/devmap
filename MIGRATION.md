@@ -7,9 +7,9 @@ describes its parameters; a table row adds a start and length in 512-byte
 sectors, and the table has one access mode. Creating a device, loading its
 inactive table, resuming it, and removing it are separate backend operations.
 
-- `devmap-core`: `Target`, `DevId`, parameter/status helpers, backend traits.
+- `devmap-core`: `Target`, `DevId`, field types and the `TableBuilder` trait.
 - `devmap-linux`: device handles, ioctl encoding, tables, status, and messages.
-- Owner crates' `dm` modules: target definitions and command/status codecs.
+- Owner crates' `dm` modules: target definitions and parameter/status codecs.
 - `devmap`: compatibility arguments, application workflows, and presentation.
 
 ## Target owners
@@ -17,28 +17,13 @@ inactive table, resuming it, and removing it are separate backend operations.
 | Kernel target | Owner |
 | --- | --- |
 | crypt | devmap-crypt |
-| delay | devmap-delay |
-| dust | devmap-dust |
-| era | devmap-era |
-| error | devmap-error |
-| flakey | devmap-flakey |
-| integrity | devmap-integrity |
-| linear | devmap-linear |
-| log-writes | devmap-log-writes |
-| raid | devmap-raid |
 | snapshot, snapshot-origin, snapshot-merge | devmap-snapshot |
-| striped | devmap-striped |
-| thin | devmap-thin |
-| thin-pool | devmap-thin-pool |
-| unstriped | devmap-unstriped |
 | verity | devmap-verity |
-| writecache | devmap-writecache |
 | zero | devmap-zero |
-| zoned | devmap-zoned |
 
 The main type is `dm::Target`; snapshot also provides `dm::Origin` and
-`dm::Merge`. Import an owner's `dm::Commands` trait to use its message
-methods on a Linux `LiveTarget`. Read typed runtime status with
+`dm::Merge`. Send raw target messages with Linux's `Device::message`.
+Read typed runtime status with
 `device.target::<T>(sector).info()`.
 Import shared types such as `DevId` and the `Target` trait directly from
 `devmap_core`; Linux exposes its own backend handles, builders, and rows.
@@ -51,14 +36,12 @@ Use core's `NoInfo` only when empty or whitespace-only status is required.
 
 Normal dependencies flow to core, not between Linux and target crates.
 LUKS is separate from raw crypt, with optional header-to-crypt conversion.
-`devmap-persistent` supplies metadata readers, checks, and restoration for
-thin, cache, and era formats.
 
 ## Dependencies and features
 
-- Core is a normal dependency of verity, snapshot, zoned, and LUKS, as it is
-  for target crates. Verity, snapshot, and zoned always provide target
-  definitions through their `dm` modules. Verity's no-default-feature build
+- Core is a normal dependency of all six other libraries. Crypt, snapshot,
+  verity, and zero always provide target definitions through their `dm`
+  modules. Verity's no-default-feature build
   supports header inspection and target construction without hashing libraries.
 - LUKS's optional `devmap-crypt` dependency enables header-to-target conversion.
   All opt-in Cargo features are named for the optional dependencies they enable.
@@ -101,9 +84,6 @@ including cleanup after a failed load or resume. The
   written zero blocks need no allocation.
 - LUKS's `Header::open` reads metadata; its payload and target-conversion
   methods provide the offsets, extents, and cipher parameters for activation.
-- Integrity's `Header::open` reads recorded capacity.
-  `dm::Target::format` destructively initializes storage using a caller-supplied
-  backend implementing core's interfaces.
 
 ## Verification commands
 
@@ -123,11 +103,11 @@ bash scripts/test-kernel.sh
 Package verification uses a fresh target directory to avoid stale cached
 workspace packages with the same unpublished version.
 
-The kernel runner uses private loop/configfs devices and never unloads shared
+The kernel runner uses private loop devices and never unloads shared
 modules. It requires root or passwordless sudo and refuses to run without an
 accessible device-mapper control node. An optional first argument selects test
 binary names by regex. Runtime skip messages still indicate missing coverage.
 
 CI also builds target crates independently and checks minimal header/target,
-Tokio-only, and individual hashing features. New crates and the existing crates
-that declare Rust 1.85 are checked on that compiler.
+Tokio-only, and individual hashing features. Crates that declare Rust 1.85
+are checked on that compiler.

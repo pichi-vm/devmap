@@ -24,27 +24,12 @@ pub(crate) enum Object {
     /// dm-verity volumes — the `veritysetup` layer.
     #[command(subcommand)]
     Verity(VerityCmd),
-    /// dm-zoned volumes — the `dmzadm` layer.
-    #[command(subcommand)]
-    Zoned(ZonedCmd),
-    /// dm-integrity volumes — the `integritysetup` layer.
-    #[command(subcommand)]
-    Integrity(IntegrityCmd),
     /// LUKS encrypted volumes — the `cryptsetup` layer.
     #[command(subcommand)]
     Crypt(CryptCmd),
     /// dm-snapshot persistent COW images.
     #[command(subcommand)]
     Snapshot(SnapshotCmd),
-    /// dm-thin metadata — the thin-provisioning-tools layer.
-    #[command(subcommand)]
-    Thin(ThinCmd),
-    /// dm-cache metadata — the cache_* tools layer.
-    #[command(subcommand)]
-    Cache(CacheCmd),
-    /// dm-era metadata — the era_* tools layer.
-    #[command(subcommand)]
-    Era(EraCmd),
     /// Create the legacy-tool symlinks (dmsetup, veritysetup, …) in a directory.
     InstallLinks(InstallLinks),
 }
@@ -233,124 +218,6 @@ pub(crate) struct VerityStatus {
     pub(crate) name: String,
 }
 
-/// The `dmzadm`-equivalent verbs.
-#[derive(Subcommand, Debug)]
-pub(crate) enum ZonedCmd {
-    /// Write dm-zoned metadata to a zoned block device.
-    Format(ZonedFormat),
-    /// Validate a zoned device's superblock.
-    Check(ZonedCheck),
-    /// Activate a dm-zoned device over a formatted zoned device.
-    Start(ZonedStart),
-    /// Deactivate a dm-zoned device.
-    Stop(ZonedStop),
-    /// Print a dm-zoned device's runtime status.
-    Status(ZonedStatus),
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ZonedFormat {
-    /// Zoned block device to format.
-    pub(crate) device: PathBuf,
-    /// Volume label (truncated to 32 bytes).
-    #[arg(long)]
-    pub(crate) label: Option<String>,
-    /// Sequential zones to reserve for reclaim; defaults to a proportional value.
-    #[arg(long)]
-    pub(crate) seq: Option<u32>,
-    /// Volume UUID (hex or hyphenated); defaults to random.
-    #[arg(long)]
-    pub(crate) uuid: Option<String>,
-    /// Device UUID (hex or hyphenated); defaults to random.
-    #[arg(long)]
-    pub(crate) dev_uuid: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ZonedCheck {
-    /// Zoned block device.
-    pub(crate) device: PathBuf,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ZonedStart {
-    /// Formatted zoned block device.
-    pub(crate) device: PathBuf,
-    /// Name for the mapped device; defaults to `dmz-<basename>`.
-    pub(crate) name: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ZonedStop {
-    /// Mapped device name.
-    pub(crate) name: String,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ZonedStatus {
-    /// Mapped device name.
-    pub(crate) name: String,
-}
-
-/// The `integritysetup`-equivalent verbs.
-#[derive(Subcommand, Debug)]
-pub(crate) enum IntegrityCmd {
-    /// Write a dm-integrity superblock sized to the device.
-    Format(IntegrityFormat),
-    /// Activate an integrity device over a formatted device.
-    Open(IntegrityOpen),
-    /// Deactivate an integrity device.
-    Close(IntegrityClose),
-    /// Print an integrity device's runtime status.
-    Status(IntegrityStatus),
-}
-
-/// Shared knobs for `format` and `open`; they MUST match, so the same
-/// fields appear on both (integritysetup takes them on both too).
-#[derive(clap::Args, Debug)]
-pub(crate) struct IntegrityFormat {
-    /// Device to protect.
-    pub(crate) device: PathBuf,
-    /// Internal hash / checksum algorithm.
-    #[arg(long, default_value = "crc32c")]
-    pub(crate) integrity: String,
-    /// Per-block tag size in bytes; omitted lets the kernel derive it.
-    #[arg(long)]
-    pub(crate) tag_size: Option<u32>,
-    /// Allow discards to pass through.
-    #[arg(long)]
-    pub(crate) allow_discards: bool,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct IntegrityOpen {
-    /// Formatted device.
-    pub(crate) device: PathBuf,
-    /// Name for the mapped device.
-    pub(crate) name: String,
-    /// Internal hash / checksum algorithm (must match format).
-    #[arg(long, default_value = "crc32c")]
-    pub(crate) integrity: String,
-    /// Per-block tag size in bytes (must match format).
-    #[arg(long)]
-    pub(crate) tag_size: Option<u32>,
-    /// Allow discards to pass through.
-    #[arg(long)]
-    pub(crate) allow_discards: bool,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct IntegrityClose {
-    /// Mapped device name.
-    pub(crate) name: String,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct IntegrityStatus {
-    /// Mapped device name.
-    pub(crate) name: String,
-}
-
 /// The `cryptsetup`-equivalent verbs.
 #[derive(Subcommand, Debug)]
 pub(crate) enum CryptCmd {
@@ -452,77 +319,6 @@ pub(crate) struct SnapshotConvert {
     /// COW chunk size in 512-byte sectors (power of two, >= 8).
     #[arg(long, default_value = "32")]
     pub(crate) chunk_size: NonZeroU32,
-}
-
-/// The thin-provisioning-tools-equivalent verbs.
-#[derive(Subcommand, Debug)]
-pub(crate) enum ThinCmd {
-    /// Print the metadata as thin_dump-compatible XML.
-    Dump(ThinDump),
-    /// Summarise the pool: space maps, devices, geometry.
-    Info(ThinInfo),
-    /// Validate the metadata, reconciling reference counts.
-    Check(ThinCheck),
-    /// Rebuild metadata from thin_dump XML.
-    Restore(ThinRestore),
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ThinRestore {
-    /// The XML to rebuild from, or `-` for stdin.
-    #[arg(short = 'i', long = "input")]
-    pub(crate) input: PathBuf,
-    /// The metadata device to write. Its contents are replaced.
-    #[arg(short = 'o', long = "output")]
-    pub(crate) output: PathBuf,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ThinCheck {
-    /// The thin pool's metadata device.
-    pub(crate) metadata: PathBuf,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ThinDump {
-    /// The thin pool's metadata device.
-    pub(crate) metadata: PathBuf,
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct ThinInfo {
-    /// The thin pool's metadata device.
-    pub(crate) metadata: PathBuf,
-}
-
-/// The cache-tools-equivalent verbs.
-#[derive(Subcommand, Debug)]
-pub(crate) enum CacheCmd {
-    /// Print the metadata as cache_dump-compatible XML.
-    Dump(CacheDump),
-    /// Validate the metadata, reconciling reference counts.
-    Check(CacheDump),
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct CacheDump {
-    /// The cache's metadata device.
-    pub(crate) metadata: PathBuf,
-}
-
-/// The era-tools-equivalent verbs.
-#[derive(Subcommand, Debug)]
-pub(crate) enum EraCmd {
-    /// Print the metadata as era_dump-compatible XML.
-    Dump(EraDump),
-    /// Validate the metadata, reconciling reference counts.
-    Check(EraDump),
-}
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct EraDump {
-    /// The era device's metadata.
-    pub(crate) metadata: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]

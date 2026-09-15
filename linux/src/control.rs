@@ -461,13 +461,6 @@ impl Iterator for ListDevicesIter {
     }
 }
 
-impl devmap_core::Control for Control {
-    type Device = Device;
-    fn create(&self, name: &str) -> io::Result<Device> {
-        Control::create(self, name)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

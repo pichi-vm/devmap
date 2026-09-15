@@ -67,12 +67,12 @@ pub mod mode {
 /// ```compile_fail
 /// # use devmap_linux::Row;
 /// use devmap_linux::mode;
-/// use devmap_linear::dm::Target as Linear;
+/// use devmap_crypt::dm::Target as Crypt;
 /// fn wrong(row: Row<mode::Info>) {
-///     // `parse::<Linear>()` on an Info row yields `Option<Linear::Info>`,
-///     // and annotating it `Option<Linear>` demands the table type that
+///     // `parse::<Crypt>()` on an Info row yields `Option<Crypt::Info>`,
+///     // and annotating it `Option<Crypt>` demands the table type that
 ///     // the Info mode never provides — a type error.
-///     let _table: Option<Linear> = row.parse::<Linear>();
+///     let _table: Option<Crypt> = row.parse::<Crypt>();
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -309,9 +309,6 @@ impl devmap_core::TableBuilder for TableBuilder {
     fn add<T: Target + fmt::Display>(self, start: u64, length: u64, target: T) -> io::Result<Self> {
         TableBuilder::add(self, start, length, target)
     }
-    fn load(self) -> io::Result<()> {
-        TableBuilder::load(self)
-    }
 }
 
 /// Parses a `DM_TABLE_STATUS` response into [`Row`]s. Not exported —
@@ -399,7 +396,7 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
 mod tests {
     use super::*;
     use devmap_core::ParseError;
-    use devmap_linear::dm::Target as Linear;
+    use devmap_crypt::dm::Target as Crypt;
 
     /// An `Arc<File>` for a `TableBuilder` that never issues a real ioctl:
     /// the rendering/validation paths run entirely before `load`.
@@ -452,14 +449,7 @@ mod tests {
     #[test]
     fn buf_for_linear_target_has_correct_layout_and_params() {
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .add(
-                0,
-                1024,
-                Linear {
-                    device: DevId::new(252, 5).unwrap(),
-                    offset_sectors: 0,
-                },
-            )
+            .add_raw(0, 1024, "linear", "252:5 0")
             .expect("add linear");
         let params = "252:5 0";
         let aligned = (DM_TARGET_SPEC_SIZE + params.len() + 1).next_multiple_of(8);
@@ -511,17 +501,8 @@ mod tests {
         // "relative to first".
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
             .add(0, 8, devmap_zero::dm::Target)
-            .and_then(|b| {
-                b.add(
-                    8,
-                    1024,
-                    Linear {
-                        device: DevId::new(252, 5).unwrap(),
-                        offset_sectors: 5,
-                    },
-                )
-            })
-            .and_then(|b| b.add(1032, 8, devmap_error::dm::Target))
+            .and_then(|b| b.add_raw(8, 1024, "linear", "252:5 5"))
+            .and_then(|b| b.add_raw(1032, 8, "error", ""))
             .expect("build three-target table");
         let bytes = &b.buf;
 
@@ -597,30 +578,20 @@ mod tests {
 
     #[test]
     fn spec_row_parses_matching_target_and_rejects_others() {
-        let (bytes, count) = synthetic_table_status_response(&[(b"linear", "252:5 5")]);
+        let params = "aes-xts-plain64 - 0 252:5 5";
+        let (bytes, count) = synthetic_table_status_response(&[(b"crypt", params)]);
         let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
             .next()
             .expect("one row");
-        assert_eq!(row.type_name(), "linear");
+        assert_eq!(row.type_name(), "crypt");
         assert_eq!(row.start(), 0);
-        // Round-trips into a Linear...
-        assert_eq!(
-            row.parse::<Linear>(),
-            Some(Linear {
-                device: DevId::new(252, 5).unwrap(),
-                offset_sectors: 5
-            })
-        );
-        // ...but a type-name mismatch yields None, not a misparse. (Only
-        // FromStr targets can be `parse`d on a Spec row, so this uses
-        // zero — a different type name that would parse "252:5 5"
-        // as garbage if the type-name guard weren't checked first.)
+        assert_eq!(row.parse::<Crypt>(), Some(params.parse().unwrap()));
         assert_eq!(row.parse::<devmap_zero::dm::Target>(), None);
     }
 
     #[test]
     fn params_reaches_a_target_this_crate_does_not_model() {
-        // dm-cache has no type in `targets`, so `parse` can't name it and
+        // dm-cache has no typed definition in this workspace, so
         // the raw string is the only way in.
         let line = "252:1 252:2 252:3 512 1 writeback default 0";
         let (bytes, count) = synthetic_table_status_response(&[(b"cache", line)]);
@@ -678,17 +649,10 @@ mod tests {
             rows[0].parse::<devmap_zero::dm::Target>(),
             Some(devmap_zero::dm::Target)
         );
-        assert_eq!(
-            rows[1].parse::<Linear>(),
-            Some(Linear {
-                device: DevId::new(252, 5).unwrap(),
-                offset_sectors: 5
-            })
-        );
-        assert_eq!(
-            rows[2].parse::<devmap_error::dm::Target>(),
-            Some(devmap_error::dm::Target)
-        );
+        assert_eq!(rows[1].type_name(), "linear");
+        assert_eq!(rows[1].params(), "252:5 5");
+        assert_eq!(rows[2].type_name(), "error");
+        assert_eq!(rows[2].params(), "");
     }
 
     #[test]
@@ -717,21 +681,19 @@ mod tests {
         // An info row reports runtime status, never a target's ctor params;
         // parsing it as a different target's Info must yield None on a
         // type-name mismatch, before the params are even looked at.
-        let params = "raid1 2 AA 4096/4096 idle 0 0 -";
-        let (bytes, count) = synthetic_table_status_response(&[(b"raid", params)]);
+        let params = "C 42";
+        let (bytes, count) = synthetic_table_status_response(&[(b"verity", params)]);
         let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count)
             .next()
             .expect("one row");
-        assert_eq!(row.type_name(), "raid");
-        // Matching type: the row decodes into raid's typed Info.
+        assert_eq!(row.type_name(), "verity");
         let info = row
-            .parse::<devmap_raid::dm::Target>()
-            .expect("raid info parses");
-        assert_eq!(info.devices.len(), 2);
+            .parse::<devmap_verity::dm::Target>()
+            .expect("verity info parses");
+        assert!(info.corrupted);
+        assert_eq!(info.fec_corrected, Some(42));
         assert_eq!(info.to_string(), params);
-        // Non-matching type: None, even though linear's Info would happily
-        // parse an empty string — the type-name guard runs first.
-        assert_eq!(row.parse::<Linear>(), None);
+        assert_eq!(row.parse::<Crypt>(), None);
     }
 
     #[test]

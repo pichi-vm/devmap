@@ -8,7 +8,7 @@
 //! `dmsetup create …` as `devmap dm create …` (see [`multicall`]).
 
 // The CLI's docs and clap help mention many bare tool and target names
-// (dmsetup, veritysetup, thin-pool, …) that read fine unquoted.
+// (dmsetup, veritysetup, cryptsetup, …) that read fine unquoted.
 #![allow(clippy::doc_markdown)]
 
 mod cli;

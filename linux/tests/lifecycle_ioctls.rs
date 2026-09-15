@@ -11,7 +11,6 @@
 mod common;
 
 use common::{LoopDevice, Owned, open_control};
-use devmap_linear::dm::Target as Linear;
 use devmap_zero::dm::Target as Zero;
 
 #[test]
@@ -26,13 +25,11 @@ fn deps_reports_the_devices_the_table_opens() {
     let name = format!("devmap-test-deps-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(
+        .add_raw(
             0,
             8 * 1024 * 1024 / 512,
-            Linear {
-                device: backing_device.id(),
-                offset_sectors: 0,
-            },
+            "linear",
+            &format!("{} 0", backing_device.id()),
         )
         .expect("add linear")
         .load()

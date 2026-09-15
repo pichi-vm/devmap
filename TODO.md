@@ -51,8 +51,6 @@ of supported APIs or approval to change them.
 
 ## Workspace maintenance
 
-- [ ] Remove the root package's duplicate `devmap-linux` dev-dependency; it is
-  already a normal dependency.
 - [ ] Decide whether workspace `default-members` would make local library work
   more convenient. Keep all members covered by workspace CI regardless.
 
