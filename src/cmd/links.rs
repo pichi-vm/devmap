@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `devmap install-links <dir>` — create the legacy-tool symlinks that
-//! make this binary answer to `dmsetup`, `veritysetup`, `integritysetup`,
-//! and `dmzadm` via the multi-call shim (see [`crate::multicall`]).
+//! make this binary answer to `dmsetup`, `veritysetup`, and `cryptsetup`
+//! via the multi-call shim (see [`crate::multicall`]).
 
 use std::io::ErrorKind;
 use std::os::unix::fs::symlink;

@@ -13,9 +13,9 @@ jq -e '
     if $name == "devmap-linux" then true
     elif ($seen | index($name)) != null then false
     else any(normal_deps($name)[]; reaches_linux(.; $seen + [$name])) end;
-  ["crypt","delay","dust","era","error","flakey","integrity","linear",
-   "log-writes","raid","snapshot","striped","thin","thin-pool","unstriped",
-   "verity","writecache","zero","zoned"] | map("devmap-" + .) as $owners |
+  ["crypt","snapshot","verity","zero"] | map("devmap-" + .) as $owners |
+  (($packages | map(.name) | sort) ==
+   (($owners + ["devmap", "devmap-core", "devmap-linux", "devmap-luks"]) | sort)) and
   all($owners[]; $by_name[.] != null) and
   all(($owners + ["devmap-luks"])[];
       any($by_name[.].dependencies[];

@@ -1,99 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Real-kernel coverage for `era`, `log-writes`, and `snapshot-merge` —
-//! each needs two backing devices and/or a short lifecycle beyond a
-//! single `create`+`load`+`resume`.
+//! Real-kernel coverage for snapshot-merge handover and data preservation.
 
 #[path = "support/dm.rs"]
 mod common;
 
-use devmap_era::dm::Commands as _;
-use devmap_log_writes::dm::Commands as _;
-use std::io::Write;
-
 use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
-use devmap_era::dm::Target as Era;
-use devmap_log_writes::dm::Target as LogWrites;
 use devmap_snapshot::dm as snapshot;
 use devmap_snapshot::dm::Target as Snapshot;
-
-#[test]
-fn era_tracks_writes_and_responds_to_checkpoint_message() {
-    let Some(control) = open_control() else {
-        return;
-    };
-    ensure_module_loaded("dm-era");
-
-    let metadata = LoopDevice::create("era-meta", 8 * 1024 * 1024);
-    let origin = LoopDevice::create("era-origin", 8 * 1024 * 1024);
-    let metadata_device = control.by_node(&metadata.path).expect("by_node metadata");
-    let origin_device = control.by_node(&origin.path).expect("by_node origin");
-
-    let name = format!("devmap-test-era-{}", std::process::id());
-    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(
-            0,
-            16384,
-            Era {
-                metadata: metadata_device.id(),
-                origin: origin_device.id(),
-                block_size: 128,
-            },
-        )
-        .expect("add era")
-        .load()
-        .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
-
-    let status_before: Vec<_> = dev.info().expect("DM_TABLE_STATUS").collect();
-    assert_eq!(status_before.len(), 1);
-    assert_eq!(status_before[0].type_name(), "era");
-
-    // `checkpoint` may or may not bump the era counter on this call (the
-    // kernel doc explicitly says not to assume it will), but it must not
-    // error. Driven through the typed live-target handle.
-    dev.target::<Era>(0).checkpoint().expect("checkpoint");
-}
-
-#[test]
-fn log_writes_counts_logged_entries_and_accepts_marks() {
-    let Some(control) = open_control() else {
-        return;
-    };
-    ensure_module_loaded("dm-log-writes");
-
-    let data = LoopDevice::create("logwrites-data", 8 * 1024 * 1024);
-    let log = LoopDevice::create("logwrites-log", 8 * 1024 * 1024);
-    let data_device = control.by_node(&data.path).expect("by_node data");
-    let log_device = control.by_node(&log.path).expect("by_node log");
-
-    let name = format!("devmap-test-logwrites-{}", std::process::id());
-    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(
-            0,
-            16384,
-            LogWrites {
-                device: data_device.id(),
-                log_device: log_device.id(),
-            },
-        )
-        .expect("add log-writes")
-        .load()
-        .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
-
-    let mut file = dev.open_rw().expect("open mapped device");
-    file.write_all(&[0xCDu8; 4096])
-        .expect("write to logged device");
-    file.sync_all().expect("fsync");
-
-    // Marking a point in the log must succeed. Driven through the handle.
-    dev.target::<LogWrites>(0)
-        .mark("after-write")
-        .expect("mark");
-}
+use std::io::Write;
 
 /// Exercises `snapshot::Merge`'s real handover procedure end to
 /// end: a `snapshot-origin` device, a `snapshot` device sharing its COW

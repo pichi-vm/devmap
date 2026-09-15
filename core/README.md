@@ -11,7 +11,7 @@ a persistence boundary. `scale()` and `slice()` work in multipliers and
 logical blocks respectively.
 
 The crate exports `Target`, `DevId`, `Fraction`, `NoInfo`, and
-the backend traits used by target crates. Import these directly from
+the `TableBuilder` trait used by target crates. Import these directly from
 `devmap_core`. Concrete targets live in their owning crates; the Linux
 backend implements these interfaces in `devmap-linux`. A finite zero-filled
 source is available separately as `devmap_zero::Zero`.

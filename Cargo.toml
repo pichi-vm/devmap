@@ -15,28 +15,12 @@ homepage = "https://github.com/pichi-vm/devmap"
 
 [dependencies]
 devmap-crypt = { version = "0.1.0", path = "crypt" }
-devmap-delay = { version = "0.1.0", path = "delay" }
-devmap-dust = { version = "0.1.0", path = "dust" }
-devmap-era = { version = "0.1.0", path = "era" }
-devmap-error = { version = "0.1.0", path = "error" }
-devmap-flakey = { version = "0.1.0", path = "flakey" }
-devmap-integrity = { version = "0.1.0", path = "integrity" }
-devmap-linear = { version = "0.1.0", path = "linear" }
-devmap-log-writes = { version = "0.1.0", path = "log-writes" }
-devmap-raid = { version = "0.1.0", path = "raid" }
-devmap-striped = { version = "0.1.0", path = "striped" }
-devmap-thin = { version = "0.1.0", path = "thin" }
-devmap-thin-pool = { version = "0.1.0", path = "thin-pool" }
-devmap-unstriped = { version = "0.1.0", path = "unstriped" }
-devmap-writecache = { version = "0.1.0", path = "writecache" }
 devmap-zero = { version = "0.1.0", path = "zero" }
 devmap-core = { version = "0.1.0", path = "core" }
 devmap-linux = { version = "0.1.0", path = "linux" }
 devmap-verity = { version = "0.1.0", path = "verity" }
-devmap-zoned = { version = "0.1.0", path = "zoned" }
 devmap-snapshot = { version = "0.1.0", path = "snapshot" }
 devmap-luks = { version = "0.1.0", path = "luks", features = ["devmap-crypt"] }
-devmap-persistent = { version = "0.1.0", path = "persistent" }
 clap = { version = "4", features = ["derive"] }
 # Master keys go into the kernel keyring; this is a safe wrapper, so the
 # workspace-wide `unsafe_code = "deny"` still holds.
@@ -48,9 +32,7 @@ anyhow = "1"
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
-# Tests only: the root gate (Control::open) for the CLI integration test.
 [dev-dependencies]
-devmap-linux = { version = "0.1.0", path = "linux" }
 tempfile = "3"
 
 [lints]
@@ -58,7 +40,7 @@ workspace = true
 
 [workspace]
 resolver = "3"
-members = ["core", "linux", "verity", "zoned", "snapshot", "luks", "persistent", "crypt", "delay", "dust", "era", "error", "flakey", "integrity", "linear", "log-writes", "raid", "striped", "thin", "thin-pool", "unstriped", "writecache", "zero"]
+members = ["core", "crypt", "linux", "luks", "snapshot", "verity", "zero"]
 
 # Shared lints for every member. Kept here so a new member picks them up
 # with `[lints] workspace = true` rather than duplicating the block.

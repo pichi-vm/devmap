@@ -24,16 +24,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
       - name: cargo doc
-        run: cargo doc --workspace --no-deps --all-features
+        run: cargo doc --workspace --no-deps --all-features --target-dir "$RUNNER_TEMP/devmap-docs"
         env:
           RUSTDOCFLAGS: --cfg docsrs
       - name: redirect root to crate
-        run: echo '<meta http-equiv="refresh" content="0; url=devmap/index.html">' > target/doc/index.html
+        run: echo '<meta http-equiv="refresh" content="0; url=devmap/index.html">' > "$RUNNER_TEMP/devmap-docs/doc/index.html"
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: ${{ runner.temp }}/devmap-docs/doc
 
   deploy:
     name: deploy to pages

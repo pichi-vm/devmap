@@ -58,17 +58,9 @@
 //! relationship between the values. [`NoInfo`] validates empty status text,
 //! while [`String`] preserves arbitrary status text without validation.
 //!
-//! [`Control`], [`Device`], and [`TableBuilder`] let format crates create,
-//! configure, activate, and remove temporary mappings through a caller-supplied
-//! backend. For example, integrity formatting needs the kernel to initialize
-//! its metadata. [`TableBuilder`] also lets a format choose row length and
-//! read-only access without depending on a concrete backend.
-//!
-//! [`TargetEndpoint`] lets a format crate send commands through a backend's
-//! live-target handle. The format crate supplies the command syntax; the
-//! backend delivers it to the selected device and sector. Applications using
-//! `devmap-linux` ordinarily use its concrete handles, not these backend traits
-//! directly.
+//! [`TableBuilder`] lets a format choose row length and read-only access
+//! without depending on a concrete backend. Creating devices, loading tables,
+//! activation, removal, and messages belong to the backend.
 //!
 //! # Cargo features
 //!
@@ -84,7 +76,5 @@ pub mod traits;
 #[cfg(target_os = "linux")]
 mod uapi;
 
-pub use dm::{
-    Control, DevId, Device, Fraction, NoInfo, ParseError, TableBuilder, Target, TargetEndpoint,
-};
+pub use dm::{DevId, Fraction, NoInfo, ParseError, TableBuilder, Target};
 pub use geometry::{Region, Scaled};

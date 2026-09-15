@@ -9,12 +9,10 @@ suspend/resume them, query tables and status, and send target messages.
 kernel state.
 
 Target definitions live in separate crates, for example
-`devmap_linear::dm::Target` and `devmap_verity::dm::Target`.
+`devmap_crypt::dm::Target` and `devmap_verity::dm::Target`.
 Import shared target contracts, device numbers, and parsing/status helpers
 directly from `devmap_core`.
-Import a target crate's `dm::Commands` trait for its typed messages on
-`LiveTarget`. This backend does not implement on-disk formats or target-specific
-command encoding.
+Use `Device::message` to send raw target messages to a selected sector.
 
 Use `device.table()` for construction parameters and `device.info()` for
 per-target runtime status; `device.status()` reports whole-device state.

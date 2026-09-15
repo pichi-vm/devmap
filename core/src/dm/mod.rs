@@ -17,4 +17,4 @@ pub use error::ParseError;
 pub use fraction::Fraction;
 pub use info::NoInfo;
 pub use target::Target;
-pub use transport::{Control, Device, TableBuilder, TargetEndpoint};
+pub use transport::TableBuilder;
