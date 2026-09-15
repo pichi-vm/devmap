@@ -7,25 +7,25 @@ use std::fmt;
 use std::str::FromStr;
 
 use devmap_core::DevId;
-use devmap_core::{Fraction, NoInfo, ParseError, Target as DmTarget};
+use devmap_core::{Fraction, NoInfo, ParseError, Target};
 
 /// Marks a device as the origin of a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Origin {
+pub struct SnapshotOriginTarget {
     /// The device being snapshotted.
     pub origin: DevId,
 }
-impl DmTarget for Origin {
+impl Target for SnapshotOriginTarget {
     const NAME: &'static str = "snapshot-origin";
     type Table = Self;
     type Info = NoInfo;
 }
-impl fmt::Display for Origin {
+impl fmt::Display for SnapshotOriginTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.origin)
     }
 }
-impl FromStr for Origin {
+impl FromStr for SnapshotOriginTarget {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut it = s.split_whitespace();
@@ -36,14 +36,14 @@ impl FromStr for Origin {
         if it.next().is_some() {
             return Err(ParseError);
         }
-        Ok(Origin { origin })
+        Ok(SnapshotOriginTarget { origin })
     }
 }
 
 /// A copy-on-write snapshot of an origin device. Always persistent with
 /// overflow support ("PO").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Target {
+pub struct SnapshotTarget {
     /// The device being snapshotted.
     pub origin: DevId,
     /// The copy-on-write store holding changed chunks.
@@ -51,12 +51,12 @@ pub struct Target {
     /// Copy-on-write chunk size, in 512-byte sectors.
     pub chunk_size_sectors: u32,
 }
-impl DmTarget for Target {
+impl Target for SnapshotTarget {
     const NAME: &'static str = "snapshot";
     type Table = Self;
     type Info = Info;
 }
-impl fmt::Display for Target {
+impl fmt::Display for SnapshotTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -66,7 +66,7 @@ impl fmt::Display for Target {
     }
 }
 
-impl FromStr for Target {
+impl FromStr for SnapshotTarget {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut fields = s.split_whitespace();
@@ -82,7 +82,7 @@ impl FromStr for Target {
         if fields.next().is_some() {
             return Err(ParseError);
         }
-        Ok(Target {
+        Ok(SnapshotTarget {
             origin,
             cow,
             chunk_size_sectors,
@@ -90,30 +90,30 @@ impl FromStr for Target {
     }
 }
 
-/// Merges an existing persistent [`Target`]'s copy-on-write data back
-/// into its origin. The mapping is identical to [`Target`]'s; only the
+/// Merges an existing persistent [`SnapshotTarget`]'s copy-on-write data back
+/// into its origin. The mapping is identical to [`SnapshotTarget`]'s; only the
 /// kernel target name differs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Merge(pub Target);
-impl DmTarget for Merge {
+pub struct SnapshotMergeTarget(pub SnapshotTarget);
+impl Target for SnapshotMergeTarget {
     const NAME: &'static str = "snapshot-merge";
     type Table = Self;
     type Info = Info;
 }
-impl fmt::Display for Merge {
+impl fmt::Display for SnapshotMergeTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
-impl FromStr for Merge {
+impl FromStr for SnapshotMergeTarget {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(Merge)
+        s.parse().map(SnapshotMergeTarget)
     }
 }
 
-/// The runtime status of a [`Target`] or [`Merge`] — both share the
-/// kernel's status callback, so both report this.
+/// The runtime status of a [`SnapshotTarget`] or [`SnapshotMergeTarget`].
+/// Both share the kernel's status callback.
 ///
 /// An enum rather than a struct because the kernel does not pair usage
 /// with a health flag: when the snapshot is unusable it emits a bare
@@ -137,7 +137,7 @@ pub enum Info {
     /// The snapshot is invalid and cannot be recovered.
     Invalid,
 
-    /// A [`Merge`] back into the origin failed partway.
+    /// A [`SnapshotMergeTarget`] back into the origin failed partway.
     MergeFailed,
 
     /// The store filled and the snapshot was dropped.
@@ -201,7 +201,7 @@ impl FromStr for Info {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn line<T: DmTarget + std::fmt::Display>(start: u64, length: u64, value: &T) -> String {
+    fn line<T: Target + std::fmt::Display>(start: u64, length: u64, value: &T) -> String {
         let parameters = value.to_string();
         if parameters.is_empty() {
             format!("{start} {length} {}", T::NAME)
@@ -210,8 +210,8 @@ mod tests {
         }
     }
 
-    fn snapshot(chunk_size_sectors: u32) -> Target {
-        Target {
+    fn snapshot(chunk_size_sectors: u32) -> SnapshotTarget {
+        SnapshotTarget {
             origin: DevId::new(252, 1).unwrap(),
             cow: DevId::new(252, 2).unwrap(),
             chunk_size_sectors,
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn snapshot_origin_renders_device_only() {
-        let t = Origin {
+        let t = SnapshotOriginTarget {
             origin: DevId::new(252, 1).unwrap(),
         };
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-origin 252:1");
@@ -234,37 +234,40 @@ mod tests {
 
     #[test]
     fn snapshot_merge_renders_like_snapshot_with_po() {
-        let t = Merge(snapshot(8));
+        let t = SnapshotMergeTarget(snapshot(8));
         assert_eq!(line(0, 1024, &t), "0 1024 snapshot-merge 252:1 252:2 PO 8");
     }
 
     #[test]
     fn snapshot_and_merge_display_from_str_round_trip() {
         let original = snapshot(16);
-        assert_eq!(original.to_string().parse::<Target>(), Ok(original));
-        let original = Merge(original);
-        assert_eq!(original.to_string().parse::<Merge>(), Ok(original));
+        assert_eq!(original.to_string().parse::<SnapshotTarget>(), Ok(original));
+        let original = SnapshotMergeTarget(original);
+        assert_eq!(
+            original.to_string().parse::<SnapshotMergeTarget>(),
+            Ok(original)
+        );
     }
 
     #[test]
     fn snapshot_from_str_rejects_other_persistence_modes() {
         // "P" (persistent, no overflow) and "N" (transient) are real
         // dm-snapshot tables this type cannot hold.
-        assert!("252:1 252:2 P 8".parse::<Target>().is_err());
-        assert!("252:1 252:2 N 8".parse::<Target>().is_err());
+        assert!("252:1 252:2 P 8".parse::<SnapshotTarget>().is_err());
+        assert!("252:1 252:2 N 8".parse::<SnapshotTarget>().is_err());
     }
 
     #[test]
     fn snapshot_origin_from_str_rejects_trailing_tokens() {
-        assert!("252:1 extra".parse::<Origin>().is_err());
+        assert!("252:1 extra".parse::<SnapshotOriginTarget>().is_err());
     }
 
     #[test]
     fn snapshot_origin_display_from_str_round_trips() {
-        let original = Origin {
+        let original = SnapshotOriginTarget {
             origin: DevId::new(252, 7).unwrap(),
         };
         let params = original.to_string();
-        assert_eq!(params.parse::<Origin>(), Ok(original));
+        assert_eq!(params.parse::<SnapshotOriginTarget>(), Ok(original));
     }
 }

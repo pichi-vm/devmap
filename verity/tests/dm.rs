@@ -3,7 +3,7 @@
 use devmap_core::DevId;
 use devmap_verity::{
     HashType, Hashes,
-    dm::{Builder, CorruptionPolicy as C, Fec, Info, IoErrorPolicy as E, Target},
+    dm::{Builder, CorruptionPolicy as C, Fec, Info, IoErrorPolicy as E, VerityTarget},
     traits::std::OpenHashes as _,
 };
 use std::{
@@ -22,7 +22,7 @@ fn builder() -> Builder {
         .hash_block_size(512)
         .unwrap()
 }
-fn finish(builder: Builder) -> Target {
+fn finish(builder: Builder) -> VerityTarget {
     builder.build(id(1), id(2), &[0xbb; 32]).unwrap()
 }
 
@@ -54,7 +54,7 @@ fn all_parameters_round_trip_including_every_policy_combination() {
                 }
                 let target = finish(b);
                 let text = target.to_string();
-                assert_eq!(text.parse::<Target>().unwrap(), target, "{text}");
+                assert_eq!(text.parse::<VerityTarget>().unwrap(), target, "{text}");
                 assert_eq!(target.data_sectors(), 3);
                 assert_eq!(target.hash_start_block(), 7);
                 assert_eq!(target.corruption_policy(), corruption);
@@ -95,7 +95,7 @@ fn raw_kernel_algorithms_and_headerless_trees_are_representable() {
     );
     let text = target.to_string();
     assert!(text.ends_with(" -"));
-    assert_eq!(text.parse::<Target>().unwrap(), target);
+    assert_eq!(text.parse::<VerityTarget>().unwrap(), target);
     assert_eq!(
         target.to_header([0; 16]).unwrap_err().kind(),
         io::ErrorKind::Unsupported
@@ -157,27 +157,27 @@ fn invalid_parameters_and_conflicting_options_are_rejected() {
         "0 extra",
     ] {
         assert!(
-            format!("{base} {extra}").parse::<Target>().is_err(),
+            format!("{base} {extra}").parse::<VerityTarget>().is_err(),
             "{extra}"
         );
     }
     assert!(
         base.replace(&"bb".repeat(32), "é")
-            .parse::<Target>()
+            .parse::<VerityTarget>()
             .is_err()
     );
     assert!(
         base.replace(&"bb".repeat(32), "abc")
-            .parse::<Target>()
+            .parse::<VerityTarget>()
             .is_err()
     );
     assert!(
         base.replace(&"bb".repeat(32), "zz")
-            .parse::<Target>()
+            .parse::<VerityTarget>()
             .is_err()
     );
     assert_eq!(
-        format!("{base} 0").parse::<Target>().unwrap(),
+        format!("{base} 0").parse::<VerityTarget>().unwrap(),
         finish(builder())
     );
 }

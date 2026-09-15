@@ -67,12 +67,12 @@ pub mod mode {
 /// ```compile_fail
 /// # use devmap_linux::Row;
 /// use devmap_linux::mode;
-/// use devmap_crypt::dm::Target as Crypt;
+/// use devmap_crypt::dm::CryptTarget;
 /// fn wrong(row: Row<mode::Info>) {
-///     // `parse::<Crypt>()` on an Info row yields `Option<Crypt::Info>`,
-///     // and annotating it `Option<Crypt>` demands the table type that
+///     // `parse::<CryptTarget>()` on an Info row yields `Option<CryptTarget::Info>`,
+///     // and annotating it `Option<CryptTarget>` demands the table type that
 ///     // the Info mode never provides — a type error.
-///     let _table: Option<Crypt> = row.parse::<Crypt>();
+///     let _table: Option<CryptTarget> = row.parse::<CryptTarget>();
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -387,7 +387,7 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
 mod tests {
     use super::*;
     use devmap_core::ParseError;
-    use devmap_crypt::dm::Target as Crypt;
+    use devmap_crypt::dm::CryptTarget;
 
     /// An `Arc<File>` for a `TableBuilder` that never issues a real ioctl:
     /// the rendering/validation paths run entirely before `load`.
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn buf_for_zero_target_has_correct_layout() {
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
-            .add(0, 8, devmap_zero::dm::Target)
+            .add(0, 8, devmap_zero::dm::ZeroTarget)
             .expect("add zero");
         // header + (40 spec + 0 params + 1 NUL = 41 -> padded to 48).
         assert_eq!(b.buf.len(), DmHeader::SIZE + 48);
@@ -415,7 +415,7 @@ mod tests {
         use zerocopy::FromBytes as _;
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
             .read_only()
-            .add(0, 8, devmap_zero::dm::Target)
+            .add(0, 8, devmap_zero::dm::ZeroTarget)
             .expect("add zero");
         let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
         let header: &DmHeader = header;
@@ -430,7 +430,7 @@ mod tests {
     fn default_builder_does_not_set_readonly() {
         use zerocopy::FromBytes as _;
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
-            .add(0, 8, devmap_zero::dm::Target)
+            .add(0, 8, devmap_zero::dm::ZeroTarget)
             .expect("add zero");
         let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
         let header: &DmHeader = header;
@@ -498,7 +498,7 @@ mod tests {
         // spec's `next` can't distinguish "relative to current" from
         // "relative to first".
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .add(0, 8, devmap_zero::dm::Target)
+            .add(0, 8, devmap_zero::dm::ZeroTarget)
             .and_then(|b| b.add_raw(8, 1024, "linear", "252:5 5"))
             .and_then(|b| b.add_raw(1032, 8, "error", ""))
             .expect("build three-target table");
@@ -583,8 +583,8 @@ mod tests {
             .expect("one row");
         assert_eq!(row.type_name(), "crypt");
         assert_eq!(row.start(), 0);
-        assert_eq!(row.parse::<Crypt>(), Some(params.parse().unwrap()));
-        assert_eq!(row.parse::<devmap_zero::dm::Target>(), None);
+        assert_eq!(row.parse::<CryptTarget>(), Some(params.parse().unwrap()));
+        assert_eq!(row.parse::<devmap_zero::dm::ZeroTarget>(), None);
     }
 
     #[test]
@@ -644,8 +644,8 @@ mod tests {
             TableStatusIter::new(bytes, DmHeader::SIZE, count).collect();
         assert_eq!(rows.len(), 3);
         assert_eq!(
-            rows[0].parse::<devmap_zero::dm::Target>(),
-            Some(devmap_zero::dm::Target)
+            rows[0].parse::<devmap_zero::dm::ZeroTarget>(),
+            Some(devmap_zero::dm::ZeroTarget)
         );
         assert_eq!(rows[1].type_name(), "linear");
         assert_eq!(rows[1].params(), "252:5 5");
@@ -686,12 +686,12 @@ mod tests {
             .expect("one row");
         assert_eq!(row.type_name(), "verity");
         let info = row
-            .parse::<devmap_verity::dm::Target>()
+            .parse::<devmap_verity::dm::VerityTarget>()
             .expect("verity info parses");
         assert!(info.corrupted);
         assert_eq!(info.fec_corrected, Some(42));
         assert_eq!(info.to_string(), params);
-        assert_eq!(row.parse::<Crypt>(), None);
+        assert_eq!(row.parse::<CryptTarget>(), None);
     }
 
     #[test]

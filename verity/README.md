@@ -10,7 +10,7 @@ dependencies, not on hashing implementations.
 
 Build kernel parameters with `dm::Builder::from(hashes.header())`, supplying
 the data and hash device IDs and an independently trusted root digest to
-`build`. Pass the resulting `dm::Target` to a backend such as `devmap-linux`;
+`build`. Pass the resulting `dm::VerityTarget` to a backend such as `devmap-linux`;
 set the table read-only and use `target.data_sectors()` for a full-size row.
 The `dm` module and its header conversions are available in every build.
 

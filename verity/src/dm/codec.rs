@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{Builder, CorruptionPolicy, Fec, IoErrorPolicy, Target};
+use super::{Builder, CorruptionPolicy, Fec, IoErrorPolicy, VerityTarget};
 use crate::HashType;
 use devmap_core::{DevId, ParseError};
 use std::{
@@ -9,7 +9,7 @@ use std::{
     str::FromStr,
 };
 
-impl Target {
+impl VerityTarget {
     fn hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
         for byte in bytes {
             write!(f, "{byte:02x}")?;
@@ -83,7 +83,7 @@ impl Target {
     }
 }
 
-impl fmt::Display for Target {
+impl fmt::Display for VerityTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -151,7 +151,7 @@ impl fmt::Display for Target {
     }
 }
 
-impl FromStr for Target {
+impl FromStr for VerityTarget {
     type Err = ParseError;
     // Keep option counts, ordering, and conflict checks in one parser.
     #[allow(clippy::too_many_lines)]

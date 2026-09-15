@@ -2,7 +2,7 @@
 
 A finite, seekable source of zero bytes and a Linux device-mapper target
 description. `Zero::new(length)` provides standard reads, seeks, and core
-geometry without allocating backing storage. The `dm::Target` type describes
+geometry without allocating backing storage. The `dm::ZeroTarget` type describes
 the kernel zero target, which also accepts and discards writes; use a backend
 such as `devmap-linux` to activate it.
 

@@ -19,7 +19,7 @@ use std::io::Read as _;
 
 use common::{Owned, open_control};
 use devmap_core::{DevId, NoInfo};
-use devmap_zero::dm::Target as Zero;
+use devmap_zero::dm::ZeroTarget;
 
 #[test]
 fn create_load_resume_read_zeros_remove() {
@@ -31,7 +31,7 @@ fn create_load_resume_read_zeros_remove() {
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -54,7 +54,7 @@ fn create_load_resume_read_zeros_remove() {
     let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
     assert_eq!(info.len(), 1);
     assert_eq!(info[0].params(), "");
-    assert_eq!(info[0].parse::<Zero>(), Some(NoInfo));
+    assert_eq!(info[0].parse::<ZeroTarget>(), Some(NoInfo));
 
     // The test harness's `Owned` guard drops here and removes the mapping;
     // the library itself never removes anything implicitly.
@@ -70,7 +70,7 @@ fn suspend_resume_round_trips() {
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -107,7 +107,7 @@ fn status_reports_sane_values_for_a_fresh_device() {
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -128,7 +128,7 @@ fn table_status_reports_back_the_loaded_target() {
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -140,7 +140,7 @@ fn table_status_reports_back_the_loaded_target() {
     assert_eq!(row.start(), 0);
     assert_eq!(row.length(), 8192);
     assert_eq!(row.type_name(), "zero");
-    assert_eq!(row.parse::<Zero>(), Some(Zero));
+    assert_eq!(row.parse::<ZeroTarget>(), Some(ZeroTarget));
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn list_reports_the_created_device() {
     let name = format!("devmap-test-list-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -175,7 +175,7 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
     let name = format!("devmap-test-attach-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -206,7 +206,7 @@ fn by_name_finds_device_and_reports_status() {
     let name = format!("devmap-test-byname-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -231,7 +231,7 @@ fn dropping_a_handle_leaves_the_device_alone() {
     let name = format!("devmap-test-drop-{}", std::process::id());
     let dev = control.create(&name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -263,7 +263,7 @@ fn deferred_removal_reclaims_a_device_that_is_still_open() {
     let name = format!("devmap-test-deferred-{}", std::process::id());
     let dev = control.create(&name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");

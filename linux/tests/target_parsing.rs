@@ -40,11 +40,11 @@ fn reject<T: FromStr<Err = ParseError>>(cases: &[&str]) {
 
 #[test]
 fn table_parsers_preserve_required_optional_and_trailing_fields() {
-    row::<devmap_crypt::dm::Target>(
+    row::<devmap_crypt::dm::CryptTarget>(
         "aes-xts-plain64 :64:logon:example:volume 0 7:0 0 1 allow_discards",
         &[5],
     );
-    row::<devmap_snapshot::dm::Target>("7:0 7:1 PO 32", &[]);
+    row::<devmap_snapshot::dm::SnapshotTarget>("7:0 7:1 PO 32", &[]);
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn status_parsers_preserve_required_optional_and_trailing_fields() {
 
 #[test]
 fn malformed_optional_fields_are_not_treated_as_absent() {
-    reject::<devmap_crypt::dm::Target>(&[
+    reject::<devmap_crypt::dm::CryptTarget>(&[
         "aes-xts-plain64 - 0 7:0 0 bad",
         "aes-xts-plain64 - 0 7:0 0 1",
         "aes-xts-plain64 - 0 7:0 0 1 unknown",
@@ -65,7 +65,7 @@ fn malformed_optional_fields_are_not_treated_as_absent() {
 
 #[test]
 fn counted_options_require_exactly_the_declared_fields() {
-    reject::<devmap_crypt::dm::Target>(&[
+    reject::<devmap_crypt::dm::CryptTarget>(&[
         "aes-xts-plain64 - 0 7:0 0 0 allow_discards",
         "aes-xts-plain64 - 0 7:0 0 2 allow_discards",
     ]);

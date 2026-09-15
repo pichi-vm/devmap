@@ -7,13 +7,13 @@
 //! A header supplies format parameters, not the trusted root digest or device
 //! IDs; pass those to [`Builder::build`](crate::dm::Builder::build).
 //! Use a backend table builder to choose row start and length and set read-only
-//! access. [`Target::data_sectors`](crate::dm::Target::data_sectors) gives the
-//! full length in 512-byte sectors.
+//! access. [`VerityTarget::data_sectors`](crate::dm::VerityTarget::data_sectors)
+//! gives the full length in 512-byte sectors.
 //! Loading and resuming remain separate backend operations. This module
 //! performs no device-mapper ioctls and is available without hashing dependencies.
 
 use crate::{HashType, Header};
-use devmap_core::{DevId, ParseError, Target as DmTarget};
+use devmap_core::{DevId, ParseError, Target};
 use std::{
     fmt, io,
     num::{NonZeroU32, NonZeroU64},
@@ -32,7 +32,7 @@ pub use options::{CorruptionPolicy, Fec, IoErrorPolicy};
 /// obtained from an independently trusted source. Construct with [`Builder`].
 /// The kernel checks actual device geometry and availability of optional features.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Target {
+pub struct VerityTarget {
     data_dev: DevId,
     hash_dev: DevId,
     data_blocks: NonZeroU64,
@@ -41,7 +41,7 @@ pub struct Target {
     data_sectors: u64,
 }
 
-impl Target {
+impl VerityTarget {
     /// Returns the data device.
     pub const fn data_dev(&self) -> DevId {
         self.data_dev
@@ -144,7 +144,7 @@ impl Target {
     }
 }
 
-impl DmTarget for Target {
+impl Target for VerityTarget {
     const NAME: &'static str = "verity";
     type Table = Self;
     type Info = Info;

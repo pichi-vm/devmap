@@ -3,7 +3,7 @@
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
 
-use super::{CorruptionPolicy, Fec, IoErrorPolicy, Target};
+use super::{CorruptionPolicy, Fec, IoErrorPolicy, VerityTarget};
 use crate::{Algorithm, HashType, Header};
 use devmap_core::DevId;
 
@@ -215,7 +215,7 @@ impl Builder {
     ///
     /// Returns `InvalidInput` for arithmetic overflow, a wrong known digest
     /// length, an empty digest, or incompatible FEC settings.
-    pub fn build(self, data_dev: DevId, hash_dev: DevId, root: &[u8]) -> io::Result<Target> {
+    pub fn build(self, data_dev: DevId, hash_dev: DevId, root: &[u8]) -> io::Result<VerityTarget> {
         let invalid = |message| io::Error::new(io::ErrorKind::InvalidInput, message);
         let data_sectors = self
             .data_blocks
@@ -278,7 +278,7 @@ impl Builder {
                 return Err(invalid("FEC parity extent overflows"));
             }
         }
-        Ok(Target {
+        Ok(VerityTarget {
             data_dev,
             hash_dev,
             data_blocks: self.data_blocks,

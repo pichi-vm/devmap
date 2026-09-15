@@ -14,9 +14,9 @@ capacity for a change to every origin chunk. Before allocating a new COW
 chunk, writes are compared with the origin; matching bytes need no allocation.
 File import and sparse-file traversal belong to the caller.
 
-The `dm` module always provides snapshot, snapshot-origin, and snapshot-merge
-table parameters. Pass them to a backend such as `devmap-linux` for activation;
-this crate does not create or activate device-mapper devices.
+The `dm` module always provides `SnapshotTarget`, `SnapshotOriginTarget`, and
+`SnapshotMergeTarget`. Pass them to a backend such as `devmap-linux` for
+activation; this crate does not create or activate device-mapper devices.
 
 There are no default features. Enable `tokio` for the `traits::tokio` module
 and Tokio I/O implementations on `Layer`.

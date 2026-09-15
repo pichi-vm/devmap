@@ -102,14 +102,14 @@ impl Header {
         &self,
         device: devmap_core::DevId,
         key: devmap_crypt::dm::Key,
-    ) -> Result<devmap_crypt::dm::Target, Error> {
+    ) -> Result<devmap_crypt::dm::CryptTarget, Error> {
         let offset = self.payload_offset_sectors()?;
         let sector_size = self.sector_size();
-        Ok(devmap_crypt::dm::Target {
+        Ok(devmap_crypt::dm::CryptTarget {
             offset,
             iv_offset: self.iv_tweak(),
             sector_size: (sector_size != 512).then_some(sector_size),
-            ..devmap_crypt::dm::Target::new(self.cipher_spec()?, key, device)
+            ..devmap_crypt::dm::CryptTarget::new(self.cipher_spec()?, key, device)
         })
     }
 

@@ -129,9 +129,9 @@ impl Device {
     ///
     /// ```no_run
     /// # use devmap_linux::Control;
-    /// use devmap_zero::dm::Target as Zero;
+    /// use devmap_zero::dm::ZeroTarget;
     /// # fn f(dev: &devmap_linux::Device) -> std::io::Result<()> {
-    /// dev.builder().add(0, 8192, Zero)?.load()?;
+    /// dev.builder().add(0, 8192, ZeroTarget)?.load()?;
     /// # Ok(()) }
     /// ```
     #[must_use = "a TableBuilder does nothing until `.load()` is called"]

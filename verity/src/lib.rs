@@ -117,8 +117,8 @@
 //! the independently trusted root digest. Neither opening the header nor
 //! building a target requires a hashing implementation.
 //!
-//! Pass the resulting [`dm::Target`] to a backend such as `devmap-linux`.
-//! Set the table read-only and use [`dm::Target::data_sectors`] for a full-size
+//! Pass the resulting [`dm::VerityTarget`] to a backend such as `devmap-linux`.
+//! Set the table read-only and use [`dm::VerityTarget::data_sectors`] for a full-size
 //! row, then load the table and resume the device. For an embedded header, open
 //! its zero-based region and set [`dm::Builder::header_offset_bytes`] to its
 //! physical byte offset in the kernel's hash device.

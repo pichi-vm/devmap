@@ -9,7 +9,7 @@ suspend/resume them, query tables and status, and send target messages.
 kernel state.
 
 Target definitions live in separate crates, for example
-`devmap_crypt::dm::Target` and `devmap_verity::dm::Target`.
+`devmap_crypt::dm::CryptTarget` and `devmap_verity::dm::VerityTarget`.
 Import shared target contracts, device numbers, and parsing/status helpers
 directly from `devmap_core`.
 Use `Device::message` to send raw target messages to a selected sector.
