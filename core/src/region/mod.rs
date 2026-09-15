@@ -7,10 +7,12 @@ use std::num::NonZeroU32;
 mod r#async;
 mod sync;
 
-/// A zero-based device view over a contiguous block range.
+/// A bounded, zero-based view of a device.
 ///
-/// Values of this type are returned by `Slice::slice` in [`crate::traits`].
-/// Reads and writes stop at the selected extent.
+/// Create with [`Slice`](crate::traits::std::Slice) or
+/// [`SliceBytes`](crate::traits::std::SliceBytes), or their Tokio counterparts.
+/// Byte offset zero maps to the selected range's start. Reads and writes stop
+/// at its end; the underlying storage is not resized.
 #[derive(Debug)]
 pub struct Region<T> {
     inner: T,

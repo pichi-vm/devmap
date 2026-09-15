@@ -7,11 +7,11 @@ use std::num::NonZeroU32;
 mod r#async;
 mod sync;
 
-/// A device presented using larger blocks.
+/// A device view with a larger logical block size.
 ///
-/// Values of this type are returned by `Scale::scale` and `Scale::scale_to`
-/// in [`crate::traits`].
-/// The adapter forwards byte I/O unchanged.
+/// Create with [`Scale`](crate::traits::std::Scale) or its Tokio counterpart.
+/// Only the reported block geometry changes; byte I/O and storage size are
+/// unchanged.
 #[derive(Debug)]
 pub struct Scaled<T> {
     inner: T,
