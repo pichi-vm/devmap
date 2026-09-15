@@ -15,7 +15,8 @@ jq -e '
     else any(normal_deps($name)[]; reaches_linux(.; $seen + [$name])) end;
   ["crypt","snapshot","verity","zero"] | map("devmap-" + .) as $owners |
   (($packages | map(.name) | sort) ==
-   (($owners + ["devmap", "devmap-core", "devmap-linux", "devmap-luks"]) | sort)) and
+   (($owners + ["devmap-core", "devmap-linux", "devmap-luks"]) | sort)) and
+  all($packages[].targets[]; (.kind | index("bin")) == null) and
   all($owners[]; $by_name[.] != null) and
   all(($owners + ["devmap-luks"])[];
       any($by_name[.].dependencies[];
@@ -24,10 +25,9 @@ jq -e '
       [.dependencies[] | select(.optional) | (.rename // .name)] as $optional |
       all(.features | keys[];
           . as $feature | $feature == "default" or ($optional | index($feature)) != null)) and
-  all($packages[] | select(.name != "devmap" and .name != "devmap-linux");
+  all($packages[] | select(.name != "devmap-linux");
       reaches_linux(.name; []) | not) and
-  ([normal_deps("devmap-linux")[] | select(startswith("devmap-"))] == ["devmap-core"]) and
-  (($owners + ["devmap-linux"] - normal_deps("devmap")) | length == 0)
+  ([normal_deps("devmap-linux")[] | select(startswith("devmap-"))] == ["devmap-core"])
 ' <<<"$package_metadata"
 
 metadata_tree=$(cargo tree -p devmap-verity --no-default-features --edges normal --prefix none)

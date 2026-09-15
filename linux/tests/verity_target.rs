@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#[path = "support/dm.rs"]
 mod common;
 
 use common::{LoopDevice, Owned, ensure_module_loaded, open_control};

@@ -9,7 +9,6 @@
 
 #![cfg(target_os = "linux")]
 
-#[path = "support/dm.rs"]
 mod common;
 
 use common::Owned;

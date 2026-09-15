@@ -10,9 +10,9 @@ if test "$(id -u)" -ne 0; then kernel_runner=(sudo -n); fi
 "${kernel_runner[@]}" test -w /dev/mapper/control
 
 kernel_filter="${1:-.*}"
-kernel_artifacts=$(cargo test -p devmap -p devmap-linux --all-features --tests --no-run --message-format=json |
+kernel_artifacts=$(cargo test -p devmap-linux --all-features --tests --no-run --message-format=json |
     jq -r --arg filter "$kernel_filter" 'select(.reason == "compiler-artifact" and .profile.test == true and .executable != null)
-        | select(.target.name != "devmap" and .target.name != "devmap_linux")
+        | select(.target.name != "devmap_linux")
         | select(.target.name | test($filter))
         | [.target.name, .executable] | @tsv' | sort)
 test -n "$kernel_artifacts"

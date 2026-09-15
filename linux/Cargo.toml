@@ -20,7 +20,8 @@ zerocopy = { version = "0.8", features = ["derive"] }
 [dev-dependencies]
 devmap-crypt = { version = "0.1.0", path = "../crypt" }
 devmap-zero = { version = "0.1.0", path = "../zero" }
-devmap-verity = { version = "0.1.0", path = "../verity", default-features = false }
+devmap-snapshot = { version = "0.1.0", path = "../snapshot" }
+devmap-verity = { version = "0.1.0", path = "../verity", default-features = false, features = ["sha2"] }
 rustix = { version = "1", default-features = false, features = ["std", "event"] }
 
 [lints]
