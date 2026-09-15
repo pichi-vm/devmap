@@ -96,6 +96,6 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
             });
         assert_eq!(actual, expected);
         let row = device.table().unwrap().next().unwrap();
-        assert_eq!(row.parse::<dm::Target>().unwrap(), target);
+        assert_eq!(row.parse::<dm::VerityTarget>().unwrap(), target);
     }
 }

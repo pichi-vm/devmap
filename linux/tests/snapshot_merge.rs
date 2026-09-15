@@ -6,10 +6,10 @@ mod common;
 
 use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_snapshot::dm as snapshot;
-use devmap_snapshot::dm::Target as Snapshot;
+use devmap_snapshot::dm::SnapshotTarget;
 use std::io::Write;
 
-/// Exercises `snapshot::Merge`'s real handover procedure end to
+/// Exercises `snapshot::SnapshotMergeTarget`'s real handover procedure end to
 /// end: a `snapshot-origin` device, a `snapshot` device sharing its COW
 /// device, a write that creates a real COW exception, then the handover
 /// itself (suspend origin, reload it as `snapshot-merge`, suspend the old
@@ -45,7 +45,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            snapshot::Origin {
+            snapshot::SnapshotOriginTarget {
                 origin: origin_backing_device.id(),
             },
         )
@@ -66,7 +66,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            Snapshot {
+            SnapshotTarget {
                 origin: origin_backing_device.id(),
                 cow: cow_device.id(),
                 chunk_size_sectors: 8,
@@ -95,7 +95,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            snapshot::Merge(Snapshot {
+            snapshot::SnapshotMergeTarget(SnapshotTarget {
                 origin: origin_backing_device.id(),
                 cow: cow_device.id(),
                 chunk_size_sectors: 8,
@@ -120,7 +120,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
             allocated_sectors,
             metadata_sectors,
             ..
-        }) = reported[0].parse::<snapshot::Merge>()
+        }) = reported[0].parse::<snapshot::SnapshotMergeTarget>()
             && allocated_sectors == metadata_sectors
         {
             break;

@@ -1,6 +1,6 @@
 # devmap-crypt
 
-Device-mapper `crypt` target parameters and status. Start with `dm::Target`;
+Device-mapper `crypt` target parameters and status. Start with `dm::CryptTarget`;
 use a device-mapper backend such as `devmap-linux` to load it in a table.
 This crate does not manage devices or issue device-mapper ioctls.
 

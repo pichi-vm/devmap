@@ -5,12 +5,12 @@ use devmap_core::Target as _;
 #[test]
 fn supported_kernel_targets_have_owner_crates() {
     let actual = [
-        devmap_crypt::dm::Target::NAME,
-        devmap_snapshot::dm::Target::NAME,
-        devmap_snapshot::dm::Origin::NAME,
-        devmap_snapshot::dm::Merge::NAME,
-        devmap_verity::dm::Target::NAME,
-        devmap_zero::dm::Target::NAME,
+        devmap_crypt::dm::CryptTarget::NAME,
+        devmap_snapshot::dm::SnapshotTarget::NAME,
+        devmap_snapshot::dm::SnapshotOriginTarget::NAME,
+        devmap_snapshot::dm::SnapshotMergeTarget::NAME,
+        devmap_verity::dm::VerityTarget::NAME,
+        devmap_zero::dm::ZeroTarget::NAME,
     ]
     .into_iter()
     .collect::<std::collections::BTreeSet<_>>();

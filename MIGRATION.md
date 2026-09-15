@@ -13,21 +13,23 @@ inactive table, resuming it, and removing it are separate backend operations.
 
 ## Target owners
 
-| Kernel target | Owner |
-| --- | --- |
-| crypt | devmap-crypt |
-| snapshot, snapshot-origin, snapshot-merge | devmap-snapshot |
-| verity | devmap-verity |
-| zero | devmap-zero |
+| Kernel target | Owner | Type in `dm` |
+| --- | --- | --- |
+| crypt | devmap-crypt | `CryptTarget` |
+| snapshot | devmap-snapshot | `SnapshotTarget` |
+| snapshot-origin | devmap-snapshot | `SnapshotOriginTarget` |
+| snapshot-merge | devmap-snapshot | `SnapshotMergeTarget` |
+| verity | devmap-verity | `VerityTarget` |
+| zero | devmap-zero | `ZeroTarget` |
 
-The main type is `dm::Target`; snapshot also provides `dm::Origin` and
-`dm::Merge`. Send raw target messages with Linux's `Device::message`.
+Concrete targets live in their owner's `dm` module and implement
+`devmap_core::Target`. Send raw target messages with Linux's `Device::message`.
 Read typed runtime status with
 `device.target::<T>(sector).info()`.
 Import shared types such as `DevId` and the `Target` trait directly from
 `devmap_core`; Linux exposes its own backend handles, builders, and rows.
 `devmap_zero::Zero` supplies the userspace zero-filled source;
-`devmap_zero::dm::Target` describes the kernel target. The userspace source
+`devmap_zero::dm::ZeroTarget` describes the kernel target. The userspace source
 supports reads and seeks; the kernel target also accepts and discards writes.
 
 `Target::Info` can be `String` when arbitrary status text should be preserved.

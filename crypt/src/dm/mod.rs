@@ -7,7 +7,7 @@ use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
 use devmap_core::DevId;
-use devmap_core::{NoInfo, ParseError, Target as DmTarget};
+use devmap_core::{NoInfo, ParseError, Target};
 
 /// Where dm-crypt gets the key for a mapping.
 ///
@@ -196,13 +196,13 @@ impl fmt::Display for Integrity {
     }
 }
 
-/// Transparent encryption of `device`. Build with [`Target::new`] and set
+/// Transparent encryption of `device`. Build with [`CryptTarget::new`] and set
 /// the optional fields directly; they render in the kernel's own argument
 /// order, so a row read back from `DM_TABLE_STATUS` round-trips.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 // Mirrors dm-crypt's bare optional flags, which are independent booleans.
 #[allow(clippy::struct_excessive_bools)]
-pub struct Target {
+pub struct CryptTarget {
     /// `cipher[:keycount]-chainmode-ivmode[:ivopts]`, or a `capi:` spec.
     pub cipher: String,
     /// The encryption key.
@@ -235,12 +235,12 @@ pub struct Target {
     pub integrity_key_size: Option<u32>,
 }
 
-impl Target {
+impl CryptTarget {
     /// A mapping of `device` under `cipher` with `key`, starting at sector
     /// 0 with no IV offset and no optional features.
     #[must_use]
     pub fn new(cipher: impl Into<String>, key: Key, device: DevId) -> Self {
-        Target {
+        CryptTarget {
             cipher: cipher.into(),
             key,
             iv_offset: 0,
@@ -260,7 +260,7 @@ impl Target {
     }
 }
 
-impl DmTarget for Target {
+impl Target for CryptTarget {
     const NAME: &'static str = "crypt";
     type Table = Self;
     // dm-crypt's STATUSTYPE_INFO writes an empty string — it reports no
@@ -268,7 +268,7 @@ impl DmTarget for Target {
     type Info = NoInfo;
 }
 
-impl fmt::Display for Target {
+impl fmt::Display for CryptTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -316,7 +316,7 @@ impl fmt::Display for Target {
     }
 }
 
-impl FromStr for Target {
+impl FromStr for CryptTarget {
     type Err = ParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut fields = s.split_whitespace();
@@ -326,7 +326,7 @@ impl FromStr for Target {
         let device = fields.next().ok_or(ParseError)?.parse::<DevId>()?;
         let offset = fields.next().ok_or(ParseError)?.parse()?;
 
-        let mut crypt = Target {
+        let mut crypt = CryptTarget {
             cipher,
             key,
             iv_offset,
@@ -389,7 +389,7 @@ impl FromStr for Target {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn line<T: DmTarget + std::fmt::Display>(start: u64, length: u64, value: &T) -> String {
+    fn line<T: Target + std::fmt::Display>(start: u64, length: u64, value: &T) -> String {
         let parameters = value.to_string();
         if parameters.is_empty() {
             format!("{start} {length} {}", T::NAME)
@@ -402,8 +402,8 @@ mod tests {
         DevId::new(252, 1).unwrap()
     }
 
-    fn crypt() -> Target {
-        Target::new("aes-xts-plain64", Key::Hex(vec![0xAB; 32]), dev())
+    fn crypt() -> CryptTarget {
+        CryptTarget::new("aes-xts-plain64", Key::Hex(vec![0xAB; 32]), dev())
     }
 
     #[test]
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn crypt_renders_optional_args_in_kernel_order() {
-        let t = Target {
+        let t = CryptTarget {
             allow_discards: true,
             no_read_workqueue: true,
             sector_size: Some(4096),
@@ -442,7 +442,7 @@ mod tests {
     fn crypt_display_from_str_round_trips() {
         for t in [
             crypt(),
-            Target {
+            CryptTarget {
                 key: Key::Keyring {
                     size: 64,
                     kind: KeyType::Logon,
@@ -460,13 +460,17 @@ mod tests {
                 integrity_key_size: Some(32),
                 ..crypt()
             },
-            Target {
+            CryptTarget {
                 key: Key::Absent,
                 ..crypt()
             },
         ] {
             let rendered = t.to_string();
-            assert_eq!(rendered.parse::<Target>().as_ref(), Ok(&t), "{rendered}");
+            assert_eq!(
+                rendered.parse::<CryptTarget>().as_ref(),
+                Ok(&t),
+                "{rendered}"
+            );
         }
     }
 
@@ -474,7 +478,7 @@ mod tests {
     fn crypt_parses_the_row_the_kernel_reported() {
         // Captured from a live dm-crypt device (key masked by dmsetup).
         let reported = format!("aes-xts-plain64 {} 0 7:0 0", "0".repeat(64));
-        let table: Target = reported.parse().expect("parse");
+        let table: CryptTarget = reported.parse().expect("parse");
         assert_eq!(table.cipher, "aes-xts-plain64");
         assert_eq!(table.key.size(), 32);
         assert_eq!(table.device, DevId::new(7, 0).unwrap());
@@ -483,7 +487,7 @@ mod tests {
 
     #[test]
     fn crypt_parses_a_keyring_row() {
-        let table: Target = "aes-xts-plain64 :64:logon:cryptsetup:abc-def-d0 0 7:0 32768"
+        let table: CryptTarget = "aes-xts-plain64 :64:logon:cryptsetup:abc-def-d0 0 7:0 32768"
             .parse()
             .expect("parse");
         assert_eq!(
@@ -504,7 +508,7 @@ mod tests {
         let secret = [0xDEu8, 0xAD, 0xBE, 0xEF];
         let rendered = format!(
             "{:?}",
-            Target::new("aes-xts-plain64", Key::Hex(secret.to_vec()), dev())
+            CryptTarget::new("aes-xts-plain64", Key::Hex(secret.to_vec()), dev())
         );
         assert!(rendered.contains("redacted"), "{rendered}");
         assert!(!rendered.contains("deadbeef"), "{rendered}");
@@ -535,7 +539,7 @@ mod tests {
             // keyring size is not a number
             "aes-xts-plain64 :big:logon:desc 0 7:0 0",
         ] {
-            assert!(line.parse::<Target>().is_err(), "{line}");
+            assert!(line.parse::<CryptTarget>().is_err(), "{line}");
         }
     }
 }

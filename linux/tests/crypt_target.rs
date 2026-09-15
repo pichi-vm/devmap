@@ -15,8 +15,8 @@ use common::Owned;
 
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 
+use devmap_crypt::dm::CryptTarget;
 use devmap_crypt::dm::Key;
-use devmap_crypt::dm::Target as Crypt;
 
 #[test]
 fn crypt_maps_a_device_and_round_trips_data() {
@@ -30,9 +30,9 @@ fn crypt_maps_a_device_and_round_trips_data() {
 
     // A fixed key: this is a test vector, not a secret.
     let key = Key::Hex(vec![0x2b; 32]);
-    let target = Crypt {
+    let target = CryptTarget {
         allow_discards: true,
-        ..Crypt::new("aes-xts-plain64", key, backing_dev.id())
+        ..CryptTarget::new("aes-xts-plain64", key, backing_dev.id())
     };
     let rendered = target.to_string();
 
@@ -46,13 +46,13 @@ fn crypt_maps_a_device_and_round_trips_data() {
         .expect("DM_TABLE_LOAD — the kernel must accept our rendered row");
     dev.resume().expect("resume dm-crypt");
 
-    // The table read back must parse as `Crypt` and match what we rendered,
+    // The table read back must parse as `CryptTarget` and match what we rendered,
     // except that the kernel masks the key unless asked for it.
     let rows: Vec<_> = dev.table().expect("read table").collect();
     assert_eq!(rows.len(), 1);
     let reported = rows[0]
-        .parse::<Crypt>()
-        .expect("kernel row must parse as Crypt");
+        .parse::<CryptTarget>()
+        .expect("kernel row must parse as CryptTarget");
     assert_eq!(reported.cipher, "aes-xts-plain64");
     assert_eq!(reported.device, backing_dev.id());
     assert!(

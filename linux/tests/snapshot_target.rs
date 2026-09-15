@@ -14,13 +14,13 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use devmap_linux::{Control, Device};
-use devmap_snapshot::dm::Target as Snapshot;
+use devmap_snapshot::dm::SnapshotTarget;
 use devmap_snapshot::{
     Layer,
     traits::std::{Compact, Create, Merge, Open, SyncData},
 };
 use devmap_zero::Zero;
-use devmap_zero::dm::Target as DmZero;
+use devmap_zero::dm::ZeroTarget;
 
 /// 4 KiB chunks: the kernel minimum, so the test images stay small.
 const SIZE: usize = 4096;
@@ -151,7 +151,7 @@ fn the_kernel_serves_an_image_from_a_store_this_crate_wrote() {
         .expect("create the origin");
     origin
         .builder()
-        .add(0, sectors, DmZero)
+        .add(0, sectors, ZeroTarget)
         .expect("add dm-zero")
         .load()
         .expect("load dm-zero");
@@ -165,7 +165,7 @@ fn the_kernel_serves_an_image_from_a_store_this_crate_wrote() {
         .add(
             0,
             sectors,
-            Snapshot {
+            SnapshotTarget {
                 origin: origin.id(),
                 cow: cow_id,
                 chunk_size_sectors: CHUNK_SIZE_SECTORS,
@@ -274,7 +274,7 @@ fn the_kernel_accepts_a_store_this_crate_merged_down() {
         .add(
             0,
             sectors,
-            Snapshot {
+            SnapshotTarget {
                 origin: origin_id,
                 cow: cow_id,
                 chunk_size_sectors: CHUNK_SIZE_SECTORS,

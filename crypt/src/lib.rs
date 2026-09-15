@@ -5,14 +5,14 @@
 
 //! Parameters and status for the Linux device-mapper `crypt` target.
 //!
-//! Construct [`dm::Target`] and pass it to a device-mapper backend's table
+//! Construct [`dm::CryptTarget`] and pass it to a device-mapper backend's table
 //! builder. This crate describes the target; it performs no device-mapper ioctls.
 //!
 //! ```
-//! use devmap_crypt::dm::Target;
+//! use devmap_crypt::dm::CryptTarget;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let target: Target = "aes-xts-plain64 :64:logon:example:volume 0 7:0 0".parse()?;
+//! let target: CryptTarget = "aes-xts-plain64 :64:logon:example:volume 0 7:0 0".parse()?;
 //! assert_eq!(target.to_string(), "aes-xts-plain64 :64:logon:example:volume 0 7:0 0");
 //! # Ok(())
 //! # }

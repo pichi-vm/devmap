@@ -11,7 +11,7 @@
 mod common;
 
 use common::{LoopDevice, Owned, open_control};
-use devmap_zero::dm::Target as Zero;
+use devmap_zero::dm::ZeroTarget;
 
 #[test]
 fn deps_reports_the_devices_the_table_opens() {
@@ -54,7 +54,7 @@ fn deps_is_empty_for_a_target_that_opens_no_devices() {
     let name = format!("devmap-test-deps-zero-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -75,7 +75,7 @@ fn clear_inactive_table_discards_the_staged_table() {
 
     // Stage and activate a first table so the device has an active one.
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -87,7 +87,7 @@ fn clear_inactive_table_discards_the_staged_table() {
 
     // Stage a second, larger table but do NOT resume it.
     dev.builder()
-        .add(0, 16384, Zero)
+        .add(0, 16384, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD (staged)");
@@ -119,7 +119,7 @@ fn clear_inactive_table_is_a_no_op_with_nothing_staged() {
     let name = format!("devmap-test-clear-noop-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -141,7 +141,7 @@ fn rename_moves_the_device_to_the_new_name() {
     let new = format!("devmap-test-rename-new-{}", std::process::id());
     let dev = Owned::create(&control, &old).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -170,14 +170,14 @@ fn rename_rejects_a_name_already_in_use() {
     let second = format!("devmap-test-rename-clash-b-{}", std::process::id());
     let a = Owned::create(&control, &first).expect("create first");
     a.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add")
         .load()
         .expect("load");
     a.resume().expect("resume");
     let b = Owned::create(&control, &second).expect("create second");
     b.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add")
         .load()
         .expect("load");
@@ -202,7 +202,7 @@ fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
     let uuid = format!("devmap-test-uuid-value-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");
@@ -285,7 +285,7 @@ fn wait_event_returns_at_once_when_the_counter_already_differs() {
     let name = format!("devmap-test-wait-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add(0, 8192, Zero)
+        .add(0, 8192, ZeroTarget)
         .expect("add zero")
         .load()
         .expect("DM_TABLE_LOAD");

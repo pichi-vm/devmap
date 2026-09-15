@@ -15,14 +15,14 @@
 //!
 //! ```no_run
 //! use devmap_linux::Control;
-//! use devmap_zero::dm::Target as Zero;
+//! use devmap_zero::dm::ZeroTarget;
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let control = Control::open()?;
 //! let dev = control.create("my-zero")?;
 //!
 //! // Table ranges are always in 512-byte sectors.
-//! dev.builder().add(0, 8192, Zero)?.load()?;
+//! dev.builder().add(0, 8192, ZeroTarget)?.load()?;
 //! dev.resume()?;
 //!
 //! let status = dev.status()?;

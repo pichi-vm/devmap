@@ -27,7 +27,7 @@
 //! Reads stop at the configured length. Seeking beyond the end is allowed;
 //! seeking before byte zero is rejected. [`Zero`] does not implement writes.
 //!
-//! [`dm::Target`] describes the kernel zero target, which returns zeroes for
+//! [`dm::ZeroTarget`] describes the kernel zero target, which returns zeroes for
 //! reads and discards writes. Pass it to a device-mapper backend's table builder.
 //!
 //! # Cargo features

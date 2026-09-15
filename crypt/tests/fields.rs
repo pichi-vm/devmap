@@ -65,9 +65,9 @@ fn crypt_keys_parse_without_a_complete_target() {
 
 #[test]
 fn malformed_unicode_keys_fail_the_complete_crypt_parser_without_panicking() {
-    use devmap_crypt::dm::Target;
+    use devmap_crypt::dm::CryptTarget;
     for key in ["€0", "0€", "☃☃"] {
         let text = format!("aes-xts-plain64 {key} 0 7:0 0");
-        assert_eq!(text.parse::<Target>(), Err(ParseError));
+        assert_eq!(text.parse::<CryptTarget>(), Err(ParseError));
     }
 }
