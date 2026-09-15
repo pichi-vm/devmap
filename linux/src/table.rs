@@ -4,148 +4,37 @@
 //!
 //! [`Target`] names a kernel target type and the two types its status can
 //! be read as — [`Target::Table`] and [`Target::Info`], one per kernel
-//! status grammar. Each concrete target (in [`crate::targets`]) is a struct
+//! status grammar. Each concrete target (in the target crates) is a struct
 //! implementing it, with [`std::fmt::Display`] as the param encoder
 //! (required only where used, never as a supertrait).
 //!
 //! [`TableBuilder`] streams targets into a single `DM_TABLE_LOAD` buffer.
 //! [`Row`] is one row of a `DM_TABLE_STATUS` response, tagged by [`mode`]
 //! ([`mode::Spec`] for the table, [`mode::Info`] for runtime status); its
-//! params are reached only through the mode-checked [`Row::parse`].
+//! parameters are available through mode-checked [`Row::parse`] or as raw
+//! text through [`Row::params`].
 
 use std::fmt::{self, Write as _};
 use std::fs::File;
 use std::io;
 use std::marker::PhantomData;
+
+#[cfg(test)]
 use std::str::FromStr;
 use std::sync::Arc;
 
 use zerocopy::{FromBytes, IntoBytes};
 
-use crate::device::{DevId, check_version};
+use crate::device::check_version;
 use crate::header::DmHeader;
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TABLE_LOAD, DM_TARGET_SPEC_SIZE, dm_target_spec_raw};
 
-/// A device-mapper target type: its kernel name, and the type each of its
-/// two status grammars reads back as.
-///
-/// The trait is symmetric about the wire. Writing a table needs
-/// `Self: Display`, applied at the use site rather than as a supertrait.
-/// Reading one goes through [`Table`](Target::Table) for
-/// `STATUSTYPE_TABLE` and [`Info`](Target::Info) for `STATUSTYPE_INFO` —
-/// two associated types because the kernel answers those two requests in
-/// two different grammars.
-///
-/// Implementors must render NUL-free, whitespace-correct params — the
-/// builder rejects an interior NUL, but field-level correctness is the
-/// target's own responsibility (validate in its constructor).
-pub trait Target: Sized {
-    /// The kernel `target_type` name, e.g. `"linear"`. Must be non-empty,
-    /// shorter than 16 bytes, and free of NUL/whitespace.
-    const NAME: &'static str;
-
-    /// This target's `STATUSTYPE_TABLE` read type — what
-    /// [`Row<mode::Spec>::parse`] returns.
-    ///
-    /// Usually `Self`: the kernel echoes back the table it was given, so
-    /// the type that wrote the row can read it. It differs when the kernel
-    /// reports more than the loaded arguments — see
-    /// [`targets::integrity::Table`](crate::targets::integrity::Table),
-    /// the only such target here.
-    ///
-    /// A `Table` of `Self` does not promise a round-trip. dm-flakey
-    /// normalizes an empty feature list into an explicit
-    /// `error_reads error_writes` pair, which reads back as a different
-    /// value describing the same device. The requirement is only that the
-    /// type can hold whatever the kernel reports.
-    type Table: FromStr;
-
-    /// This target's `STATUSTYPE_INFO` runtime-status type. Targets whose
-    /// status this crate doesn't model set `type Info = RawInfo`.
-    type Info: FromStr;
-}
-
-/// Render the full `<start> <length> <type> [params]` table line for a
-/// target, the way [`TableBuilder::add`] would.
-///
-/// Shared by the target modules' tests, which assert against the exact
-/// line the kernel would be handed.
-#[cfg(test)]
-pub(crate) fn line<T: Target + fmt::Display>(start: u64, length: u64, target: &T) -> String {
-    let params = target.to_string();
-    if params.is_empty() {
-        format!("{start} {length} {}", T::NAME)
-    } else {
-        format!("{start} {length} {} {params}", T::NAME)
-    }
-}
-
-/// The uninterpreted params of a target whose typed status this crate
-/// doesn't model. Its [`FromStr`] never fails.
-///
-/// Every in-tree target now models both of its status grammars, so this
-/// exists for out-of-tree targets that would rather take the raw string
-/// than write a parser.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RawInfo(pub String);
-
-impl FromStr for RawInfo {
-    type Err = std::convert::Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(RawInfo(s.to_owned()))
-    }
-}
-
-impl fmt::Display for RawInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// The [`Target::Info`] of a target with no runtime status: the kernel
-/// emits an empty params field for it.
-///
-/// Six in-tree targets report nothing — `linear`, `unstriped`, `zero`,
-/// `error`, `flakey`, and `snapshot-origin`. Parsing rejects a non-empty
-/// row rather than ignoring it, so a kernel that grew a status for one of
-/// these surfaces as a parse failure instead of silently reporting
-/// "nothing to see".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct NoInfo;
-
-impl FromStr for NoInfo {
-    type Err = ParseError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.trim().is_empty() {
-            Ok(NoInfo)
-        } else {
-            Err(ParseError)
-        }
-    }
-}
-
-impl fmt::Display for NoInfo {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
-    }
-}
-
-/// Error returned by a target's [`FromStr`] when a status/table string
-/// doesn't match the expected grammar.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseError;
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("malformed dm target params")
-    }
-}
-impl std::error::Error for ParseError {}
+use devmap_core::{DevId, Target};
 
 /// Mode markers distinguishing the two `DM_TABLE_STATUS` payloads.
 pub mod mode {
     /// `STATUSTYPE_TABLE`: the mapping's parameters, read as
-    /// [`Target::Table`](super::Target::Table).
+    /// [`Target::Table`](devmap_core::Target::Table).
     #[derive(Debug)]
     pub enum Spec {}
     /// `STATUSTYPE_INFO`: per-target runtime status.
@@ -168,7 +57,7 @@ pub mod mode {
 /// tagged by its [`mode`]. Read it with the mode-checked [`Row::parse`],
 /// which returns the row's table type ([`mode::Spec`]) or its runtime
 /// status ([`mode::Info`]); [`Row::params`] is the untyped fallback for
-/// targets this crate doesn't model.
+/// targets for which the caller has no typed decoder.
 ///
 /// The mode tag is load-bearing: the kernel answers the two status
 /// requests in two different grammars, so a [`mode::Info`] row exposes
@@ -176,7 +65,9 @@ pub mod mode {
 /// will not compile:
 ///
 /// ```compile_fail
-/// # use devmap_linux::{Row, mode, targets::Linear};
+/// # use devmap_linux::Row;
+/// use devmap_linux::mode;
+/// use devmap_linear::dm::Target as Linear;
 /// fn wrong(row: Row<mode::Info>) {
 ///     // `parse::<Linear>()` on an Info row yields `Option<Linear::Info>`,
 ///     // and annotating it `Option<Linear>` demands the table type that
@@ -210,9 +101,9 @@ impl<M: mode::Mode> Row<M> {
     ///
     /// [`parse`](Row::parse) is the typed path and should be preferred:
     /// it checks the target type name and hands back a modelled value. This
-    /// is the fallback for a row [`crate::targets`] has no type for — a
-    /// `cache` or `crypt` mapping, or a target from a newer kernel — where
-    /// the alternative is no access at all.
+    /// is also the fallback for a target or parameter set without a typed
+    /// decoder, including targets from a newer kernel. Raw crypt table text
+    /// can contain key material and must not be logged.
     pub fn params(&self) -> &str {
         &self.params
     }
@@ -270,7 +161,7 @@ pub struct TableBuilder {
 impl TableBuilder {
     pub(crate) fn new(control: Arc<File>, dev: DevId) -> Self {
         let mut buf = Vec::with_capacity(DmHeader::SIZE + 256);
-        buf.extend_from_slice(DmHeader::by_dev(dev.to_dev_t()).as_bytes());
+        buf.extend_from_slice(DmHeader::by_dev(u64::from(dev)).as_bytes());
         Self {
             control,
             buf,
@@ -411,6 +302,18 @@ impl TableBuilder {
     }
 }
 
+impl devmap_core::TableBuilder for TableBuilder {
+    fn read_only(self) -> Self {
+        TableBuilder::read_only(self)
+    }
+    fn add<T: Target + fmt::Display>(self, start: u64, length: u64, target: T) -> io::Result<Self> {
+        TableBuilder::add(self, start, length, target)
+    }
+    fn load(self) -> io::Result<()> {
+        TableBuilder::load(self)
+    }
+}
+
 /// Parses a `DM_TABLE_STATUS` response into [`Row`]s. Not exported —
 /// `Device::table`/`Device::info` return `impl Iterator<Item = Row<_>>`.
 ///
@@ -491,81 +394,12 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
     }
 }
 
-/// Parse a `major:minor` device token.
-pub(crate) fn parse_device(s: &str) -> Option<DevId> {
-    let (maj, min) = s.split_once(':')?;
-    DevId::new(maj.parse().ok()?, min.parse().ok()?)
-}
-
-/// A cursor over a table row's whitespace-separated parameters, used by
-/// the targets' [`FromStr`] impls. Every accessor fails with
-/// [`ParseError`] rather than returning an `Option`, so a parser reads as
-/// a straight sequence of `?`s.
-pub(crate) struct Params<'a>(std::str::SplitWhitespace<'a>);
-
-impl<'a> Params<'a> {
-    pub(crate) fn new(s: &'a str) -> Self {
-        Params(s.split_whitespace())
-    }
-
-    /// The next token as a `major:minor` device.
-    pub(crate) fn device(&mut self) -> Result<DevId, ParseError> {
-        self.0.next().and_then(parse_device).ok_or(ParseError)
-    }
-
-    /// The next token parsed as `T`.
-    pub(crate) fn value<T: FromStr>(&mut self) -> Result<T, ParseError> {
-        self.0
-            .next()
-            .ok_or(ParseError)?
-            .parse()
-            .map_err(|_| ParseError)
-    }
-
-    /// The next token verbatim, for keywords and other tokens with no
-    /// useful [`FromStr`].
-    pub(crate) fn token(&mut self) -> Result<&'a str, ParseError> {
-        self.0.next().ok_or(ParseError)
-    }
-
-    /// The next token as a `used/total` pair — the shape several status
-    /// grammars use to report usage (era and thin-pool metadata, snapshot
-    /// exception store).
-    pub(crate) fn fraction<T: FromStr>(&mut self) -> Result<(T, T), ParseError> {
-        let (used, total) = self.token()?.split_once('/').ok_or(ParseError)?;
-        Ok((
-            used.parse().map_err(|_| ParseError)?,
-            total.parse().map_err(|_| ParseError)?,
-        ))
-    }
-
-    /// The next token, if any, without consuming a failure.
-    pub(crate) fn optional(&mut self) -> Option<&'a str> {
-        self.0.next()
-    }
-
-    /// How many tokens remain.
-    pub(crate) fn remaining(&self) -> usize {
-        self.0.clone().count()
-    }
-
-    /// Assert the row is fully consumed. A trailing token means the line
-    /// carries something this target cannot represent, which is a parse
-    /// failure rather than something to drop silently.
-    pub(crate) fn end(mut self) -> Result<(), ParseError> {
-        if self.0.next().is_some() {
-            Err(ParseError)
-        } else {
-            Ok(())
-        }
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::cast_possible_truncation)] // test fixtures: sizes are tiny, never near u32::MAX
 mod tests {
     use super::*;
-    use crate::targets::{self, Linear, Verity};
+    use devmap_core::ParseError;
+    use devmap_linear::dm::Target as Linear;
 
     /// An `Arc<File>` for a `TableBuilder` that never issues a real ioctl:
     /// the rendering/validation paths run entirely before `load`.
@@ -582,7 +416,7 @@ mod tests {
     #[test]
     fn buf_for_zero_target_has_correct_layout() {
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
-            .add(0, 8, targets::Zero)
+            .add(0, 8, devmap_zero::dm::Target)
             .expect("add zero");
         // header + (40 spec + 0 params + 1 NUL = 41 -> padded to 48).
         assert_eq!(b.buf.len(), DmHeader::SIZE + 48);
@@ -593,7 +427,7 @@ mod tests {
         use zerocopy::FromBytes as _;
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
             .read_only()
-            .add(0, 8, targets::Zero)
+            .add(0, 8, devmap_zero::dm::Target)
             .expect("add zero");
         let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
         let header: &DmHeader = header;
@@ -608,7 +442,7 @@ mod tests {
     fn default_builder_does_not_set_readonly() {
         use zerocopy::FromBytes as _;
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
-            .add(0, 8, targets::Zero)
+            .add(0, 8, devmap_zero::dm::Target)
             .expect("add zero");
         let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
         let header: &DmHeader = header;
@@ -644,14 +478,14 @@ mod tests {
 
     #[test]
     fn buf_for_verity_target_has_correct_layout_and_params() {
-        let t = Verity {
-            data_dev: DevId::new(253, 3).unwrap(),
-            hash_dev: DevId::new(253, 4).unwrap(),
-            num_data_blocks: 7,
-            algorithm: "sha256".to_owned(),
-            digest: vec![0xCD; 32],
-            salt: vec![0x55; 32],
-        };
+        let t = devmap_verity::dm::Builder::new(std::num::NonZeroU64::new(7).unwrap())
+            .salt(&[0x55; 32])
+            .build(
+                DevId::new(253, 3).unwrap(),
+                DevId::new(253, 4).unwrap(),
+                &[0xCD; 32],
+            )
+            .unwrap();
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
             .add(0, 56, t)
             .expect("add verity");
@@ -676,7 +510,7 @@ mod tests {
         // spec's `next` can't distinguish "relative to current" from
         // "relative to first".
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .add(0, 8, targets::Zero)
+            .add(0, 8, devmap_zero::dm::Target)
             .and_then(|b| {
                 b.add(
                     8,
@@ -687,7 +521,7 @@ mod tests {
                     },
                 )
             })
-            .and_then(|b| b.add(1032, 8, targets::Error))
+            .and_then(|b| b.add(1032, 8, devmap_error::dm::Target))
             .expect("build three-target table");
         let bytes = &b.buf;
 
@@ -779,9 +613,9 @@ mod tests {
         );
         // ...but a type-name mismatch yields None, not a misparse. (Only
         // FromStr targets can be `parse`d on a Spec row, so this uses
-        // snapshot::Origin — a different type name that would parse "252:5 5"
+        // zero — a different type name that would parse "252:5 5"
         // as garbage if the type-name guard weren't checked first.)
-        assert_eq!(row.parse::<targets::snapshot::Origin>(), None);
+        assert_eq!(row.parse::<devmap_zero::dm::Target>(), None);
     }
 
     #[test]
@@ -840,7 +674,10 @@ mod tests {
         let rows: Vec<Row<mode::Spec>> =
             TableStatusIter::new(bytes, DmHeader::SIZE, count).collect();
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].parse::<targets::Zero>(), Some(targets::Zero));
+        assert_eq!(
+            rows[0].parse::<devmap_zero::dm::Target>(),
+            Some(devmap_zero::dm::Target)
+        );
         assert_eq!(
             rows[1].parse::<Linear>(),
             Some(Linear {
@@ -848,7 +685,10 @@ mod tests {
                 offset_sectors: 5
             })
         );
-        assert_eq!(rows[2].parse::<targets::Error>(), Some(targets::Error));
+        assert_eq!(
+            rows[2].parse::<devmap_error::dm::Target>(),
+            Some(devmap_error::dm::Target)
+        );
     }
 
     #[test]
@@ -884,7 +724,9 @@ mod tests {
             .expect("one row");
         assert_eq!(row.type_name(), "raid");
         // Matching type: the row decodes into raid's typed Info.
-        let info = row.parse::<targets::Raid>().expect("raid info parses");
+        let info = row
+            .parse::<devmap_raid::dm::Target>()
+            .expect("raid info parses");
         assert_eq!(info.devices.len(), 2);
         assert_eq!(info.to_string(), params);
         // Non-matching type: None, even though linear's Info would happily
@@ -929,7 +771,7 @@ mod tests {
     impl Target for NulTarget {
         const NAME: &'static str = "nul-target";
         type Table = Unreadable;
-        type Info = RawInfo;
+        type Info = String;
     }
     impl fmt::Display for NulTarget {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -950,7 +792,7 @@ mod tests {
     impl Target for BadNameTarget {
         const NAME: &'static str = "bad name";
         type Table = Unreadable;
-        type Info = RawInfo;
+        type Info = String;
     }
     impl fmt::Display for BadNameTarget {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -976,7 +818,7 @@ mod tests {
     impl Target for CustomTarget {
         const NAME: &'static str = "custom-target";
         type Table = Self;
-        type Info = RawInfo;
+        type Info = String;
     }
     impl fmt::Display for CustomTarget {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1026,7 +868,7 @@ mod tests {
     impl Target for EmptyName {
         const NAME: &'static str = "";
         type Table = Unreadable;
-        type Info = RawInfo;
+        type Info = String;
     }
     impl fmt::Display for EmptyName {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1038,7 +880,7 @@ mod tests {
     impl Target for SixteenByteName {
         const NAME: &'static str = "0123456789abcdef";
         type Table = Unreadable;
-        type Info = RawInfo;
+        type Info = String;
     }
     impl fmt::Display for SixteenByteName {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1050,7 +892,7 @@ mod tests {
     impl Target for FifteenByteName {
         const NAME: &'static str = "0123456789abcde";
         type Table = Unreadable;
-        type Info = RawInfo;
+        type Info = String;
     }
     impl fmt::Display for FifteenByteName {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -1,0 +1,19 @@
+[package]
+name = "devmap-thin"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+readme = "README.md"
+description = "Device-mapper thin target parameters, status and commands."
+repository = "https://github.com/pichi-vm/devmap"
+
+[dependencies]
+devmap-core = { version = "0.1.0", path = "../core" }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

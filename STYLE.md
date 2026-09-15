@@ -177,6 +177,13 @@ Use the standard I/O traits as the public protocol.
   writer buffering; a format that needs stable-storage ordering should expose
   a narrowly named capability such as `SyncData` and implement it for concrete
   storage types.
+- Use a narrow size capability when an adapter needs the addressable extent of
+  a generic stream. Keep synchronous and asynchronous method names identical,
+  and ship implementations for the concrete storage types the crate supports.
+- Treat logical block size as synchronous storage geometry, including for
+  asynchronous byte streams. An adapter that raises the reported logical block
+  size must validate at construction that it is a multiple of the underlying
+  value.
 - Do not use `expect`, `unwrap`, or runtime assertions for values derived from
   input or I/O. Return an error.
 
@@ -229,26 +236,73 @@ Use the standard I/O traits as the public protocol.
 
 ## Documentation
 
-Write documentation for someone using the crate for the first time.
+Write documentation for a caller encountering the crate for the first time.
+Organize it by the decisions and tasks that caller faces, not by the order in
+which the implementation was developed.
 
-- Use plain, direct English. Keep it humble and brief.
-- Explain what the type or operation does, the invariants callers must honor,
-  and the errors they can act on.
-- Do not describe development history, discarded designs, or why the current
-  code replaced an older implementation.
-- Do not spend prose listing trait implementations already visible in generated
-  API documentation.
-- Start crate documentation with a short introduction, then show the main
-  workflows in the order callers need them.
-- For I/O crates, show reading and writing, including both synchronous and
-  asynchronous forms when supported. Emphasize that the workflow and types are
-  the same and only the I/O traits differ.
-- Comment example code by step. Each comment should explain an action the
-  caller needs to understand.
-- Keep examples minimal and executable. Use defaults rather than spelling them
-  out, and test examples as doctests.
-- Document format-sensitive behavior such as padding, alignment, stream
-  position, and whether input storage must include a padded final block.
+Use this method for a new crate or a substantial documentation revision:
+
+1. Inventory the public API, feature gates, required input capabilities, units,
+   failure modes, and state changes.
+2. Identify the smallest complete workflows. For an I/O crate these normally
+   include construction, reading or writing, completion, reopening, and any
+   destructive operation.
+3. Assign each fact one primary home: crate documentation for workflow and
+   cross-cutting contracts, item documentation for local contracts, and the
+   README for package discovery. Link instead of repeating secondary detail.
+4. Write and run the examples, then check every public item independently in
+   generated rustdoc. A reader arriving on an item page must understand its
+   purpose, inputs, effects, errors, and feature requirements without knowing
+   the source layout.
+5. Remove any sentence that describes implementation history, source-code
+   organization, an abandoned alternative, or a detail with no caller-visible
+   consequence.
+
+Crate documentation should appear in this order:
+
+- one short paragraph defining the crate's scope and explicit non-goals;
+- the primary synchronous workflow as a minimal executable example;
+- the asynchronous form when it differs by more than adding `.await` and
+  importing asynchronous extension traits;
+- operational contracts that span several items, such as storage sizing,
+  alignment, flushing, durability, cancellation, and recovery;
+- secondary workflows;
+- a concise Cargo feature list.
+
+Public item documentation should contain only the applicable parts below, in
+this order:
+
+- a one-sentence purpose;
+- caller-visible semantics and invariants;
+- units and interpretation of arguments or return values;
+- side effects, completion, cancellation, and retry behavior;
+- an `# Errors` section describing actionable error categories and whether an
+  error can leave durable or in-memory state changed;
+- `# Panics` and `# Safety` sections when applicable;
+- a short example only when the crate-level workflow does not make the item
+  obvious.
+
+README files are landing pages, not alternate manuals. State what the package
+does, show or link the primary entry point, identify important non-goals, list
+optional features, and direct readers to rustdoc. Do not duplicate detailed
+contracts from the API documentation.
+
+For all documentation:
+
+- Use plain, direct English and concrete nouns. Keep paragraphs focused on one
+  decision or contract.
+- State requirements before consequences and distinguish bytes, sectors,
+  blocks, and entries explicitly.
+- Describe `flush`, persistence, cancellation, and partial failure according to
+  their observable guarantees; do not imply stronger guarantees.
+- Mark every feature-gated public item with docs.rs `doc(cfg(...))` and name
+  each feature once in the crate documentation and README.
+- Do not spend prose listing trait implementations already visible in rustdoc.
+- Do not expose internal layout or algorithms unless callers must reproduce the
+  format or the detail changes correct use of the API.
+- Comment example code only where the reason for an action is not evident.
+- Keep examples minimal and executable. Use defaults when they demonstrate the
+  intended path, and test examples as doctests.
 - Use intra-doc links for related types and operations.
 
 ## Tests and release checks

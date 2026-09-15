@@ -18,7 +18,7 @@
 //! An array block does not — its header is `csum, max_entries, nr_entries,
 //! value_size, blocknr`, so the address lands at offset 16. Reading it from
 //! the usual offset 8 would silently compare against `max_entries`, so this
-//! module validates through [`read_validated_at`](crate::block::read_validated_at).
+//! module validates through [`read_validated_at`].
 
 use crate::block::{BLOCK_SIZE, Blocks, le32, read_validated_at};
 use crate::btree::ValueSize;

@@ -3,13 +3,20 @@ name = "devmap-luks"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+readme = "README.md"
 description = "Reader and writer for the LUKS1 and LUKS2 on-disk formats (a pure-Rust cryptsetup)."
 repository = "https://github.com/pichi-vm/devmap"
 homepage = "https://github.com/pichi-vm/devmap"
 keywords = ["luks", "luks2", "cryptsetup", "dm-crypt", "encryption"]
 categories = ["filesystem", "cryptography"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
+devmap-core = { version = "0.1.0", path = "../core" }
+devmap-crypt = { version = "0.1.0", path = "../crypt", optional = true }
 # LUKS2 metadata is JSON; large integers are encoded as JSON strings.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -127,13 +127,33 @@ impl Default for FormatOptions {
     }
 }
 
-/// What [`format`] produced.
+/// What [`format()`] produced.
 #[derive(Debug)]
 pub struct Formatted {
     /// The generated master key. Zeroizes on drop.
     pub master_key: Secret,
     /// Byte offset of the encrypted payload.
     pub payload_offset: u64,
+}
+
+impl Formatted {
+    /// Returns the payload offset in 512-byte sectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the offset is not sector aligned.
+    pub fn payload_offset_sectors(&self) -> Result<u64, Error> {
+        crate::payload_offset_sectors(self.payload_offset)
+    }
+
+    /// Returns the number of complete 512-byte payload sectors in the device.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no complete sector fits beyond the header.
+    pub fn payload_sectors(&self, total_bytes: u64) -> Result<u64, Error> {
+        crate::payload_sectors(total_bytes, self.payload_offset)
+    }
 }
 
 /// Write a fresh LUKS volume to `out`, unlockable with `passphrase`.

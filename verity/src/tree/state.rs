@@ -5,10 +5,10 @@ use std::io;
 use digest::DynDigest;
 
 use super::{Drain, Failure, FlushMode};
-use crate::{HashType, Verified};
+use crate::superblock::Header;
 
 pub(super) struct State {
-    superblock: Verified,
+    superblock: Header,
     hasher: Box<dyn DynDigest + Send + Sync>,
     digest: Box<[u8]>,
     maximum_size: u64,
@@ -23,76 +23,31 @@ pub(super) struct State {
 }
 
 impl State {
-    pub(super) fn new(
-        superblock: Verified,
-        hasher: Box<dyn DynDigest + Send + Sync>,
-    ) -> io::Result<Self> {
+    pub(super) fn new(superblock: Header, hasher: Box<dyn DynDigest + Send + Sync>) -> Self {
         let digest_size = hasher.output_size();
-        if digest_size == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "hash algorithm has an empty digest",
-            ));
-        }
-
-        let hash_block_size = superblock.hash_block_size();
-        let digest_capacity = hash_block_size as usize / digest_size;
-        if digest_capacity < 2 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "verity hash block cannot hold two digests",
-            ));
-        }
-        let hashes_per_block = 1usize << digest_capacity.ilog2();
-        let slot_size = match superblock.hash_type() {
-            HashType::ChromeOs => digest_size,
-            HashType::Normal => digest_size.checked_next_power_of_two().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "hash digest size overflows")
-            })?,
-        };
-
-        let mut level_blocks = Vec::new();
-        let mut blocks = superblock.data_blocks().get();
-        while blocks > 1 {
-            blocks = blocks.div_ceil(hashes_per_block as u64);
-            level_blocks.push(blocks);
-        }
-
-        let mut level_offsets = vec![0; level_blocks.len()];
-        let mut tree_size = 0u64;
-        for index in (0..level_blocks.len()).rev() {
-            level_offsets[index] = tree_size;
-            let level_size = level_blocks[index]
-                .checked_mul(u64::from(hash_block_size))
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "verity layout overflows")
-                })?;
-            tree_size = tree_size.checked_add(level_size).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "verity layout overflows")
-            })?;
-        }
-
-        let data_block_size = superblock.data_block_size();
-        let maximum_size = superblock.data_blocks().get() * u64::from(data_block_size);
-        let levels = level_offsets
-            .into_iter()
-            .map(|offset| HashLevel::new(offset, hash_block_size as usize))
+        let layout = &superblock.layout;
+        let data_block_size = superblock.data_block_size().get();
+        let levels = layout
+            .level_offsets
+            .iter()
+            .copied()
+            .map(|offset| HashLevel::new(offset, superblock.hash_block_size().get() as usize))
             .collect();
 
-        Ok(Self {
-            superblock,
+        Self {
             hasher,
             digest: vec![0; digest_size].into_boxed_slice(),
-            maximum_size,
+            maximum_size: layout.data_size,
             written: 0,
             data_block: vec![0; data_block_size as usize].into_boxed_slice(),
             data_used: 0,
             levels,
-            slot_size,
-            hashes_per_block,
-            tree_size,
+            slot_size: layout.slot_size,
+            hashes_per_block: layout.hashes_per_block,
+            tree_size: layout.tree_size,
             root: None,
-        })
+            superblock,
+        }
     }
 
     pub(super) fn accept(&mut self, input: &[u8]) -> Result<usize, Failure> {
@@ -183,12 +138,11 @@ impl State {
             return Err(io::Error::other("invalid pending hash-tree block"));
         }
 
-        Self::hash(
+        self.superblock.hash_type().digest(
             self.hasher.as_mut(),
-            &mut self.digest,
-            self.superblock.hash_type(),
             self.superblock.salt(),
             &pending.bytes,
+            &mut self.digest,
         )?;
 
         let next_offset = pending
@@ -220,12 +174,11 @@ impl State {
     }
 
     fn process_data_block(&mut self) -> io::Result<()> {
-        Self::hash(
+        self.superblock.hash_type().digest(
             self.hasher.as_mut(),
-            &mut self.digest,
-            self.superblock.hash_type(),
             self.superblock.salt(),
             &self.data_block,
+            &mut self.digest,
         )?;
         if self.levels.is_empty() {
             self.root = Some(std::mem::take(&mut self.digest));
@@ -238,12 +191,11 @@ impl State {
     }
 
     fn process_block(&mut self, block: &[u8]) -> io::Result<()> {
-        Self::hash(
+        self.superblock.hash_type().digest(
             self.hasher.as_mut(),
-            &mut self.digest,
-            self.superblock.hash_type(),
             self.superblock.salt(),
             block,
+            &mut self.digest,
         )?;
         if self.levels.is_empty() {
             self.root = Some(std::mem::take(&mut self.digest));
@@ -251,28 +203,6 @@ impl State {
             self.levels[0].push(&self.digest, self.slot_size)?;
         }
         Ok(())
-    }
-
-    fn hash(
-        hasher: &mut dyn DynDigest,
-        digest: &mut [u8],
-        hash_type: HashType,
-        salt: &[u8],
-        block: &[u8],
-    ) -> io::Result<()> {
-        match hash_type {
-            HashType::ChromeOs => {
-                hasher.update(block);
-                hasher.update(salt);
-            }
-            HashType::Normal => {
-                hasher.update(salt);
-                hasher.update(block);
-            }
-        }
-        hasher.finalize_into_reset(digest).map_err(|_| {
-            io::Error::other("hash output buffer does not match the algorithm's digest size")
-        })
     }
 }
 

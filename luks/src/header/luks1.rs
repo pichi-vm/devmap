@@ -3,7 +3,7 @@
 //! The LUKS1 header: one 592-byte big-endian struct with eight inline
 //! keyslots, followed by the keyslot areas and then the payload.
 //!
-//! Field offsets are fixed by the format and pinned by [`OFFSETS`]-style
+//! Field offsets are fixed by the format and pinned by fixed
 //! constants below; they were confirmed byte-for-byte against a header
 //! `cryptsetup luksFormat --type luks1` produced.
 

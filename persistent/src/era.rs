@@ -3,9 +3,9 @@
 //! dm-era metadata: which era each block was last written in.
 //!
 //! dm-era answers "what changed since era N", for incremental backup. It
-//! keeps two things: an [`array`](crate::array) mapping every origin block
+//! keeps two things: an [`mod@array`] mapping every origin block
 //! to the era it was last written in, and a btree of per-era
-//! [`bitset`](crate::bitset)s recording which blocks were touched during
+//! [`bitset`]s recording which blocks were touched during
 //! each era.
 //!
 //! The current era's writeset is held in the superblock rather than the

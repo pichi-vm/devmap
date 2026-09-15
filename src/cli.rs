@@ -4,6 +4,7 @@
 //! multi-call shim in [`crate::multicall`] maps legacy tool names
 //! (`dmsetup`, …) onto these objects.
 
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -152,7 +153,7 @@ pub(crate) enum VerityCmd {
     Open(VerityOpen),
     /// Deactivate a verity device.
     Close(VerityClose),
-    /// Recompute the root hash from the data device and compare it.
+    /// Authenticate the complete data device against the stored tree and root.
     Verify(VerityVerify),
     /// Print a hash device's superblock fields.
     Dump(VerityDump),
@@ -193,6 +194,9 @@ pub(crate) struct VerityOpen {
     pub(crate) hash_dev: PathBuf,
     /// Expected root hash (hex).
     pub(crate) root_hash: String,
+    /// Byte offset of the superblock on the hash device.
+    #[arg(long, default_value_t = 0)]
+    pub(crate) hash_offset: u64,
 }
 
 #[derive(clap::Args, Debug)]
@@ -209,12 +213,18 @@ pub(crate) struct VerityVerify {
     pub(crate) hash_dev: PathBuf,
     /// Expected root hash (hex).
     pub(crate) root_hash: String,
+    /// Byte offset of the superblock on the hash device.
+    #[arg(long, default_value_t = 0)]
+    pub(crate) hash_offset: u64,
 }
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct VerityDump {
     /// Hash device.
     pub(crate) hash_dev: PathBuf,
+    /// Byte offset of the superblock on the hash device.
+    #[arg(long, default_value_t = 0)]
+    pub(crate) hash_offset: u64,
 }
 
 #[derive(clap::Args, Debug)]
@@ -440,8 +450,8 @@ pub(crate) struct SnapshotConvert {
     /// COW output — a file (truncated) or a block device (written in place).
     pub(crate) cow: PathBuf,
     /// COW chunk size in 512-byte sectors (power of two, >= 8).
-    #[arg(long, default_value_t = devmap_snapshot::ChunkSize::DEFAULT.sectors())]
-    pub(crate) chunk_size: u32,
+    #[arg(long, default_value = "32")]
+    pub(crate) chunk_size: NonZeroU32,
 }
 
 /// The thin-provisioning-tools-equivalent verbs.

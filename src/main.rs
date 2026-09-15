@@ -2,8 +2,8 @@
 
 //! `devmap` — a device-mapper multitool.
 //!
-//! Canonical form is `devmap <object> <verb>` (`dm`, and the setup
-//! personas as they land). Symlinking a legacy tool name to this binary
+//! Canonical form is `devmap <object> <verb>`, with objects such as `dm`,
+//! `verity`, `crypt`, and `snapshot`. Symlinking a legacy tool name to this binary
 //! makes it behave like that tool: `ln -s devmap dmsetup` then runs
 //! `dmsetup create …` as `devmap dm create …` (see [`multicall`]).
 
@@ -16,7 +16,6 @@ mod cmd;
 mod control;
 mod hex;
 mod multicall;
-mod size;
 mod table_input;
 mod urandom;
 mod uuid;

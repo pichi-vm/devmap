@@ -5,20 +5,15 @@
 //! dm-zoned target over it via [`devmap_linux`].
 
 use std::fs::File;
-use std::os::unix::fs::FileExt as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use devmap_linux::DevId;
-use devmap_linux::targets::Zoned;
-use devmap_zoned::{BLOCK_SIZE, FormatOptions, Superblock};
+use devmap_core::DevId;
+use devmap_zoned::dm::Target as Zoned;
+use devmap_zoned::{FormatOptions, Superblock};
 
 use crate::cli::{ZonedCheck, ZonedCmd, ZonedFormat, ZonedStart, ZonedStatus, ZonedStop};
-use crate::size::SECTOR;
 use crate::{control, urandom, uuid};
-
-/// Sectors per [`BLOCK_SIZE`] metadata block.
-const SECTORS_PER_BLOCK: u64 = BLOCK_SIZE as u64 / SECTOR;
 
 pub(crate) fn run(cmd: ZonedCmd) -> Result<()> {
     match cmd {
@@ -32,29 +27,22 @@ pub(crate) fn run(cmd: ZonedCmd) -> Result<()> {
 
 /// Read and validate the primary superblock (block 0) of a zoned device.
 fn read_superblock(dev: &Path) -> Result<Superblock> {
-    let file = File::open(dev).with_context(|| format!("open {}", dev.display()))?;
-    let mut block = [0u8; BLOCK_SIZE];
-    file.read_exact_at(&mut block, 0)
-        .with_context(|| format!("read superblock from {}", dev.display()))?;
-    Superblock::from_block(&block).context("parse dm-zoned superblock")
+    Superblock::open(File::open(dev).with_context(|| format!("open {}", dev.display()))?)
+        .context("read dm-zoned superblock")
 }
 
 fn format(a: &ZonedFormat) -> Result<()> {
-    let mut label = [0u8; 32];
-    if let Some(text) = &a.label {
-        let bytes = text.as_bytes();
-        let n = bytes.len().min(label.len());
-        label[..n].copy_from_slice(&bytes[..n]);
-    }
     let dmz_uuid = pick_uuid(a.uuid.as_deref(), "--uuid")?;
     let dev_uuid = pick_uuid(a.dev_uuid.as_deref(), "--dev-uuid")?;
 
     let options = FormatOptions {
-        label,
         dmz_uuid,
         dev_uuid,
         reserved_seq: a.seq,
-    };
+        ..FormatOptions::default()
+    }
+    .label(a.label.as_deref().unwrap_or(""))
+    .context("set volume label")?;
     let layout = devmap_zoned::format(&a.device, &options)
         .with_context(|| format!("format {}", a.device.display()))?;
 
@@ -87,7 +75,9 @@ fn start(a: &ZonedStart) -> Result<()> {
     let sb = read_superblock(&a.device)?;
     let geometry = devmap_zoned::report_zones(&a.device)
         .with_context(|| format!("report zones of {}", a.device.display()))?;
-    let length = u64::from(sb.nr_chunks) * u64::from(geometry.zone_size_blocks) * SECTORS_PER_BLOCK;
+    let length = sb
+        .logical_sectors(geometry)
+        .context("read zoned capacity")?;
 
     let device = DevId::from_path(&a.device).context("resolve zoned device")?;
     let name = a.name.clone().unwrap_or_else(|| default_name(&a.device));

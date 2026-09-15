@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
 readme = "README.md"
-description = "Reader, writer, and merger for the dm-snapshot persistent COW on-disk format."
+description = "A seekable copy-on-write layer using the dm-snapshot persistent COW format."
 repository = "https://github.com/pichi-vm/devmap"
 homepage = "https://github.com/pichi-vm/devmap"
 keywords = ["dm-snapshot", "snapshot", "device-mapper", "copy-on-write", "cow"]
@@ -16,22 +16,16 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+devmap-core = { version = "0.1.0", path = "../core" }
 tokio = { version = "1", features = ["fs", "io-util"], optional = true }
 
-# The sparse-aware converter uses SEEK_DATA / SEEK_HOLE to skip holes in a
-# raw image; the rest of the crate (the format itself) stays portable.
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
-rustix = { version = "1", features = ["fs"] }
-
 [dev-dependencies]
+devmap-zero = { version = "0.1.0", path = "../zero", features = ["tokio"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt"] }
 tempfile = "3"
-# The end-to-end test activates dm-snapshot over our COW to prove the
-# kernel accepts the format.
-devmap-linux = { path = "../linux" }
 
 [features]
-tokio = ["dep:tokio"]
+tokio = ["dep:tokio", "devmap-core/tokio"]
 
 [[test]]
 name = "async"

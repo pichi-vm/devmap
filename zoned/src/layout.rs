@@ -39,6 +39,25 @@ pub struct FormatOptions {
     pub reserved_seq: Option<u32>,
 }
 
+impl FormatOptions {
+    /// Sets the volume label, rejecting values larger than its 32-byte field.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` if the UTF-8 bytes exceed the field capacity.
+    pub fn label(mut self, text: &str) -> std::io::Result<Self> {
+        if text.len() > self.label.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "zoned label exceeds 32 bytes",
+            ));
+        }
+        self.label.fill(0);
+        self.label[..text.len()].copy_from_slice(text.as_bytes());
+        Ok(self)
+    }
+}
+
 /// A geometry that can't host a dm-zoned volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

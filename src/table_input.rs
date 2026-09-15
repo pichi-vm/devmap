@@ -40,16 +40,21 @@ pub(crate) fn read_table(path: Option<&Path>) -> Result<Vec<Row>> {
 pub(crate) fn parse_table(text: &str) -> Result<Vec<Row>> {
     let mut rows = Vec::new();
     for (i, raw) in text.lines().enumerate() {
-        let line = raw.trim();
+        let line = raw.trim_start();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let lineno = i + 1;
-        let mut words = line.split_whitespace();
+        let mut rest = line;
         let mut next = |what: &str| -> Result<&str> {
-            words
-                .next()
-                .with_context(|| format!("table line {lineno}: missing {what}"))
+            rest = rest.trim_start();
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let (word, tail) = rest.split_at(end);
+            rest = tail;
+            if word.is_empty() {
+                anyhow::bail!("table line {lineno}: missing {what}");
+            }
+            Ok(word)
         };
         let start = next("start sector")?;
         let length = next("length")?;
@@ -60,9 +65,9 @@ pub(crate) fn parse_table(text: &str) -> Result<Vec<Row>> {
         let length = length
             .parse()
             .with_context(|| format!("table line {lineno}: bad length {length:?}"))?;
-        // The remaining tokens are the target params; re-join on single
-        // spaces (the kernel splits on whitespace, so this is faithful).
-        let params = words.collect::<Vec<_>>().join(" ");
+        // Target arguments may contain escaped whitespace. They belong to
+        // the target codec and must not be retokenized by the compatibility parser.
+        let params = rest.trim_start().to_owned();
         rows.push(Row {
             start,
             length,
@@ -108,9 +113,9 @@ mod tests {
     }
 
     #[test]
-    fn collapses_runs_of_whitespace_in_params() {
+    fn preserves_target_parameter_spacing() {
         let rows = parse_table("0 8  linear   7:0    0\n").unwrap();
-        assert_eq!(rows[0].params, "7:0 0");
+        assert_eq!(rows[0].params, "7:0    0");
     }
 
     #[test]
@@ -118,5 +123,15 @@ mod tests {
         assert!(parse_table("0 2048\n").is_err()); // missing target
         assert!(parse_table("x 2048 zero\n").is_err()); // bad start
         assert!(parse_table("# only comments\n").is_err()); // empty table
+    }
+}
+
+#[cfg(test)]
+mod escaped_params {
+    #[test]
+    fn preserves_escaped_tabs_and_trailing_spaces() {
+        let params = "1 root_hash_sig_key_desc key\\\twith\\ ";
+        let rows = super::parse_table(&format!("0 8 verity {params}\n")).unwrap();
+        assert_eq!(rows[0].params, params);
     }
 }

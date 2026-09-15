@@ -185,7 +185,7 @@ pub fn devices<B: Blocks + ?Sized>(
 ///
 /// # Panics
 ///
-/// Never: both trees are walked expecting [`MAPPING_SIZE`], so every value
+/// Never: both trees are walked expecting `MAPPING_SIZE`, so every value
 /// is a whole `u64`, and the timestamp is masked to 24 bits before its
 /// conversion.
 pub fn mappings<B: Blocks + ?Sized>(

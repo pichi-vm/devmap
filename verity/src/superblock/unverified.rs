@@ -1,113 +1,109 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use zerocopy::byteorder::little_endian::{U16, U32, U64};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+use super::{HashType, Header};
 
-use super::{HashType, Verified};
-
-/// The 512-byte on-disk form of a dm-verity superblock.
-///
-/// This value may contain invalid fields. Convert it to [`crate::Verified`]
-/// before using it.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, FromBytes, IntoBytes, KnownLayout, Immutable)]
-pub struct Unverified {
-    pub(super) signature: [u8; 8],
-    pub(super) version: U32,
-    pub(super) hash_type: U32,
-    pub(super) uuid: [u8; 16],
-    pub(super) algorithm: [u8; 32],
-    pub(super) data_block_size: U32,
-    pub(super) hash_block_size: U32,
-    pub(super) data_blocks: U64,
-    pub(super) salt_size: U16,
-    pub(super) salt_padding: [u8; 6],
-    pub(super) salt: [u8; 256],
-    pub(super) padding: [u8; 168],
-}
+/// The fixed-size record, excluding padding to the hash-block boundary.
+#[derive(Debug)]
+pub(crate) struct Unverified([u8; Self::LEN]);
 
 impl Unverified {
     pub(super) const SIGNATURE: [u8; 8] = *b"verity\0\0";
+    pub(super) const VERSION: usize = Self::SIGNATURE.len();
+    pub(super) const HASH_TYPE: usize = Self::VERSION + 4;
+    pub(super) const UUID: usize = Self::HASH_TYPE + 4;
+    pub(super) const ALGORITHM: usize = Self::UUID + 16;
+    pub(super) const DATA_BLOCK_SIZE: usize = Self::ALGORITHM + 32;
+    pub(super) const HASH_BLOCK_SIZE: usize = Self::DATA_BLOCK_SIZE + 4;
+    pub(super) const DATA_BLOCKS: usize = Self::HASH_BLOCK_SIZE + 4;
+    pub(super) const SALT_SIZE: usize = Self::DATA_BLOCKS + 8;
+    pub(super) const SALT_PADDING: usize = Self::SALT_SIZE + 2;
+    pub(super) const SALT: usize = Self::SALT_PADDING + 6;
+    pub(super) const PADDING: usize = Self::SALT + 256;
+    const LEN: usize = Self::PADDING + 168;
+
+    pub(super) fn field<const N: usize>(&self, offset: usize) -> [u8; N] {
+        let mut field = [0; N];
+        // All callers select fixed fields within this 512-byte record.
+        field.copy_from_slice(&self.0[offset..offset + N]);
+        field
+    }
 }
 
 impl Default for Unverified {
     fn default() -> Self {
-        Self {
-            signature: [0; 8],
-            version: U32::new(0),
-            hash_type: U32::new(0),
-            uuid: [0; 16],
-            algorithm: [0; 32],
-            data_block_size: U32::new(0),
-            hash_block_size: U32::new(0),
-            data_blocks: U64::new(0),
-            salt_size: U16::new(0),
-            salt_padding: [0; 6],
-            salt: [0; 256],
-            padding: [0; 168],
-        }
+        Self([0; Self::LEN])
     }
 }
 
 impl AsRef<[u8]> for Unverified {
     fn as_ref(&self) -> &[u8] {
-        IntoBytes::as_bytes(self)
+        &self.0
     }
 }
 
 impl AsMut<[u8]> for Unverified {
     fn as_mut(&mut self) -> &mut [u8] {
-        IntoBytes::as_mut_bytes(self)
+        &mut self.0
     }
 }
 
-impl From<Verified> for Unverified {
-    fn from(superblock: Verified) -> Self {
-        Self::from(&superblock)
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+impl From<&Header> for Unverified {
+    fn from(header: &Header) -> Self {
+        let mut encoded = Self::default();
+        let bytes = &mut encoded.0;
+        bytes[..Self::VERSION].copy_from_slice(&Self::SIGNATURE);
+        bytes[Self::VERSION..Self::HASH_TYPE].copy_from_slice(&1u32.to_le_bytes());
+        let hash_type: u32 = match header.hash_type() {
+            HashType::ChromeOs => 0,
+            HashType::Normal => 1,
+        };
+        bytes[Self::HASH_TYPE..Self::UUID].copy_from_slice(&hash_type.to_le_bytes());
+        bytes[Self::UUID..Self::ALGORITHM].copy_from_slice(&header.uuid());
+        let name = header.algorithm.as_ref().as_bytes();
+        bytes[Self::ALGORITHM..Self::ALGORITHM + name.len()].copy_from_slice(name);
+        bytes[Self::DATA_BLOCK_SIZE..Self::HASH_BLOCK_SIZE]
+            .copy_from_slice(&header.data_block_size().get().to_le_bytes());
+        bytes[Self::HASH_BLOCK_SIZE..Self::DATA_BLOCKS]
+            .copy_from_slice(&header.hash_block_size().get().to_le_bytes());
+        bytes[Self::DATA_BLOCKS..Self::SALT_SIZE]
+            .copy_from_slice(&header.data_blocks().get().to_le_bytes());
+        bytes[Self::SALT_SIZE..Self::SALT_PADDING].copy_from_slice(&header.salt_size.to_le_bytes());
+        bytes[Self::SALT..Self::PADDING].copy_from_slice(&header.salt);
+        encoded
     }
 }
-
-impl From<&Verified> for Unverified {
-    fn from(superblock: &Verified) -> Self {
-        let mut algorithm = [0; 32];
-        let name = superblock.algorithm.as_ref().as_bytes();
-        algorithm[..name.len()].copy_from_slice(name);
-
-        Self {
-            signature: Unverified::SIGNATURE,
-            version: U32::new(1),
-            hash_type: U32::new(match superblock.hash_type {
-                HashType::ChromeOs => 0,
-                HashType::Normal => 1,
-            }),
-            uuid: superblock.uuid,
-            algorithm,
-            data_block_size: U32::new(superblock.data_block_size),
-            hash_block_size: U32::new(superblock.hash_block_size),
-            data_blocks: U64::new(superblock.data_blocks.get()),
-            salt_size: U16::new(superblock.salt_size),
-            salt_padding: [0; 6],
-            salt: superblock.salt,
-            padding: [0; 168],
-        }
-    }
-}
-
-const _: () = assert!(size_of::<Unverified>() == 512);
 
 const _: () = {
-    use core::mem::offset_of;
-
-    assert!(offset_of!(Unverified, signature) == 0);
-    assert!(offset_of!(Unverified, version) == 8);
-    assert!(offset_of!(Unverified, hash_type) == 12);
-    assert!(offset_of!(Unverified, uuid) == 16);
-    assert!(offset_of!(Unverified, algorithm) == 32);
-    assert!(offset_of!(Unverified, data_block_size) == 64);
-    assert!(offset_of!(Unverified, hash_block_size) == 68);
-    assert!(offset_of!(Unverified, data_blocks) == 72);
-    assert!(offset_of!(Unverified, salt_size) == 80);
-    assert!(offset_of!(Unverified, salt_padding) == 82);
-    assert!(offset_of!(Unverified, salt) == 88);
-    assert!(offset_of!(Unverified, padding) == 344);
+    assert!(size_of::<Unverified>() == 512);
+    assert!(Unverified::VERSION == 8);
+    assert!(Unverified::HASH_TYPE == 12);
+    assert!(Unverified::UUID == 16);
+    assert!(Unverified::ALGORITHM == 32);
+    assert!(Unverified::DATA_BLOCK_SIZE == 64);
+    assert!(Unverified::HASH_BLOCK_SIZE == 68);
+    assert!(Unverified::DATA_BLOCKS == 72);
+    assert!(Unverified::SALT_SIZE == 80);
+    assert!(Unverified::SALT_PADDING == 82);
+    assert!(Unverified::SALT == 88);
+    assert!(Unverified::PADDING == 344);
 };

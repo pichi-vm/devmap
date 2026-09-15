@@ -5,13 +5,14 @@
 
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::Arc;
 
 use zerocopy::IntoBytes;
 
-use crate::device::{DevId, Device, Status, check_version};
+use devmap_core::DevId;
+
+use crate::device::{Device, Status, check_version, decode_dev_t};
 use crate::header::DmHeader;
 use crate::uapi::{DM_BUFFER_FULL_FLAG, DM_DEV_CREATE, DM_DEV_STATUS, DM_LIST_DEVICES};
 
@@ -110,10 +111,7 @@ impl Control {
         let mut header = DmHeader::by_name(name)?;
         DM_DEV_CREATE.ioctl(&*self.0, &mut header)?;
         check_version(&header)?;
-        Ok(Device::new(
-            DevId::from_dev_t(header.dev()),
-            Arc::clone(&self.0),
-        ))
+        Ok(Device::new(decode_dev_t(header.dev()), Arc::clone(&self.0)))
     }
 
     /// No syscall — wraps an already-known [`DevId`] (build one with
@@ -124,26 +122,24 @@ impl Control {
         Device::new(id, Arc::clone(&self.0))
     }
 
-    /// `stat()` only — resolves a device node path to its [`DevId`].
+    /// Resolves a block-device path with [`DevId::from_path`] and wraps its ID.
+    ///
+    /// Does not check that the block device is a live device-mapper mapping;
+    /// subsequent operations ask the kernel to resolve it.
     ///
     /// # Errors
     ///
-    /// The underlying `io::Error` if the path can't be `stat`ed (its errno
-    /// and kind are preserved).
+    /// Returns a filesystem error, `InvalidInput` for a non-block device, or
+    /// `InvalidData` for an unsupported device number.
     pub fn by_node(&self, path: impl AsRef<Path>) -> io::Result<Device> {
-        let meta = std::fs::metadata(path)?;
-        Ok(Device::new(
-            DevId::from_dev_t(meta.rdev()),
-            Arc::clone(&self.0),
-        ))
+        Ok(self.by_device(DevId::from_path(path)?))
     }
-
     #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
     fn status_lookup(&self, header: DmHeader) -> io::Result<(Device, Status)> {
         let mut header = header;
         DM_DEV_STATUS.ioctl(&*self.0, &mut header)?;
         check_version(&header)?;
-        let device = Device::new(DevId::from_dev_t(header.dev()), Arc::clone(&self.0));
+        let device = Device::new(decode_dev_t(header.dev()), Arc::clone(&self.0));
         Ok((device, Status::from_header(&header)))
     }
 
@@ -242,10 +238,7 @@ impl Control {
         )?;
         let (parsed, _): (&DmHeader, _) = zerocopy::FromBytes::ref_from_prefix(&buf)
             .expect("buf is at least DmHeader::SIZE bytes");
-        Ok(Device::new(
-            DevId::from_dev_t(parsed.dev()),
-            Arc::clone(&self.0),
-        ))
+        Ok(Device::new(decode_dev_t(parsed.dev()), Arc::clone(&self.0)))
     }
 
     /// `DM_DEV_RENAME` — give the device currently called `current_name`
@@ -371,7 +364,7 @@ impl std::os::fd::AsRawFd for Control {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TargetVersion {
     /// The kernel `target_type` name, e.g. `"linear"` — matches
-    /// [`crate::Target::NAME`].
+    /// [`devmap_core::Target::NAME`].
     pub name: String,
     /// The target's `[major, minor, patch]` version.
     pub version: [u32; 3],
@@ -456,7 +449,7 @@ impl Iterator for ListDevicesIter {
             .position(|&b| b == 0)
             .unwrap_or(name_bytes.len());
         let name = String::from_utf8_lossy(&name_bytes[..nul]).into_owned();
-        let device = Device::new(DevId::from_dev_t(dev), Arc::clone(&self.control));
+        let device = Device::new(decode_dev_t(dev), Arc::clone(&self.control));
 
         self.offset = if next == 0 {
             self.end
@@ -465,6 +458,13 @@ impl Iterator for ListDevicesIter {
         };
 
         Some((name, device))
+    }
+}
+
+impl devmap_core::Control for Control {
+    type Device = Device;
+    fn create(&self, name: &str) -> io::Result<Device> {
+        Control::create(self, name)
     }
 }
 
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn list_devices_iter_parses_single_entry() {
         let (buf, start, end) =
-            synthetic_list_devices_response(&[(DevId::new(252, 5).unwrap().to_dev_t(), "foo")]);
+            synthetic_list_devices_response(&[(u64::from(DevId::new(252, 5).unwrap()), "foo")]);
         let iter = ListDevicesIter {
             buf,
             offset: start,
@@ -616,9 +616,9 @@ mod tests {
     #[test]
     fn list_devices_iter_follows_next_relative_to_current_entry() {
         let (buf, start, end) = synthetic_list_devices_response(&[
-            (DevId::new(252, 5).unwrap().to_dev_t(), "first"),
-            (DevId::new(252, 6).unwrap().to_dev_t(), "second-longer-name"),
-            (DevId::new(252, 7).unwrap().to_dev_t(), "third"),
+            (u64::from(DevId::new(252, 5).unwrap()), "first"),
+            (u64::from(DevId::new(252, 6).unwrap()), "second-longer-name"),
+            (u64::from(DevId::new(252, 7).unwrap()), "third"),
         ]);
         let iter = ListDevicesIter {
             buf,
