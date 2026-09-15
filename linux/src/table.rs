@@ -302,15 +302,6 @@ impl TableBuilder {
     }
 }
 
-impl devmap_core::TableBuilder for TableBuilder {
-    fn read_only(self) -> Self {
-        TableBuilder::read_only(self)
-    }
-    fn add<T: Target + fmt::Display>(self, start: u64, length: u64, target: T) -> io::Result<Self> {
-        TableBuilder::add(self, start, length, target)
-    }
-}
-
 /// Parses a `DM_TABLE_STATUS` response into [`Row`]s. Not exported —
 /// `Device::table`/`Device::info` return `impl Iterator<Item = Row<_>>`.
 ///
@@ -477,7 +468,8 @@ mod tests {
             )
             .unwrap();
         let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .add(0, 56, t)
+            .read_only()
+            .add(0, t.data_sectors(), t)
             .expect("add verity");
         let cd_hex = "cd".repeat(32);
         let salt_hex = "55".repeat(32);
@@ -485,6 +477,12 @@ mod tests {
         let aligned = (DM_TARGET_SPEC_SIZE + params.len() + 1).next_multiple_of(8);
         assert_eq!(b.buf.len(), DmHeader::SIZE + aligned);
 
+        let length = u64::from_ne_bytes(
+            b.buf[DmHeader::SIZE + 8..DmHeader::SIZE + 16]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(length, 56);
         let param_start = DmHeader::SIZE + DM_TARGET_SPEC_SIZE;
         assert_eq!(
             &b.buf[param_start..param_start + params.len()],

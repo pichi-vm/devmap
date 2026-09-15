@@ -58,9 +58,8 @@
 //! relationship between the values. [`NoInfo`] validates empty status text,
 //! while [`String`] preserves arbitrary status text without validation.
 //!
-//! [`TableBuilder`] lets a format choose row length and read-only access
-//! without depending on a concrete backend. Creating devices, loading tables,
-//! activation, removal, and messages belong to the backend.
+//! Table construction, access mode, device creation, activation, removal, and
+//! messages belong to the backend.
 //!
 //! # Cargo features
 //!
@@ -76,5 +75,5 @@ pub mod traits;
 #[cfg(target_os = "linux")]
 mod uapi;
 
-pub use dm::{DevId, Fraction, NoInfo, ParseError, TableBuilder, Target};
+pub use dm::{DevId, Fraction, NoInfo, ParseError, Target};
 pub use geometry::{Region, Scaled};
