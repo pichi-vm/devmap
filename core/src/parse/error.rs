@@ -2,8 +2,7 @@
 
 use std::fmt;
 
-/// Error returned when a device-mapper field, table, or status string does not
-/// match its expected grammar.
+/// Malformed device-mapper text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error;
 
