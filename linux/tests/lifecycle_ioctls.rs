@@ -11,7 +11,7 @@
 mod common;
 
 use common::{LoopDevice, Owned, open_control};
-use devmap_zero::dm::ZeroTarget;
+use devmap_zero::ZeroTarget;
 
 #[test]
 fn deps_reports_the_devices_the_table_opens() {

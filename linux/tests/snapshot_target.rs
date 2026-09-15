@@ -19,8 +19,7 @@ use devmap_snapshot::{
     Layer,
     traits::std::{Compact, Create, Merge, Open, SyncData},
 };
-use devmap_zero::Zero;
-use devmap_zero::dm::ZeroTarget;
+use devmap_zero::{Zero, ZeroTarget};
 
 /// 4 KiB chunks: the kernel minimum, so the test images stay small.
 const SIZE: usize = 4096;

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The `zero` target: discards all writes and returns zeroes for all
-//! reads.
-
 use std::fmt;
 use std::str::FromStr;
 
 use devmap_core::Target;
 use devmap_core::parse::{Empty, Error};
 
-/// Discards writes, returns zeroed reads. No parameters.
+/// The Linux device-mapper `zero` target.
+///
+/// Reads return zeroes; writes are discarded. The table row supplies its size.
+/// Parameters are empty: parsing accepts only `""`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ZeroTarget;
 impl Target for ZeroTarget {

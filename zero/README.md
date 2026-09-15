@@ -1,12 +1,9 @@
 # devmap-zero
 
-A finite, seekable source of zero bytes and a Linux device-mapper target
-description. `Zero::new(length)` provides standard reads, seeks, and core
-geometry without allocating backing storage. The `dm::ZeroTarget` type describes
-the kernel zero target, which also accepts and discards writes; use a backend
-such as `devmap-linux` to activate it.
+Use `Zero` for finite zero-filled input and `ZeroTarget` to describe a Linux
+device-mapper mapping. This crate does not activate kernel devices.
 
-There are no default features. Enable `tokio` for asynchronous reads, seeks,
-and geometry on `Zero`. The crate does not manage devices or issue ioctls.
+No default features. `tokio` enables asynchronous I/O on `Zero`.
 
-See the [API documentation](https://docs.rs/devmap-zero).
+See the [API documentation](https://docs.rs/devmap-zero) for an example and
+the type contracts.

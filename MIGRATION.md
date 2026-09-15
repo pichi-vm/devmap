@@ -9,28 +9,28 @@ inactive table, resuming it, and removing it are separate backend operations.
 
 - `devmap-core`: `Target` and shared field types in `parse`.
 - `devmap-linux`: device handles, ioctl encoding, tables, status, and messages.
-- Owner crates' `dm` modules: target definitions and parameter/status codecs.
+- Target/format crates: target definitions and parameter/status codecs.
 
 ## Target owners
 
-| Kernel target | Owner | Type in `dm` |
+| Kernel target | Owner | Type |
 | --- | --- | --- |
-| crypt | devmap-crypt | `CryptTarget` |
-| snapshot | devmap-snapshot | `SnapshotTarget` |
-| snapshot-origin | devmap-snapshot | `SnapshotOriginTarget` |
-| snapshot-merge | devmap-snapshot | `SnapshotMergeTarget` |
-| verity | devmap-verity | `VerityTarget` |
+| crypt | devmap-crypt | `dm::CryptTarget` |
+| snapshot | devmap-snapshot | `dm::SnapshotTarget` |
+| snapshot-origin | devmap-snapshot | `dm::SnapshotOriginTarget` |
+| snapshot-merge | devmap-snapshot | `dm::SnapshotMergeTarget` |
+| verity | devmap-verity | `dm::VerityTarget` |
 | zero | devmap-zero | `ZeroTarget` |
 
-Concrete targets live in their owner's `dm` module and implement
-`devmap_core::Target`. Send raw target messages with Linux's `Device::message`.
+Concrete targets implement `devmap_core::Target`.
+Send raw target messages with Linux's `Device::message`.
 Read typed runtime status with
 `device.target::<T>(sector).info()`.
 Import the `Target` trait from `devmap_core`; `DevId`, `Fraction`, `Empty`,
 and `Error` live in `devmap_core::parse`. Linux exposes its own backend
 handles, builders, and rows.
 `devmap_zero::Zero` supplies the userspace zero-filled source;
-`devmap_zero::dm::ZeroTarget` describes the kernel target. The userspace source
+`devmap_zero::ZeroTarget` describes the kernel target. The userspace source
 supports reads and seeks; the kernel target also accepts and discards writes.
 
 `Target::Info` can be `String` when arbitrary status text should be preserved.
@@ -42,9 +42,8 @@ LUKS is separate from raw crypt, with optional header-to-crypt conversion.
 ## Dependencies and features
 
 - Core is a normal dependency of all six other libraries. Crypt, snapshot,
-  verity, and zero always provide target definitions through their `dm`
-  modules. Verity's no-default-feature build
-  supports header inspection and target construction without hashing libraries.
+  verity, and zero always provide target definitions. Verity's no-default-feature
+  build supports header inspection and target construction without hashing libraries.
 - LUKS's optional `devmap-crypt` dependency enables header-to-target conversion.
   All opt-in Cargo features are named for the optional dependencies they enable.
 - Hashing implementations are optional dependencies of verity; enabling one
