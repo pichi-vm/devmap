@@ -62,7 +62,7 @@
 //!
 //! ```no_run
 //! use std::fs::File;
-//! use devmap_core::DevId;
+//! use devmap_core::parse::DevId;
 //! use devmap_linux::Control;
 //! use devmap_verity::{Hashes, dm, traits::std::OpenHashes as _};
 //!

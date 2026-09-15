@@ -6,7 +6,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use devmap_core::{NoInfo, ParseError, Target};
+use devmap_core::Target;
+use devmap_core::parse::{Error, NoInfo};
 
 /// Discards writes, returns zeroed reads. No parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,12 +23,12 @@ impl fmt::Display for ZeroTarget {
     }
 }
 impl FromStr for ZeroTarget {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
             Ok(ZeroTarget)
         } else {
-            Err(ParseError)
+            Err(Error)
         }
     }
 }

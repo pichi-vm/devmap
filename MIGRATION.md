@@ -7,7 +7,7 @@ describes its parameters; a table row adds a start and length in 512-byte
 sectors, and the table has one access mode. Creating a device, loading its
 inactive table, resuming it, and removing it are separate backend operations.
 
-- `devmap-core`: `Target`, `DevId`, and shared field types.
+- `devmap-core`: `Target` and shared field types in `parse`.
 - `devmap-linux`: device handles, ioctl encoding, tables, status, and messages.
 - Owner crates' `dm` modules: target definitions and parameter/status codecs.
 
@@ -26,8 +26,9 @@ Concrete targets live in their owner's `dm` module and implement
 `devmap_core::Target`. Send raw target messages with Linux's `Device::message`.
 Read typed runtime status with
 `device.target::<T>(sector).info()`.
-Import shared types such as `DevId` and the `Target` trait directly from
-`devmap_core`; Linux exposes its own backend handles, builders, and rows.
+Import the `Target` trait from `devmap_core`; `DevId`, `Fraction`, `NoInfo`,
+and `Error` live in `devmap_core::parse`. Linux exposes its own backend
+handles, builders, and rows.
 `devmap_zero::Zero` supplies the userspace zero-filled source;
 `devmap_zero::dm::ZeroTarget` describes the kernel target. The userspace source
 supports reads and seeks; the kernel target also accepts and discards writes.

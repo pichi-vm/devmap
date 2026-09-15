@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use devmap_core::ParseError;
+use devmap_core::parse::Error;
 
 #[test]
 fn crypt_integrity_fields_preserve_the_kind() {
@@ -16,7 +16,7 @@ fn crypt_integrity_fields_preserve_the_kind() {
         assert_eq!(parsed.to_string(), text);
     }
     for invalid in ["", "16", ":aead", "x:aead", "4294967296:aead"] {
-        assert_eq!(invalid.parse::<Integrity>(), Err(ParseError));
+        assert_eq!(invalid.parse::<Integrity>(), Err(Error));
     }
 }
 
@@ -59,7 +59,7 @@ fn crypt_keys_parse_without_a_complete_target() {
         "☃☃",
         "é",
     ] {
-        assert_eq!(invalid.parse::<Key>(), Err(ParseError), "{invalid:?}");
+        assert_eq!(invalid.parse::<Key>(), Err(Error), "{invalid:?}");
     }
 }
 
@@ -68,6 +68,6 @@ fn malformed_unicode_keys_fail_the_complete_crypt_parser_without_panicking() {
     use devmap_crypt::dm::CryptTarget;
     for key in ["€0", "0€", "☃☃"] {
         let text = format!("aes-xts-plain64 {key} 0 7:0 0");
-        assert_eq!(text.parse::<CryptTarget>(), Err(ParseError));
+        assert_eq!(text.parse::<CryptTarget>(), Err(Error));
     }
 }

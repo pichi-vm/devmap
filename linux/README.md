@@ -10,8 +10,8 @@ kernel state.
 
 Target definitions live in separate crates, for example
 `devmap_crypt::dm::CryptTarget` and `devmap_verity::dm::VerityTarget`.
-Import shared target contracts, device numbers, and parsing/status helpers
-directly from `devmap_core`.
+Import the `Target` trait from `devmap_core`, and device numbers and shared
+parsing/status values from `devmap_core::parse`.
 Use `Device::message` to send raw target messages to a selected sector.
 
 Use `device.table()` for construction parameters and `device.info()` for

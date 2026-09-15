@@ -18,7 +18,7 @@ mod common;
 use std::io::Read as _;
 
 use common::{Owned, open_control};
-use devmap_core::{DevId, NoInfo};
+use devmap_core::parse::{DevId, NoInfo};
 use devmap_zero::dm::ZeroTarget;
 
 #[test]

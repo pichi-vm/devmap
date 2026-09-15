@@ -47,16 +47,17 @@
 //!
 //! # Device-mapper interfaces
 //!
-//! [`Target`] describes a target's kernel name and table/status types. [`DevId`]
-//! identifies a backing device by its major and minor numbers. Row ranges use
-//! 512-byte sectors; their start, length, and whole-table access mode remain separate
-//! from target arguments. Concrete targets belong to their format crates and
-//! can be passed to a backend such as `devmap-linux`.
+//! [`Target`] describes a target's kernel name and table/status types.
+//! [`parse::DevId`] identifies a backing device by its major and minor numbers.
+//! Row ranges use 512-byte sectors; their start, length, and whole-table access
+//! mode remain separate from target arguments. Concrete targets belong to their
+//! format crates and can be passed to a backend such as `devmap-linux`.
 //!
-//! Target fields use [`std::str::FromStr`] for parsing. [`Fraction`] handles
-//! the `a/b` syntax used for usage counts and progress without interpreting the
-//! relationship between the values. [`NoInfo`] validates empty status text,
-//! while [`String`] preserves arbitrary status text without validation.
+//! The [`parse`] module supplies shared field values and errors.
+//! [`parse::Fraction`] handles the `a/b` syntax used for usage counts and progress
+//! without interpreting the relationship between the values. [`parse::NoInfo`]
+//! validates empty status text, while [`String`] preserves arbitrary status text
+//! without validation.
 //!
 //! Table construction, access mode, device creation, activation, removal, and
 //! messages belong to the backend.
@@ -68,12 +69,13 @@
 //! - `tokio` provides the Tokio traits, implements them for
 //!   `tokio::fs::File`, and enables Tokio I/O on the adapters.
 
-mod dm;
-mod durability;
-mod geometry;
+pub mod parse;
+mod region;
+mod scaled;
+mod storage;
+mod target;
 pub mod traits;
-#[cfg(target_os = "linux")]
-mod uapi;
 
-pub use dm::{DevId, Fraction, NoInfo, ParseError, Target};
-pub use geometry::{Region, Scaled};
+pub use region::Region;
+pub use scaled::Scaled;
+pub use target::Target;

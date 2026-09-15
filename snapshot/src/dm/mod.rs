@@ -6,8 +6,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use devmap_core::DevId;
-use devmap_core::{Fraction, NoInfo, ParseError, Target};
+use devmap_core::Target;
+use devmap_core::parse::{DevId, Error, Fraction, NoInfo};
 
 /// Marks a device as the origin of a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,15 +26,15 @@ impl fmt::Display for SnapshotOriginTarget {
     }
 }
 impl FromStr for SnapshotOriginTarget {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut it = s.split_whitespace();
         let origin = it
             .next()
             .and_then(|value| value.parse().ok())
-            .ok_or(ParseError)?;
+            .ok_or(Error)?;
         if it.next().is_some() {
-            return Err(ParseError);
+            return Err(Error);
         }
         Ok(SnapshotOriginTarget { origin })
     }
@@ -67,20 +67,20 @@ impl fmt::Display for SnapshotTarget {
 }
 
 impl FromStr for SnapshotTarget {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut fields = s.split_whitespace();
-        let origin = fields.next().ok_or(ParseError)?.parse::<DevId>()?;
-        let cow = fields.next().ok_or(ParseError)?.parse::<DevId>()?;
+        let origin = fields.next().ok_or(Error)?.parse::<DevId>()?;
+        let cow = fields.next().ok_or(Error)?.parse::<DevId>()?;
         // This type is always persistent-with-overflow. The kernel's other
         // persistence modes ("P" and the transient "N") are real tables it
         // cannot hold, so reject rather than misreport them as "PO".
-        if fields.next().ok_or(ParseError)? != "PO" {
-            return Err(ParseError);
+        if fields.next().ok_or(Error)? != "PO" {
+            return Err(Error);
         }
-        let chunk_size_sectors = fields.next().ok_or(ParseError)?.parse()?;
+        let chunk_size_sectors = fields.next().ok_or(Error)?.parse()?;
         if fields.next().is_some() {
-            return Err(ParseError);
+            return Err(Error);
         }
         Ok(SnapshotTarget {
             origin,
@@ -106,7 +106,7 @@ impl fmt::Display for SnapshotMergeTarget {
     }
 }
 impl FromStr for SnapshotMergeTarget {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse().map(SnapshotMergeTarget)
     }
@@ -169,7 +169,7 @@ impl fmt::Display for Info {
 }
 
 impl FromStr for Info {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // The sentinels replace the entire line, and "Merge failed" is two
         // tokens, so match the trimmed line before tokenizing at all.
@@ -181,14 +181,11 @@ impl FromStr for Info {
             _ => {}
         }
         let mut fields = s.split_whitespace();
-        let (allocated_sectors, total_sectors) = fields
-            .next()
-            .ok_or(ParseError)?
-            .parse::<Fraction<u64>>()?
-            .into();
-        let metadata_sectors = fields.next().ok_or(ParseError)?.parse()?;
+        let (allocated_sectors, total_sectors) =
+            fields.next().ok_or(Error)?.parse::<Fraction<u64>>()?.into();
+        let metadata_sectors = fields.next().ok_or(Error)?.parse()?;
         if fields.next().is_some() {
-            return Err(ParseError);
+            return Err(Error);
         }
         Ok(Info::Usage {
             allocated_sectors,

@@ -14,7 +14,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use devmap_core::NoInfo;
+use devmap_core::parse::NoInfo;
 use devmap_snapshot::dm as snapshot;
 use devmap_verity::dm as verity;
 

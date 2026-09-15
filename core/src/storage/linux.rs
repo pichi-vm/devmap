@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Private Linux UAPI declarations.
+//! Linux block-device geometry inspection.
 
 // Defining an ioctl is unsafe; invoking this typed declaration is safe. Keep
 // this exception confined to the module that audits the kernel ABI.
@@ -27,7 +27,7 @@ const BLKSSZGET: Ioctl<Read, &c_int> = unsafe { BLOCK.none(104) };
 /// Returns the logical block size reported by Linux.
 ///
 /// Files that do not implement `BLKSSZGET` are byte-addressable.
-pub(crate) fn block_size(fd: impl AsFd) -> io::Result<NonZeroU32> {
+pub(super) fn block_size(fd: impl AsFd) -> io::Result<NonZeroU32> {
     let size = match BLKSSZGET.ioctl(fd) {
         Ok((_, size)) => size,
         Err(error) if error.raw_os_error() == Some(ENOTTY) => 1,

@@ -6,8 +6,8 @@
 use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
-use devmap_core::DevId;
-use devmap_core::{NoInfo, ParseError, Target};
+use devmap_core::Target;
+use devmap_core::parse::{DevId, Error, NoInfo};
 
 /// Where dm-crypt gets the key for a mapping.
 ///
@@ -88,13 +88,13 @@ impl fmt::Display for Key {
 }
 
 impl FromStr for Key {
-    type Err = ParseError;
+    type Err = Error;
 
     /// Parses `-`, a `:size:type:description` keyring reference, or hex bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`ParseError`] for malformed fields, unknown keyring types,
+    /// Returns [`Error`] for malformed fields, unknown keyring types,
     /// empty key descriptions, or invalid hex. Hex input accepts either case;
     /// formatting uses lowercase. Parsed raw keys remain sensitive data.
     fn from_str(token: &str) -> Result<Self, Self::Err> {
@@ -104,10 +104,10 @@ impl FromStr for Key {
         if let Some(rest) = token.strip_prefix(':') {
             // `<size>:<type>:<description>` — the description may itself contain
             // colons (cryptsetup uses `cryptsetup:<uuid>-d0`), so split only twice.
-            let (size, rest) = rest.split_once(':').ok_or(ParseError)?;
-            let (kind, description) = rest.split_once(':').ok_or(ParseError)?;
+            let (size, rest) = rest.split_once(':').ok_or(Error)?;
+            let (kind, description) = rest.split_once(':').ok_or(Error)?;
             if description.is_empty() {
-                return Err(ParseError);
+                return Err(Error);
             }
             return Ok(Key::Keyring {
                 size: size.parse()?,
@@ -116,11 +116,11 @@ impl FromStr for Key {
             });
         }
         if token.is_empty() || !token.is_ascii() || token.len() % 2 != 0 {
-            return Err(ParseError);
+            return Err(Error);
         }
         (0..token.len())
             .step_by(2)
-            .map(|i| u8::from_str_radix(&token[i..i + 2], 16).map_err(|_| ParseError))
+            .map(|i| u8::from_str_radix(&token[i..i + 2], 16).map_err(|_| Error))
             .collect::<Result<Vec<u8>, _>>()
             .map(Key::Hex)
     }
@@ -152,14 +152,14 @@ impl fmt::Display for KeyType {
 }
 
 impl FromStr for KeyType {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "logon" => Ok(KeyType::Logon),
             "user" => Ok(KeyType::User),
             "encrypted" => Ok(KeyType::Encrypted),
             "trusted" => Ok(KeyType::Trusted),
-            _ => Err(ParseError),
+            _ => Err(Error),
         }
     }
 }
@@ -179,10 +179,10 @@ pub struct Integrity {
 }
 
 impl FromStr for Integrity {
-    type Err = ParseError;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (tag_size, kind) = s.split_once(':').ok_or(ParseError)?;
+        let (tag_size, kind) = s.split_once(':').ok_or(Error)?;
         Ok(Self {
             tag_size: tag_size.parse()?,
             kind: kind.to_owned(),
@@ -317,14 +317,14 @@ impl fmt::Display for CryptTarget {
 }
 
 impl FromStr for CryptTarget {
-    type Err = ParseError;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut fields = s.split_whitespace();
-        let cipher = fields.next().ok_or(ParseError)?.to_owned();
-        let key = fields.next().ok_or(ParseError)?.parse()?;
-        let iv_offset = fields.next().ok_or(ParseError)?.parse()?;
-        let device = fields.next().ok_or(ParseError)?.parse::<DevId>()?;
-        let offset = fields.next().ok_or(ParseError)?.parse()?;
+        let cipher = fields.next().ok_or(Error)?.to_owned();
+        let key = fields.next().ok_or(Error)?.parse()?;
+        let iv_offset = fields.next().ok_or(Error)?.parse()?;
+        let device = fields.next().ok_or(Error)?.parse::<DevId>()?;
+        let offset = fields.next().ok_or(Error)?.parse()?;
 
         let mut crypt = CryptTarget {
             cipher,
@@ -353,7 +353,7 @@ impl FromStr for CryptTarget {
         // `key:value` pair, so the count is a token count.
         let count: usize = count.parse()?;
         for _ in 0..count {
-            let arg = fields.next().ok_or(ParseError)?;
+            let arg = fields.next().ok_or(Error)?;
             match arg {
                 "allow_discards" => crypt.allow_discards = true,
                 "same_cpu_crypt" => crypt.same_cpu_crypt = true,
@@ -363,7 +363,7 @@ impl FromStr for CryptTarget {
                 "no_write_workqueue" => crypt.no_write_workqueue = true,
                 "iv_large_sectors" => crypt.iv_large_sectors = true,
                 _ => {
-                    let (key, value) = arg.split_once(':').ok_or(ParseError)?;
+                    let (key, value) = arg.split_once(':').ok_or(Error)?;
                     match key {
                         "integrity" => {
                             crypt.integrity = Some(value.parse()?);
@@ -374,13 +374,13 @@ impl FromStr for CryptTarget {
                         "integrity_key_size" => {
                             crypt.integrity_key_size = Some(value.parse()?);
                         }
-                        _ => return Err(ParseError),
+                        _ => return Err(Error),
                     }
                 }
             }
         }
         if fields.next().is_some() {
-            return Err(ParseError);
+            return Err(Error);
         }
         Ok(crypt)
     }
