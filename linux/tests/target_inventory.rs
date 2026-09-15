@@ -10,7 +10,7 @@ fn supported_kernel_targets_have_owner_crates() {
         devmap_snapshot::dm::SnapshotOriginTarget::NAME,
         devmap_snapshot::dm::SnapshotMergeTarget::NAME,
         devmap_verity::dm::VerityTarget::NAME,
-        devmap_zero::dm::ZeroTarget::NAME,
+        devmap_zero::ZeroTarget::NAME,
     ]
     .into_iter()
     .collect::<std::collections::BTreeSet<_>>();

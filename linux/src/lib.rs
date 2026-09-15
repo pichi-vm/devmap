@@ -15,7 +15,7 @@
 //!
 //! ```no_run
 //! use devmap_linux::Control;
-//! use devmap_zero::dm::ZeroTarget;
+//! use devmap_zero::ZeroTarget;
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let control = Control::open()?;

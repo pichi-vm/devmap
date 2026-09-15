@@ -13,15 +13,11 @@ use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 
 use devmap_core::traits::std::Geometry;
 
-/// A fixed-length, seekable source of zero bytes.
+/// A fixed-length, read-only source of zero bytes.
 ///
-/// Reads return zeroes until the configured length and then return EOF. Seeking
-/// beyond the end is allowed; seeking before byte zero returns
-/// [`io::ErrorKind::InvalidInput`]. The stream allocates no backing storage and
-/// reports a block size of one byte.
-///
-/// With the `tokio` feature, the same type also implements Tokio's asynchronous
-/// read and seek traits.
+/// Reads stop at the configured length. Seeks past the end are allowed;
+/// negative or overflowing positions return [`io::ErrorKind::InvalidInput`].
+/// Reports one-byte blocks and allocates no backing storage.
 #[derive(Debug, Clone)]
 pub struct Zero {
     length: u64,

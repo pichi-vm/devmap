@@ -130,7 +130,7 @@ impl Device {
     ///
     /// ```no_run
     /// # use devmap_linux::Control;
-    /// use devmap_zero::dm::ZeroTarget;
+    /// use devmap_zero::ZeroTarget;
     /// # fn f(dev: &devmap_linux::Device) -> std::io::Result<()> {
     /// dev.builder().add(0, 8192, ZeroTarget)?.load()?;
     /// # Ok(()) }

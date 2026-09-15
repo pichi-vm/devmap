@@ -19,7 +19,7 @@ use std::io::Read as _;
 
 use common::{Owned, open_control};
 use devmap_core::parse::{DevId, Empty};
-use devmap_zero::dm::ZeroTarget;
+use devmap_zero::ZeroTarget;
 
 #[test]
 fn create_load_resume_read_zeros_remove() {

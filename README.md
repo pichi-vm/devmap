@@ -13,9 +13,9 @@ The workspace contains seven libraries; it does not ship an application.
 - [`devmap-verity`](verity/): verity metadata, userspace verification, and targets.
 - [`devmap-zero`](zero/): a finite zero-filled source and the kernel zero target.
 
-Every target definition lives in its owning crate's `dm` module, not in the
-Linux backend. Applications depend on `devmap-linux` and the target crates they
-use; both share the interfaces in `devmap-core`. Application policy, such as
+Target definitions live in their owning crates, not in the Linux backend.
+Applications depend on `devmap-linux` and the target crates they use; both
+share the interfaces in `devmap-core`. Application policy, such as
 sparse-file traversal, stays with the caller. See [MIGRATION.md](MIGRATION.md)
 for the target owners and composition workflow, and [STYLE.md](STYLE.md) for
 repository conventions.
