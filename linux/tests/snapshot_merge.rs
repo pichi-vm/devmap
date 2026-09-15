@@ -2,7 +2,6 @@
 
 //! Real-kernel coverage for snapshot-merge handover and data preservation.
 
-#[path = "support/dm.rs"]
 mod common;
 
 use common::{LoopDevice, Owned, ensure_module_loaded, open_control};

@@ -49,11 +49,6 @@ of supported APIs or approval to change them.
   general block sizes, hash formats, offsets, and optional parameters, but that
   does not establish complete coverage for every other target crate.
 
-## Workspace maintenance
-
-- [ ] Decide whether workspace `default-members` would make local library work
-  more convenient. Keep all members covered by workspace CI regardless.
-
 ## Verification
 
 Use the commands in [MIGRATION.md](MIGRATION.md). Portable tests and compiling

@@ -1,43 +1,4 @@
-# The devmap repo root is the `devmap` CLI. The workspace members are the
-# libraries it drives, each in a directory named without the `devmap-`
-# prefix (the prefix is implied here and only carried in the published
-# crate name). `core/` holds shared storage and device-mapper interfaces;
-# `linux/` implements the device-mapper backend. Each target's owning crate
-# supplies its `dm` module and any on-disk format or userspace I/O APIs.
-[package]
-name = "devmap"
-version = "0.1.0"
-edition = "2024"
-license = "Apache-2.0"
-description = "Command-line front-end for the Linux device-mapper."
-repository = "https://github.com/pichi-vm/devmap"
-homepage = "https://github.com/pichi-vm/devmap"
-
-[dependencies]
-devmap-crypt = { version = "0.1.0", path = "crypt" }
-devmap-zero = { version = "0.1.0", path = "zero" }
-devmap-core = { version = "0.1.0", path = "core" }
-devmap-linux = { version = "0.1.0", path = "linux" }
-devmap-verity = { version = "0.1.0", path = "verity" }
-devmap-snapshot = { version = "0.1.0", path = "snapshot" }
-devmap-luks = { version = "0.1.0", path = "luks", features = ["devmap-crypt"] }
-clap = { version = "4", features = ["derive"] }
-# Master keys go into the kernel keyring; this is a safe wrapper, so the
-# workspace-wide `unsafe_code = "deny"` still holds.
-keyutils = "0.4"
-# Passphrase entry without terminal echo.
-rpassword = "7"
-anyhow = "1"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
-
-[dev-dependencies]
-tempfile = "3"
-
-[lints]
-workspace = true
-
+# Shared storage, format, and Linux device-mapper libraries.
 [workspace]
 resolver = "3"
 members = ["core", "crypt", "linux", "luks", "snapshot", "verity", "zero"]

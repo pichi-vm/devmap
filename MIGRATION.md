@@ -10,7 +10,6 @@ inactive table, resuming it, and removing it are separate backend operations.
 - `devmap-core`: `Target`, `DevId`, field types and the `TableBuilder` trait.
 - `devmap-linux`: device handles, ioctl encoding, tables, status, and messages.
 - Owner crates' `dm` modules: target definitions and parameter/status codecs.
-- `devmap`: compatibility arguments, application workflows, and presentation.
 
 ## Target owners
 
