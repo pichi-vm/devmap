@@ -6,9 +6,10 @@
 //! or convert an opened [`Header`] with [`Builder::from`](crate::dm::Builder::from).
 //! A header supplies format parameters, not the trusted root digest or device
 //! IDs; pass those to [`Builder::build`](crate::dm::Builder::build).
-//! Use a backend table builder to choose row start/length and access mode, or
-//! [`Target::add_full`](crate::dm::Target::add_full) for a full-size, read-only
-//! row. Loading and resuming remain separate backend operations. This module
+//! Use a backend table builder to choose row start and length and set read-only
+//! access. [`Target::data_sectors`](crate::dm::Target::data_sectors) gives the
+//! full length in 512-byte sectors.
+//! Loading and resuming remain separate backend operations. This module
 //! performs no device-mapper ioctls and is available without hashing dependencies.
 
 use crate::{HashType, Header};
@@ -114,19 +115,6 @@ impl Target {
     /// A backend row may expose a shorter aligned prefix.
     pub const fn data_sectors(&self) -> u64 {
         self.data_sectors
-    }
-
-    /// Adds a full-size read-only row at sector zero to an empty table builder.
-    ///
-    /// Does not load or resume the device. Use the backend's ordinary `add`
-    /// operation instead when explicitly selecting a shorter row.
-    ///
-    /// # Errors
-    ///
-    /// Returns errors from the supplied table builder.
-    pub fn add_full<B: devmap_core::TableBuilder>(self, builder: B) -> io::Result<B> {
-        let length = self.data_sectors;
-        builder.read_only().add(0, length, self)
     }
 
     /// Constructs portable header metadata using the supplied UUID.

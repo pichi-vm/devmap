@@ -7,7 +7,7 @@ describes its parameters; a table row adds a start and length in 512-byte
 sectors, and the table has one access mode. Creating a device, loading its
 inactive table, resuming it, and removing it are separate backend operations.
 
-- `devmap-core`: `Target`, `DevId`, field types and the `TableBuilder` trait.
+- `devmap-core`: `Target`, `DevId`, and shared field types.
 - `devmap-linux`: device handles, ioctl encoding, tables, status, and messages.
 - Owner crates' `dm` modules: target definitions and parameter/status codecs.
 
@@ -62,8 +62,9 @@ For an existing verity hash device:
    and set `header_offset_bytes` to its physical offset.
 3. Call `build` with the data and hash `DevId`s and a trusted root digest.
    The header does not contain that root.
-4. Create a Linux device. `target.add_full(device.builder())` adds a full-size
-   read-only row; `load()` stages it and `device.resume()` activates it.
+4. Create a Linux device. On `device.builder()`, call `read_only()` and
+   `add(0, target.data_sectors(), target)` for a full-size row. `load()` stages
+   the table and `device.resume()` activates it.
 
 The ordinary table builder also accepts an explicitly selected shorter row.
 Header validation is not data authentication. Persist newly formatted hash

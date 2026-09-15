@@ -78,9 +78,10 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
             &format!("devmap-test-verity-{}-{case}", std::process::id()),
         )
         .unwrap();
-        target
-            .clone()
-            .add_full(device.builder())
+        device
+            .builder()
+            .read_only()
+            .add(0, target.data_sectors(), target.clone())
             .unwrap()
             .load()
             .unwrap();

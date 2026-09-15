@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use devmap_core::{DevId, TableBuilder as _, Target as _};
+use devmap_core::DevId;
 use devmap_verity::{
     HashType, Hashes,
     dm::{Builder, CorruptionPolicy as C, Fec, Info, IoErrorPolicy as E, Target},
@@ -180,43 +180,6 @@ fn invalid_parameters_and_conflicting_options_are_rejected() {
         format!("{base} 0").parse::<Target>().unwrap(),
         finish(builder())
     );
-}
-
-#[derive(Default)]
-struct Table {
-    read_only: bool,
-    start: u64,
-    length: u64,
-    params: String,
-}
-impl devmap_core::TableBuilder for Table {
-    fn read_only(mut self) -> Self {
-        self.read_only = true;
-        self
-    }
-    fn add<T: devmap_core::Target + std::fmt::Display>(
-        mut self,
-        start: u64,
-        length: u64,
-        target: T,
-    ) -> io::Result<Self> {
-        self.start = start;
-        self.length = length;
-        self.params = target.to_string();
-        Ok(self)
-    }
-}
-
-#[test]
-fn full_volume_helper_leaves_explicit_row_selection_available() {
-    let target = finish(builder());
-    assert_eq!(Target::NAME, "verity");
-    let table = target.clone().add_full(Table::default()).unwrap();
-    assert!(table.read_only);
-    assert_eq!((table.start, table.length), (0, 3));
-    assert_eq!(table.params, target.to_string());
-    let prefix = Table::default().read_only().add(0, 1, target).unwrap();
-    assert_eq!(prefix.length, 1);
 }
 
 #[test]

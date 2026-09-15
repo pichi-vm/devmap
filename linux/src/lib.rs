@@ -77,7 +77,10 @@
 //!
 //! let control = Control::open()?;
 //! let device = control.create("verified-data")?;
-//! target.add_full(device.builder())?.load()?;
+//! device.builder()
+//!     .read_only()
+//!     .add(0, target.data_sectors(), target)?
+//!     .load()?;
 //! device.resume()?;
 //! # Ok(device)
 //! # }
