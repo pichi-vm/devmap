@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Complete Linux verity target parameters, independent of userspace hashing.
+//! Linux verity target descriptions, available without hashing dependencies.
 //!
-//! Construct [`Builder`](crate::dm::Builder) directly for a headerless tree,
-//! or convert an opened [`Header`] with [`Builder::from`](crate::dm::Builder::from).
-//! A header supplies format parameters, not the trusted root digest or device
-//! IDs; pass those to [`Builder::build`](crate::dm::Builder::build).
-//! Use a backend table builder to choose row start and length and set read-only
-//! access. [`VerityTarget::data_sectors`](crate::dm::VerityTarget::data_sectors)
-//! gives the full length in 512-byte sectors.
-//! Loading and resuming remain separate backend operations. This module
-//! performs no device-mapper ioctls and is available without hashing dependencies.
+//! Configure a [`Builder`] directly or from a [`Header`]. Pass the resulting
+//! [`VerityTarget`] to a backend such as `devmap-linux` for activation.
 
 use crate::{HashType, Header};
 use devmap_core::Target;
@@ -31,6 +24,8 @@ pub use options::{CorruptionPolicy, Fec, IoErrorPolicy};
 ///
 /// Devices must contain the described data and tree and the root must be
 /// obtained from an independently trusted source. Construct with [`Builder`].
+/// Load in a read-only table; [`data_sectors`](Self::data_sectors) gives the
+/// full row length.
 /// The kernel checks actual device geometry and availability of optional features.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VerityTarget {

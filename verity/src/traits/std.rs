@@ -31,26 +31,23 @@ pub use devmap_core::traits::std::{Geometry, Scale, Slice, SliceBytes, SyncData}
     )))
 )]
 pub trait Format<D, H>: Sized {
-    /// Consumes the input's declared extent, writes the hash device from block
-    /// zero, and returns the root digest.
+    /// Writes a hash device from byte zero and returns its root digest.
     ///
-    /// The input's block size and count determine the protected extent. It
-    /// must yield exactly that many bytes, forming one or more complete
-    /// blocks. Bytes
-    /// after that extent remain unread. The hash output's block size becomes
-    /// the hash-block size. The output must have
-    /// enough capacity for the complete image; a growable file expands as
-    /// needed. It is flushed before this method returns, but is not made
-    /// persistent. On error, output may be partial and either stream may have
-    /// advanced.
+    /// Input geometry defines the protected extent: one or more complete
+    /// blocks. Exactly that extent is consumed; trailing bytes remain unread.
+    /// Output geometry supplies the hash-block size. Fixed storage must fit
+    /// the complete image; growable storage expands as needed.
+    ///
+    /// Output is flushed, not persisted. For durable output, retain it by
+    /// passing `&mut` and call [`SyncData::sync_data`] after formatting.
+    /// Failure may leave partial output and advance either stream.
     ///
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::InvalidInput`] for incompatible endpoint
-    /// geometry, [`io::ErrorKind::UnexpectedEof`] when input ends before its
-    /// reported extent, and
-    /// [`io::ErrorKind::Unsupported`] when the selected algorithm's Cargo
-    /// feature is disabled. Other errors come from the streams.
+    /// geometry, [`io::ErrorKind::UnexpectedEof`] for short input, or
+    /// [`io::ErrorKind::Unsupported`] for a disabled hash implementation.
+    /// Other errors come from the streams.
     fn format(self, data: D, hashes: H) -> io::Result<Box<[u8]>>;
 }
 
@@ -81,21 +78,18 @@ pub trait Format<D, H>: Sized {
 pub trait Open<D, H>: Sized {
     /// Checks endpoint geometry and the supplied root digest's length.
     ///
-    /// The hash endpoint must already be opened as [`crate::Hashes`]. Each stored block size must be
-    /// a multiple of the corresponding endpoint's block size, and both
-    /// endpoints must contain the complete declared layout. Use a
-    /// [`devmap_core::Region`] when a device occupies only part of another
-    /// object.
+    /// Pass an opened [`crate::Hashes`]. Each stored block size must be a
+    /// multiple of its backing storage's block size, and both devices must
+    /// fit the declared layout. Use [`Region`](devmap_core::Region) for embedded devices.
     ///
-    /// Opening does not hash data or tree blocks. Each data block is authenticated
-    /// against the supplied root when read; an unavailable algorithm fails then.
-    /// The returned device is positioned at logical byte zero.
+    /// The view starts at logical byte zero. Opening authenticates no blocks;
+    /// [`crate::Verity`] checks them on read.
     ///
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::InvalidInput`] for a root digest of the wrong
     /// length, [`io::ErrorKind::InvalidData`] for incompatible geometry or
-    /// endpoints shorter than the declared layout. Other errors come from the endpoints.
+    /// storage shorter than the declared layout. Other errors come from storage.
     fn open(data: D, hashes: H, root_digest: &[u8]) -> io::Result<Self>;
 }
 
@@ -112,7 +106,8 @@ pub trait OpenHashes<H>: Sized {
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::UnexpectedEof`] for a short header,
-    /// [`io::ErrorKind::InvalidData`] for invalid fields or overflowing
-    /// layouts, or an underlying I/O error. Storage is never written.
+    /// [`io::ErrorKind::InvalidData`] for unknown formats or algorithms, invalid
+    /// fields, nonzero record padding, or overflowing layouts. Other errors
+    /// come from storage, which is never written.
     fn open(storage: H) -> io::Result<Self>;
 }

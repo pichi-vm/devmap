@@ -7,12 +7,34 @@ use super::{Algorithm, HashType, Header, layout::Layout};
 
 /// Configures and formats a dm-verity hash device.
 ///
-/// The defaults are SHA-256, [`HashType::Normal`], and no salt. The data and
-/// hash block sizes and the protected extent are obtained from the endpoints
-/// when `format` is called.
+/// Defaults to SHA-256, [`HashType::Normal`], and no salt. Block sizes and extent
+/// come from the storage passed to [`Format::format`](crate::traits::std::Format::format).
+/// Keep the returned root digest in independently trusted storage.
 ///
-/// Import [`crate::traits::std::Format`] or, with the `tokio` feature,
-/// [`crate::traits::tokio::Format`] to finish configuration with `format`.
+/// ```
+/// # #[cfg(feature = "sha2")]
+/// # fn main() -> std::io::Result<()> {
+/// use std::io::{Cursor, Read};
+/// use std::num::NonZeroU32;
+/// use devmap_verity::{Formatter, Hashes, Verity,
+///     traits::std::{Format as _, Open as _, OpenHashes as _, Scale as _}};
+///
+/// let block_size = NonZeroU32::new(4096).unwrap();
+/// let bytes = vec![0x5a; 8192];
+/// let data = Cursor::new(&bytes).scale_to(block_size)?;
+/// let mut output = Cursor::new(Vec::new()).scale_to(block_size)?;
+/// let root = Formatter::new([7; 16]).format(data, &mut output)?;
+///
+/// let hashes = Hashes::open(output)?;
+/// let mut volume = Verity::open(Cursor::new(bytes), hashes, &root)?;
+/// let mut first = [0; 16];
+/// volume.read_exact(&mut first)?;
+/// assert_eq!(first, [0x5a; 16]);
+/// # Ok(())
+/// # }
+/// # #[cfg(not(feature = "sha2"))]
+/// # fn main() {}
+/// ```
 #[must_use = "a formatter performs no I/O until `.format()` is called"]
 #[derive(Debug, Clone)]
 #[cfg_attr(
@@ -39,8 +61,7 @@ pub struct Formatter {
 impl Formatter {
     /// Creates a formatter with the UUID written to the dm-verity superblock.
     ///
-    /// The UUID is metadata, not a substitute for keeping the root digest
-    /// returned by formatting in trusted storage.
+    /// The UUID identifies the volume; it does not authenticate it.
     pub const fn new(uuid: [u8; 16]) -> Self {
         Self {
             hash_type: HashType::Normal,
@@ -59,11 +80,7 @@ impl Formatter {
 
     /// Sets the hash algorithm.
     ///
-    /// The matching Cargo feature must be enabled when [`Format::format`] is
-    /// called. See [`crate::Algorithm`] for the feature associated with each
-    /// family.
-    ///
-    /// [`Format::format`]: crate::traits::std::Format::format
+    /// Its hash-family feature must be enabled when formatting.
     pub const fn algorithm(mut self, algorithm: Algorithm) -> Self {
         self.algorithm = algorithm;
         self

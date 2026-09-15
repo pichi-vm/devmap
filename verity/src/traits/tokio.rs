@@ -36,10 +36,8 @@ pub trait Format<D, H>: Sized {
     /// Asynchronously performs the same operation as
     /// [`crate::traits::std::Format::format`].
     ///
-    /// See the synchronous operation for its sizing, alignment, and flushing
-    /// contracts. Cancellation may leave partial output, advance either
-    /// stream, and drop values passed by ownership; borrowed streams are
-    /// released.
+    /// Uses the same sizing, alignment, and flushing contracts. Cancellation
+    /// may leave partial output and advance either stream.
     ///
     /// # Errors
     ///
@@ -77,9 +75,8 @@ pub trait Open<D, H>: Sized {
     /// Asynchronously performs the same validation as
     /// [`crate::traits::std::Open::open`].
     ///
-    /// See the synchronous operation for its layout, alignment, and
-    /// authentication contracts. Cancellation may advance either endpoint
-    /// and drop values passed by ownership; borrowed endpoints are released.
+    /// Uses the same layout, alignment, and authentication contracts.
+    /// Cancellation may advance either stream.
     ///
     /// # Errors
     ///
@@ -94,18 +91,13 @@ pub trait Open<D, H>: Sized {
 /// Opens a hash device without requiring data storage or hashing support.
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 pub trait OpenHashes<H>: Sized {
-    /// Reads and validates the 512-byte header at byte zero.
+    /// Asynchronous form of [`crate::traits::std::OpenHashes::open`].
     ///
-    /// On success the backing stream is positioned at byte 512. No tree
-    /// blocks, hash-block padding, or endpoint geometry are inspected.
-    /// Known algorithm names are accepted regardless of hashing features.
-    /// Pass a zero-based region for a format embedded in a larger object.
-    /// Failure or cancellation may advance the stream and drops owned endpoints.
+    /// Uses the same validation and final stream position. Failure or
+    /// cancellation may advance the stream. Storage is never written.
     ///
     /// # Errors
     ///
-    /// Returns [`io::ErrorKind::UnexpectedEof`] for a short header,
-    /// [`io::ErrorKind::InvalidData`] for invalid fields or overflowing
-    /// layouts, or an underlying I/O error. Storage is never written.
+    /// Returns the same error kinds as [`crate::traits::std::OpenHashes::open`].
     fn open(storage: H) -> impl Future<Output = io::Result<Self>> + Send;
 }
