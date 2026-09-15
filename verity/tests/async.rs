@@ -3,14 +3,14 @@
 #![cfg(feature = "tokio")]
 
 use std::io::{self, Cursor, SeekFrom};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use devmap_verity::traits::tokio::{
     Format as _, Geometry, Open as _, OpenHashes as _, Scale as _, Slice as _,
 };
-use devmap_verity::{Formatter, Hashes, Verity};
+use devmap_verity::{Hashes, Parameters, Verity};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _, ReadBuf};
 
 struct Short(Cursor<Vec<u8>>);
@@ -43,8 +43,14 @@ async fn tokio_uses_the_same_format_and_open_workflow() {
     let block_size = NonZeroU32::new(512).unwrap();
     let input = Cursor::new(&data).scale(block_size).await.unwrap();
     let mut hashes = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    let root = Formatter::new([3; 16])
-        .format(input, &mut hashes)
+    let (_, root) = Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(257).unwrap())
+        .unwrap()
+        .format(input, &mut hashes, [3; 16])
         .await
         .unwrap();
     hashes.seek(SeekFrom::Start(0)).await.unwrap();
@@ -66,10 +72,17 @@ async fn tokio_uses_the_same_format_and_open_workflow() {
 async fn asynchronous_format_rejects_short_input_and_leaves_trailing_bytes_unread() {
     let block_size = NonZeroU32::new(512).unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    let error = Formatter::new([0; 16])
-        .format(Short(Cursor::new(vec![0; 511])), hashes)
+    let error = Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(1).unwrap())
+        .unwrap()
+        .format(Short(Cursor::new(vec![0; 511])), hashes, [0; 16])
         .await
-        .unwrap_err();
+        .err()
+        .unwrap();
     assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
 
     let mut input = Cursor::new(vec![0; 513]);
@@ -81,7 +94,16 @@ async fn asynchronous_format_rejects_short_input_and_leaves_trailing_bytes_unrea
         .await
         .unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    Formatter::new([0; 16]).format(data, hashes).await.unwrap();
+    Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(1).unwrap())
+        .unwrap()
+        .format(data, hashes, [0; 16])
+        .await
+        .unwrap();
     assert_eq!(input.position(), 512);
 }
 
@@ -188,8 +210,14 @@ async fn image(blocks: usize) -> (Vec<u8>, Vec<u8>, Box<[u8]>) {
     let block_size = NonZeroU32::new(512).unwrap();
     let input = Cursor::new(&data).scale(block_size).await.unwrap();
     let mut output = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    let root = Formatter::new([7; 16])
-        .format(input, &mut output)
+    let (_, root) = Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(blocks as u64).unwrap())
+        .unwrap()
+        .format(input, &mut output, [7; 16])
         .await
         .unwrap();
     (data, output.into_inner().into_inner(), root)
@@ -229,9 +257,14 @@ async fn borrowed_endpoints_resume_cancelled_reads_with_smaller_buffers() {
             }
         })
         .await;
-        assert_eq!(device.header().uuid(), [7; 16]);
+        assert_eq!(device.hashes().uuid(), [7; 16]);
         assert_eq!(
-            device.seek(SeekFrom::Start(512)).await.unwrap_err().kind(),
+            device
+                .seek(SeekFrom::Start(512))
+                .await
+                .err()
+                .unwrap()
+                .kind(),
             io::ErrorKind::WouldBlock
         );
 

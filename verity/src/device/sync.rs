@@ -20,10 +20,10 @@ impl<D: Read + Seek, H: Read + Seek> Read for Verity<D, H> {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
         #[cfg(feature = "tokio")]
         self.ensure_idle()?;
-        if output.is_empty() || self.position >= self.header().layout.data_size {
+        if output.is_empty() || self.position >= (self.parameters().layout.data_size as u64) {
             return Ok(0);
         }
-        let block_size = u64::from(self.header().data_block_size().get());
+        let block_size = u64::from(self.parameters().data_block_size().get());
         let block = self.position / block_size;
         if self.cached != Some(block) {
             self.prepare_buffer();
@@ -48,6 +48,6 @@ impl<D, H> Geometry for Verity<D, H> {
     }
 
     fn count(&mut self) -> io::Result<u64> {
-        Ok(self.header().layout.data_size / u64::from(self.block_size.get()))
+        Ok((self.parameters().layout.data_size as u64) / u64::from(self.block_size.get()))
     }
 }

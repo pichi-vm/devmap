@@ -44,13 +44,14 @@ impl<H: AsyncRead + AsyncSeek + Unpin> Hashes<H> {
         root: &[u8],
     ) -> Poll<io::Result<()>> {
         if self.authentication.is_none() {
-            self.authentication = Some(State::new(&self.header)?);
+            self.authentication = Some(State::new(&self.parameters)?);
         }
         let state = self
             .authentication
             .as_mut()
             .ok_or_else(|| io::Error::other("missing verifier"))?;
-        let result = state.poll_authenticate(cx, &mut self.inner, &self.header, index, data, root);
+        let result =
+            state.poll_authenticate(cx, &mut self.inner, &self.parameters, index, data, root);
         if result.is_ready() {
             state.phase = Phase::Idle;
         }
@@ -63,7 +64,7 @@ impl State {
         &mut self,
         cx: &mut Context<'_>,
         storage: &mut H,
-        header: &crate::Header,
+        parameters: &crate::Parameters,
         index: u64,
         data: &[u8],
         root: &[u8],
@@ -71,19 +72,19 @@ impl State {
         loop {
             match self.phase {
                 Phase::Idle => {
-                    self.begin(header, index, data)?;
+                    self.begin(parameters, index, data)?;
                     self.phase = Phase::Start {
                         level: 0,
                         child: index,
                     };
                 }
                 Phase::Start { level, child } => {
-                    if level == header.layout.level_offsets.len() {
+                    if level == parameters.layout.level_offsets.len() {
                         return Poll::Ready(self.check_root(root));
                     }
                     ready!(Pin::new(&mut *storage).poll_complete(cx))?;
                     Pin::new(&mut *storage)
-                        .start_seek(io::SeekFrom::Start(Self::offset(header, level, child)))?;
+                        .start_seek(io::SeekFrom::Start(Self::offset(parameters, level, child)))?;
                     self.phase = Phase::Seeking { level, child };
                 }
                 Phase::Seeking { level, child } => {
@@ -110,10 +111,10 @@ impl State {
                     }
                     let filled = filled + count;
                     if filled == self.block.len() {
-                        self.advance(header, child)?;
+                        self.advance(parameters, child)?;
                         self.phase = Phase::Start {
                             level: level + 1,
-                            child: child / header.layout.hashes_per_block as u64,
+                            child: child / parameters.layout.hashes_per_block as u64,
                         };
                     } else {
                         self.phase = Phase::Reading {

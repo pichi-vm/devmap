@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io::{self, Cursor, Read as _, Seek as _, SeekFrom};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 
 use devmap_verity::traits::std::{
     Format as _, Geometry as _, Open as _, OpenHashes as _, Scale as _, Slice as _,
 };
-use devmap_verity::{Algorithm, Formatter, HashType, Hashes, Verity};
+use devmap_verity::{Algorithm, HashType, Hashes, Parameters, Verity};
 
 fn bytes(blocks: usize, block_size: usize) -> Vec<u8> {
     (0..blocks * block_size)
@@ -16,18 +16,24 @@ fn bytes(blocks: usize, block_size: usize) -> Vec<u8> {
 
 fn format(data: &[u8], block_size: u32) -> (Vec<u8>, Box<[u8]>) {
     let block_size = NonZeroU32::new(block_size).unwrap();
+    let count = data.len() as u64 / u64::from(block_size.get());
     let data = Cursor::new(data).scale(block_size).unwrap();
     let mut hashes = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let root = Formatter::new([0x5a; 16])
+    let (_, root) = Parameters::builder()
         .salt(&[7; 32])
+        .data_block_size(block_size.get())
         .unwrap()
-        .format(data, &mut hashes)
+        .hash_block_size(block_size.get())
+        .unwrap()
+        .build(NonZeroU64::new(count).unwrap())
+        .unwrap()
+        .format(data, &mut hashes, [0x5a; 16])
         .unwrap();
     (hashes.into_inner().into_inner(), root)
 }
 
 #[test]
-fn formatter_accepts_a_stream_and_returns_the_trusted_root() {
+fn format_accepts_a_stream_and_returns_the_trusted_root() {
     let data = bytes(257, 512);
     let (hashes, root) = format(&data, 512);
     assert_eq!(root.len(), 32);
@@ -36,14 +42,22 @@ fn formatter_accepts_a_stream_and_returns_the_trusted_root() {
 }
 
 #[test]
-fn formatter_derives_geometry_from_the_endpoints() {
+fn format_uses_explicit_parameters_with_compatible_endpoints() {
     let data = bytes(3, 512);
     let data_block_size = NonZeroU32::new(512).unwrap();
     let hash_block_size = NonZeroU32::new(4096).unwrap();
     let input = Cursor::new(&data).scale(data_block_size).unwrap();
     let mut hashes = Cursor::new(Vec::new()).scale(hash_block_size).unwrap();
 
-    let root = Formatter::new([0; 16]).format(input, &mut hashes).unwrap();
+    let (_, root) = Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(4096)
+        .unwrap()
+        .build(NonZeroU64::new(3).unwrap())
+        .unwrap()
+        .format(input, &mut hashes, [0; 16])
+        .unwrap();
     let encoded = hashes.as_ref().get_ref();
     assert_eq!(u32::from_le_bytes(encoded[64..68].try_into().unwrap()), 512);
     assert_eq!(
@@ -89,8 +103,14 @@ fn endpoint_regions_define_independent_data_and_hash_devices() {
     let block_size = NonZeroU32::new(512).unwrap();
     let data_view = Cursor::new(payload.clone()).scale(block_size).unwrap();
     let mut hash_view = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let root = Formatter::new([0; 16])
-        .format(data_view, &mut hash_view)
+    let (_, root) = Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(3).unwrap())
+        .unwrap()
+        .format(data_view, &mut hash_view, [0; 16])
         .unwrap();
 
     let hashes = hash_view.into_inner().into_inner();
@@ -217,7 +237,7 @@ fn composition_checks_root_length_and_both_endpoint_block_sizes() {
 
     let large_block = NonZeroU32::new(1024).unwrap();
     let hashes = Hashes::open(Cursor::new(storage.clone()).scale(large_block).unwrap()).unwrap();
-    assert_eq!(hashes.header().hash_block_size().get(), 512);
+    assert_eq!(hashes.parameters().hash_block_size().get(), 512);
     let error = Verity::open(Cursor::new(&data), hashes, &root)
         .err()
         .unwrap();
@@ -257,9 +277,16 @@ fn format_rejects_short_input_and_leaves_trailing_bytes_unread() {
     let hashes = Cursor::new(Vec::new())
         .scale(NonZeroU32::new(512).unwrap())
         .unwrap();
-    let error = Formatter::new([0; 16])
-        .format(Short(Cursor::new(vec![0; 511])), hashes)
-        .unwrap_err();
+    let error = Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(1).unwrap())
+        .unwrap()
+        .format(Short(Cursor::new(vec![0; 511])), hashes, [0; 16])
+        .err()
+        .unwrap();
     assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
 
     let mut input = Cursor::new(vec![0; 513]);
@@ -271,12 +298,20 @@ fn format_rejects_short_input_and_leaves_trailing_bytes_unread() {
     let hashes = Cursor::new(Vec::new())
         .scale(NonZeroU32::new(512).unwrap())
         .unwrap();
-    Formatter::new([0; 16]).format(data, hashes).unwrap();
+    Parameters::builder()
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(1).unwrap())
+        .unwrap()
+        .format(data, hashes, [0; 16])
+        .unwrap();
     assert_eq!(input.position(), 512);
 }
 
 #[test]
-fn formatter_configuration_is_validated_when_supplied() {
+fn format_rejects_incompatible_geometry_and_empty_input() {
     struct InvalidGeometry(Cursor<Vec<u8>>);
 
     impl io::Read for InvalidGeometry {
@@ -300,9 +335,16 @@ fn formatter_configuration_is_validated_when_supplied() {
         .scale(NonZeroU32::new(512).unwrap())
         .unwrap();
     assert_eq!(
-        Formatter::new([0; 16])
-            .format(data, hashes)
-            .unwrap_err()
+        Parameters::builder()
+            .data_block_size(512)
+            .unwrap()
+            .hash_block_size(512)
+            .unwrap()
+            .build(NonZeroU64::new(1).unwrap())
+            .unwrap()
+            .format(data, hashes, [0; 16])
+            .err()
+            .unwrap()
             .kind(),
         io::ErrorKind::InvalidInput
     );
@@ -310,24 +352,33 @@ fn formatter_configuration_is_validated_when_supplied() {
     let data = Cursor::new(Vec::new()).scale(block_size).unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).unwrap();
     assert_eq!(
-        Formatter::new([0; 16])
-            .format(data, hashes)
-            .unwrap_err()
+        Parameters::builder()
+            .data_block_size(512)
+            .unwrap()
+            .hash_block_size(512)
+            .unwrap()
+            .build(NonZeroU64::new(1).unwrap())
+            .unwrap()
+            .format(data, hashes, [0; 16])
+            .err()
+            .unwrap()
             .kind(),
-        io::ErrorKind::InvalidInput
-    );
-    assert_eq!(
-        Formatter::new([0; 16]).salt(&[0; 257]).unwrap_err().kind(),
-        io::ErrorKind::InvalidInput
+        io::ErrorKind::UnexpectedEof
     );
 
     let block_size = NonZeroU32::new(4096).unwrap();
     let data = Cursor::new(vec![0; 4096]).scale(block_size).unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let root = Formatter::new([0; 16])
+    let (_, root) = Parameters::builder()
         .algorithm(Algorithm::Sha256)
         .hash_type(HashType::Normal)
-        .format(data, hashes)
+        .data_block_size(4096)
+        .unwrap()
+        .hash_block_size(4096)
+        .unwrap()
+        .build(NonZeroU64::new(1).unwrap())
+        .unwrap()
+        .format(data, hashes, [0; 16])
         .unwrap();
     assert_eq!(root.len(), 32);
 }

@@ -34,7 +34,7 @@ use streebog::{Streebog256, Streebog512};
 #[cfg(feature = "whirlpool")]
 use whirlpool::Whirlpool;
 
-/// A hash algorithm stored in a dm-verity superblock.
+/// A dm-verity hash algorithm.
 ///
 /// Values remain representable without their hash-family features. Formatting
 /// or authenticated reading with an unavailable algorithm returns

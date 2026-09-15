@@ -4,29 +4,23 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use devmap_core::traits::std::Geometry;
 
-use crate::superblock::{Formatter, Unverified};
+use crate::superblock::Unverified;
 use crate::traits::std::Format;
 use crate::tree::TreeWriter;
+use crate::{Hashes, Parameters};
 
-impl<D, H> Format<D, H> for Formatter
+impl<D, H> Format<D, H> for Parameters
 where
     D: Read + Geometry,
     H: Write + Seek + Geometry,
 {
-    fn format(self, mut data: D, mut hashes: H) -> io::Result<Box<[u8]>> {
-        let data_block_size = data.block_size()?;
-        let data_size = data
-            .count()?
-            .checked_mul(u64::from(data_block_size.get()))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "data geometry overflows"))?;
-        let output_block_size = hashes.block_size()?;
-        let superblock = self.superblock(data_size, data_block_size, output_block_size)?;
-        hashes.seek(SeekFrom::Start(0))?;
-
-        let encoded = Unverified::from(&superblock);
-        let padding =
-            u64::from(superblock.hash_block_size().get()) - size_of::<Unverified>() as u64;
-        let mut tree = TreeWriter::new(hashes, superblock)?;
+    fn format(self, mut data: D, hashes: H, uuid: [u8; 16]) -> io::Result<(Hashes<H>, Box<[u8]>)> {
+        let encoded = Unverified::try_from((&self, uuid))?;
+        self.validate_format_geometry(data.block_size()?, hashes.block_size()?)?;
+        let data_size = self.layout.data_size as u64;
+        let padding = u64::from(self.hash_block_size().get()) - size_of::<Unverified>() as u64;
+        let mut tree = TreeWriter::new(hashes, self)?;
+        tree.output_mut().seek(SeekFrom::Start(0))?;
         tree.output_mut().write_all(encoded.as_ref())?;
         io::copy(&mut io::repeat(0).take(padding), tree.output_mut())?;
         let copied = io::copy(&mut data.by_ref().take(data_size), &mut tree)?;
@@ -34,6 +28,7 @@ where
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         tree.flush()?;
-        Ok(Box::from(tree.digest()?))
+        let (hashes, parameters, root) = tree.finish()?;
+        Ok((Hashes::new(hashes, uuid, parameters), root))
     }
 }

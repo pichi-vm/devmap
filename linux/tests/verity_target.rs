@@ -6,13 +6,13 @@ use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_core::parse::DevId;
 use devmap_core::traits::std::SyncData as _;
 use devmap_verity::{
-    Formatter, HashType, Hashes, dm,
+    HashType, Hashes, Parameters, dm,
     traits::std::{Format as _, OpenHashes as _, Scale as _, SliceBytes as _},
 };
 use std::{
     fs::OpenOptions,
     io::{Read as _, Write as _},
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroU64},
 };
 
 #[test]
@@ -49,11 +49,16 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
             .unwrap()
             .slice_bytes(16384..)
             .unwrap();
-        let root = Formatter::new([7; 16])
+        let (_, root) = Parameters::builder()
             .hash_type(hash_type)
             .salt(&[3; 17])
+            .data_block_size(data_size)
             .unwrap()
-            .format(data_blocks, &mut output)
+            .hash_block_size(hash_size)
+            .unwrap()
+            .build(NonZeroU64::new(65536 / u64::from(data_size)).unwrap())
+            .unwrap()
+            .format(data_blocks, &mut output, [7; 16])
             .unwrap();
         output.sync_data().unwrap();
         drop(output);
@@ -64,14 +69,15 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
                 .unwrap(),
         )
         .unwrap();
-        let target = dm::Builder::from(hash_device.header())
-            .header_offset_bytes(16384)
-            .unwrap()
-            .build(
+        let target = hash_device
+            .parameters()
+            .target(
                 DevId::from_path(&data.path).unwrap(),
                 DevId::from_path(&hashes.path).unwrap(),
                 &root,
             )
+            .unwrap()
+            .with_header_offset_bytes(16384)
             .unwrap();
         let device = Owned::create(
             &control,

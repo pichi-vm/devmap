@@ -59,11 +59,10 @@ For an existing verity hash device:
 1. Open its hash storage with `Hashes::open`, importing `OpenHashes` from
    `devmap_verity::traits::std` or `traits::tokio`. No data device or root is
    required for this step.
-2. Read `hashes.header()` and convert it with `dm::Builder::from`. If the header
-   is embedded in a larger hash device, open it through a zero-based region
-   and set `header_offset_bytes` to its physical offset.
-3. Call `build` with the data and hash `DevId`s and a trusted root digest.
+2. Call `hashes.parameters().target(data_id, hash_id, trusted_root)`.
    The header does not contain that root.
+3. For an embedded header, open through a zero-based region and set the
+   target's `with_header_offset_bytes` to its offset in the Linux hash device.
 4. Create a Linux device. On `device.builder()`, call `read_only()` and
    `add(0, target.data_sectors(), target)` for a full-size row. `load()` stages
    the table and `device.resume()` activates it.
@@ -79,6 +78,9 @@ including cleanup after a failed load or resume. The
 - Core's `scale_to(bytes)` selects a final logical-block size,
   `slice_bytes(range)` selects an aligned byte range, and `byte_size()` reports
   the complete extent. Scaling does not resize storage.
+- Verity's `Parameters::builder()` configures both formatting and targets.
+  The format traits take `format(data, hashes, uuid)` and return `(Hashes, root)`.
+  Stored metadata is available through `Hashes::uuid()` and `parameters()`.
 - Snapshot's `Layer::create` initializes metadata in preallocated COW storage.
   Before allocating a new chunk, a write matching the origin succeeds without
   promotion. Raw-image import and sparse-file traversal belong in application

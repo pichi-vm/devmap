@@ -1,7 +1,7 @@
 # devmap-verity
 
 Inspect dm-verity metadata, build hash trees, and read authenticated data.
-Start with `Hashes` for metadata, `Formatter` to create a hash device, or
+Start with `Hashes` for metadata, `Parameters::builder()` to configure formatting or a target, or
 `Verity` to verify reads against a trusted root. Kernel activation belongs
 to `devmap-linux`.
 

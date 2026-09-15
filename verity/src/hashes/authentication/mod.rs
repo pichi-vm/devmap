@@ -5,7 +5,7 @@ use std::io;
 use digest::DynDigest;
 
 use super::Hashes;
-use crate::Header;
+use crate::Parameters;
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -20,8 +20,8 @@ pub(super) struct State {
 }
 
 impl State {
-    fn new(header: &Header) -> io::Result<Self> {
-        let hasher = header.algorithm().hasher().ok_or_else(|| {
+    fn new(parameters: &Parameters) -> io::Result<Self> {
+        let hasher = parameters.algorithm().hasher().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "hash algorithm support is not enabled",
@@ -29,39 +29,42 @@ impl State {
         })?;
         Ok(Self {
             hasher,
-            digest: vec![0; header.algorithm().digest_size()].into_boxed_slice(),
-            block: vec![0; header.hash_block_size().get() as usize].into_boxed_slice(),
+            digest: vec![0; parameters.algorithm().digest_size()].into_boxed_slice(),
+            block: vec![0; parameters.hash_block_size().get() as usize].into_boxed_slice(),
             #[cfg(feature = "tokio")]
             phase: r#async::Phase::Idle,
         })
     }
 
-    fn begin(&mut self, header: &Header, index: u64, data: &[u8]) -> io::Result<()> {
-        if index >= header.data_blocks().get()
-            || data.len() != header.data_block_size().get() as usize
+    fn begin(&mut self, parameters: &Parameters, index: u64, data: &[u8]) -> io::Result<()> {
+        if index >= parameters.data_blocks().get()
+            || data.len() != parameters.data_block_size().get() as usize
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "invalid verity data block",
             ));
         }
-        header
-            .hash_type()
-            .digest(self.hasher.as_mut(), header.salt(), data, &mut self.digest)
+        parameters.hash_type().digest(
+            self.hasher.as_mut(),
+            parameters.salt(),
+            data,
+            &mut self.digest,
+        )
     }
 
-    fn advance(&mut self, header: &Header, child: u64) -> io::Result<()> {
-        let slot = (child % header.layout.hashes_per_block as u64) as usize;
-        let start = slot * header.layout.slot_size;
+    fn advance(&mut self, parameters: &Parameters, child: u64) -> io::Result<()> {
+        let slot = (child % parameters.layout.hashes_per_block as u64) as usize;
+        let start = slot * parameters.layout.slot_size;
         if self.block.get(start..start + self.digest.len()) != Some(self.digest.as_ref()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "verity data authentication failed",
             ));
         }
-        header.hash_type().digest(
+        parameters.hash_type().digest(
             self.hasher.as_mut(),
-            header.salt(),
+            parameters.salt(),
             &self.block,
             &mut self.digest,
         )
@@ -77,12 +80,12 @@ impl State {
         Ok(())
     }
 
-    fn offset(header: &Header, level: usize, child: u64) -> u64 {
-        // Header validation bounds the complete tree; begin bounds the child.
-        u64::from(header.hash_block_size().get())
-            + header.layout.level_offsets[level]
-            + (child / header.layout.hashes_per_block as u64)
-                * u64::from(header.hash_block_size().get())
+    fn offset(parameters: &Parameters, level: usize, child: u64) -> u64 {
+        // Header validation bounds the complete tree in bytes; begin bounds the child.
+        u64::from(parameters.hash_block_size().get())
+            + parameters.layout.level_offsets[level] as u64
+            + (child / parameters.layout.hashes_per_block as u64)
+                * u64::from(parameters.hash_block_size().get())
     }
 }
 
@@ -91,13 +94,13 @@ impl<H> Hashes<H> {
         let bytes = count
             .checked_mul(u64::from(block_size.get()))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "hash geometry overflows"))?;
-        if self.header.hash_block_size().get() % block_size.get() != 0 {
+        if self.parameters.hash_block_size().get() % block_size.get() != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "verity hash block size is incompatible with the endpoint block size",
             ));
         }
-        if bytes < self.header.layout.hash_size {
+        if u128::from(bytes) < self.parameters.layout.hash_size {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "hash endpoint is shorter than the declared layout",

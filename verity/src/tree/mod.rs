@@ -6,7 +6,7 @@ use std::io;
 use state::PendingBlock;
 use state::State;
 
-use crate::superblock::Header;
+use crate::Parameters;
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -16,11 +16,11 @@ mod sync;
 /// Writes a dm-verity hash tree to a seekable output.
 ///
 /// Write exactly the number of complete data blocks declared by the
-/// superblock. Input slices may have any length; only fragments are copied
+/// parameters. Input slices may have any length; only fragments are copied
 /// into the internal block buffer. Complete aligned blocks are hashed directly.
 ///
 /// `flush` has its conventional meaning: it drains available hash output but
-/// neither pads nor seals incomplete input. Call [`digest`](Self::digest)
+/// neither pads nor seals incomplete input. Call [`finish`](Self::finish)
 /// after the exact input length has been written and flushed. Dropping the writer
 /// does not flush it. The writer cannot be used after an output error.
 #[allow(missing_debug_implementations)]
@@ -38,15 +38,15 @@ impl<W> TreeWriter<W> {
     /// Creates a tree writer at the output's current position.
     ///
     /// This writes only the hash tree. Write the encoded
-    /// superblock and its block padding first. Creating the
+    /// header and its block padding first. Creating the
     /// writer performs no I/O.
     ///
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::Unsupported`] if the feature for the selected
     /// hash algorithm is not enabled.
-    pub(crate) fn new(output: W, superblock: Header) -> io::Result<Self> {
-        let hasher = superblock.algorithm().hasher().ok_or_else(|| {
+    pub(crate) fn new(output: W, parameters: Parameters) -> io::Result<Self> {
+        let hasher = parameters.algorithm().hasher().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "hash algorithm support is not enabled",
@@ -55,7 +55,7 @@ impl<W> TreeWriter<W> {
 
         Ok(Self {
             output,
-            tree: State::new(superblock, hasher),
+            tree: State::new(parameters, hasher),
             output_range: None,
             phase: Phase::Open,
             #[cfg(feature = "tokio")]
@@ -67,49 +67,20 @@ impl<W> TreeWriter<W> {
         &mut self.output
     }
 
-    /// Returns the root digest after the tree is complete and flushed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`io::ErrorKind::UnexpectedEof`] if more input is needed,
-    /// [`io::ErrorKind::WouldBlock`] if the tree needs to be flushed, or
-    /// [`io::ErrorKind::Other`] after an output error.
-    pub(crate) fn digest(&self) -> io::Result<&[u8]> {
-        match &self.phase {
+    /// Returns the output, parameters, and root only after a successful final flush.
+    pub(crate) fn finish(self) -> io::Result<(W, Parameters, Box<[u8]>)> {
+        match self.phase {
+            Phase::Complete(digest) => Ok((self.output, self.tree.parameters, digest)),
             Phase::Open => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "verity input has not reached its final data block",
             )),
-            Phase::Sealed => Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "verity tree must be flushed before its digest is available",
-            )),
-            #[cfg(feature = "tokio")]
-            Phase::Draining(draining) => match draining.after {
-                AfterDrain::Finish => Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "verity tree must be flushed before its digest is available",
-                )),
-                AfterDrain::AcceptInput | AfterDrain::FlushIntermediate => Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "verity input has not reached its final data block",
-                )),
-            },
-            #[cfg(feature = "tokio")]
-            Phase::SeekingEnd { .. } | Phase::FlushingOutput(AfterFlush::Complete(_)) => {
-                Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "verity tree must be flushed before its digest is available",
-                ))
-            }
-            #[cfg(feature = "tokio")]
-            Phase::FlushingOutput(AfterFlush::Open) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "verity input has not reached its final data block",
-            )),
-            Phase::Complete(digest) => Ok(digest),
             Phase::Failed => Err(io::Error::other(
                 "cannot use a tree writer after an output failure",
+            )),
+            _ => Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "verity tree must be flushed before its digest is available",
             )),
         }
     }

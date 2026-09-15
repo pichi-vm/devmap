@@ -17,7 +17,7 @@ impl<H: Geometry> Hashes<H> {
 impl<H: Read + Seek> Hashes<H> {
     pub(crate) fn authenticate(&mut self, index: u64, data: &[u8], root: &[u8]) -> io::Result<()> {
         if self.authentication.is_none() {
-            self.authentication = Some(State::new(&self.header)?);
+            self.authentication = Some(State::new(&self.parameters)?);
         }
         let state = self
             .authentication
@@ -30,14 +30,17 @@ impl<H: Read + Seek> Hashes<H> {
                 "authentication is in progress",
             ));
         }
-        state.begin(&self.header, index, data)?;
+        state.begin(&self.parameters, index, data)?;
         let mut child = index;
-        for level in 0..self.header.layout.level_offsets.len() {
-            self.inner
-                .seek(SeekFrom::Start(State::offset(&self.header, level, child)))?;
+        for level in 0..self.parameters.layout.level_offsets.len() {
+            self.inner.seek(SeekFrom::Start(State::offset(
+                &self.parameters,
+                level,
+                child,
+            )))?;
             self.inner.read_exact(&mut state.block)?;
-            state.advance(&self.header, child)?;
-            child /= self.header.layout.hashes_per_block as u64;
+            state.advance(&self.parameters, child)?;
+            child /= self.parameters.layout.hashes_per_block as u64;
         }
         state.check_root(root)
     }
