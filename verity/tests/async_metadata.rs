@@ -18,7 +18,7 @@ async fn tokio_files_work_without_a_hash_implementation() {
     file.write_all(&common::header("sha256")).unwrap();
     let mut file = tokio::fs::File::from_std(file);
     let hashes = Hashes::open(&mut file).await.unwrap();
-    assert_eq!(hashes.header().uuid(), [0x5a; 16]);
+    assert_eq!(hashes.uuid(), [0x5a; 16]);
     assert_eq!(hashes.into_inner().stream_position().await.unwrap(), 512);
 }
 
@@ -71,7 +71,7 @@ async fn tokio_only_build_inspects_every_algorithm_with_borrowed_storage() {
             ready: false,
         };
         let hashes = Hashes::open(&mut source).await.unwrap();
-        assert_eq!(hashes.header().algorithm(), algorithm);
+        assert_eq!(hashes.parameters().algorithm(), algorithm);
         assert_eq!(hashes.into_inner().inner.position(), 512);
     }
 }
@@ -90,7 +90,7 @@ async fn cancelled_header_open_can_restart_at_zero() {
     .await;
     drop(opening);
     let hashes = Hashes::open(&mut source).await.unwrap();
-    assert_eq!(hashes.header().salt(), [1, 2, 3]);
+    assert_eq!(hashes.parameters().salt(), [1, 2, 3]);
     assert_eq!(hashes.into_inner().inner.position(), 512);
 }
 

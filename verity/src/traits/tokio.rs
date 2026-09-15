@@ -43,7 +43,12 @@ pub trait Format<D, H>: Sized {
     ///
     /// Returns the same error kinds as
     /// [`crate::traits::std::Format::format`].
-    fn format(self, data: D, hashes: H) -> impl Future<Output = io::Result<Box<[u8]>>> + Send;
+    fn format(
+        self,
+        data: D,
+        hashes: H,
+        uuid: [u8; 16],
+    ) -> impl Future<Output = io::Result<(crate::Hashes<H>, Box<[u8]>)>> + Send;
 }
 
 /// Opens a dm-verity device asynchronously.

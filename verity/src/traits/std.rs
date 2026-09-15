@@ -31,24 +31,36 @@ pub use devmap_core::traits::std::{Geometry, Scale, Slice, SliceBytes, SyncData}
     )))
 )]
 pub trait Format<D, H>: Sized {
-    /// Writes a hash device from byte zero and returns its root digest.
+    /// Writes a header and tree, returning their handle and root digest.
     ///
-    /// Input geometry defines the protected extent: one or more complete
-    /// blocks. Exactly that extent is consumed; trailing bytes remain unread.
-    /// Output geometry supplies the hash-block size. Fixed storage must fit
-    /// the complete image; growable storage expands as needed.
+    /// Implemented for [`crate::Parameters`]. Reads exactly the declared data
+    /// extent from the current input position; trailing bytes remain unread.
+    /// Each configured block size must be a multiple of the endpoint's block
+    /// size. Writes hash storage from byte zero. Fixed storage must fit the
+    /// image; growable storage expands as needed. The UUID identifies the
+    /// volume but does not authenticate it.
     ///
-    /// Output is flushed, not persisted. For durable output, retain it by
-    /// passing `&mut` and call [`SyncData::sync_data`] after formatting.
-    /// Failure may leave partial output and advance either stream.
+    /// Header-based formatting accepts block sizes up to 512 KiB and salts
+    /// up to 256 bytes. Extents must fit in `u64` bytes. Configuration is
+    /// checked before writing.
+    ///
+    /// Output is flushed, not persisted. Call [`SyncData::sync_data`] on the
+    /// returned handle for durability. Keep the root in independently trusted
+    /// storage. Failure may leave partial output and advance either stream;
+    /// no completed handle or root is returned.
     ///
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::InvalidInput`] for incompatible endpoint
-    /// geometry, [`io::ErrorKind::UnexpectedEof`] for short input, or
+    /// geometry or unrepresentable header fields, [`io::ErrorKind::UnexpectedEof`] for short input, or
     /// [`io::ErrorKind::Unsupported`] for a disabled hash implementation.
     /// Other errors come from the streams.
-    fn format(self, data: D, hashes: H) -> io::Result<Box<[u8]>>;
+    fn format(
+        self,
+        data: D,
+        hashes: H,
+        uuid: [u8; 16],
+    ) -> io::Result<(crate::Hashes<H>, Box<[u8]>)>;
 }
 
 /// Opens a dm-verity device using an externally trusted root digest.

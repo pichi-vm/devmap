@@ -12,9 +12,9 @@
 ))]
 
 use std::io::{self, Cursor, Read as _, Seek as _, SeekFrom};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 
-use devmap_verity::{Algorithm, Formatter, Hashes, Verity, traits::std::*};
+use devmap_verity::{Algorithm, Hashes, Parameters, Verity, traits::std::*};
 
 mod common;
 
@@ -51,7 +51,7 @@ fn every_enabled_algorithm_formats_and_authenticates() {
         if !available(algorithm) {
             continue;
         }
-        for blocks in [1, 2, 129] {
+        for blocks in [1usize, 2, 129] {
             for hash_type in [
                 devmap_verity::HashType::Normal,
                 devmap_verity::HashType::ChromeOs,
@@ -61,12 +61,21 @@ fn every_enabled_algorithm_formats_and_authenticates() {
                     .collect();
                 let block_size = NonZeroU32::new(512).unwrap();
                 let mut storage = Cursor::new(Vec::new()).scale(block_size).unwrap();
-                let root = Formatter::new([7; 16])
+                let (_, root) = Parameters::builder()
                     .algorithm(algorithm)
                     .hash_type(hash_type)
                     .salt(&[9; 17])
+                    .data_block_size(512)
                     .unwrap()
-                    .format(Cursor::new(&data).scale(block_size).unwrap(), &mut storage)
+                    .hash_block_size(512)
+                    .unwrap()
+                    .build(NonZeroU64::new(blocks as u64).unwrap())
+                    .unwrap()
+                    .format(
+                        Cursor::new(&data).scale(block_size).unwrap(),
+                        &mut storage,
+                        [7; 16],
+                    )
                     .unwrap();
                 assert_eq!(root.len(), digest_size);
                 let hashes = Hashes::open(storage).unwrap();
@@ -90,7 +99,7 @@ fn unavailable_algorithms_allow_inspection_and_composition_but_not_hashing() {
         let hashes = Hashes::open(Cursor::new(bytes)).unwrap();
         let mut device =
             Verity::open(Cursor::new(vec![0; 1536]), hashes, &vec![0; digest_size]).unwrap();
-        assert_eq!(device.header().algorithm(), algorithm);
+        assert_eq!(device.hashes().parameters().algorithm(), algorithm);
         let mut output = [0xaa; 1];
         assert_eq!(
             device.read(&mut output).unwrap_err().kind(),
@@ -101,13 +110,21 @@ fn unavailable_algorithms_allow_inspection_and_composition_but_not_hashing() {
 
         let block_size = NonZeroU32::new(512).unwrap();
         let mut bytes = Cursor::new(Vec::new());
-        let error = Formatter::new([0; 16])
+        let error = Parameters::builder()
             .algorithm(algorithm)
+            .data_block_size(512)
+            .unwrap()
+            .hash_block_size(512)
+            .unwrap()
+            .build(NonZeroU64::new(1).unwrap())
+            .unwrap()
             .format(
                 Cursor::new(vec![0; 512]).scale(block_size).unwrap(),
                 (&mut bytes).scale(block_size).unwrap(),
+                [0; 16],
             )
-            .unwrap_err();
+            .err()
+            .unwrap();
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
         assert_eq!(bytes.into_inner(), [] as [u8; 0]);
     }
@@ -123,9 +140,19 @@ fn failed_authentication_cannot_reuse_a_previous_blocks_cache_tag() {
     let block_size = NonZeroU32::new(512).unwrap();
     let data = [vec![0x11; 512], vec![0x22; 512]].concat();
     let mut storage = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let root = Formatter::new([0; 16])
+    let (_, root) = Parameters::builder()
         .algorithm(algorithm)
-        .format(Cursor::new(&data).scale(block_size).unwrap(), &mut storage)
+        .data_block_size(512)
+        .unwrap()
+        .hash_block_size(512)
+        .unwrap()
+        .build(NonZeroU64::new(2).unwrap())
+        .unwrap()
+        .format(
+            Cursor::new(&data).scale(block_size).unwrap(),
+            &mut storage,
+            [0; 16],
+        )
         .unwrap();
     let mut corrupt = data;
     corrupt[512] ^= 1;

@@ -34,7 +34,8 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> Verity<
         loop {
             match self.phase {
                 Phase::Idle => {
-                    let block = self.position / u64::from(self.header().data_block_size().get());
+                    let block =
+                        self.position / u64::from(self.parameters().data_block_size().get());
                     if self.cached == Some(block) {
                         return Poll::Ready(Ok(()));
                     }
@@ -43,7 +44,7 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> Verity<
                 }
                 Phase::Start { block } => {
                     ready!(Pin::new(&mut self.data).poll_complete(cx))?;
-                    let offset = block * u64::from(self.header().data_block_size().get());
+                    let offset = block * u64::from(self.parameters().data_block_size().get());
                     Pin::new(&mut self.data).start_seek(io::SeekFrom::Start(offset))?;
                     self.phase = Phase::Seeking { block };
                 }
@@ -90,7 +91,7 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> AsyncRe
         output: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        if output.remaining() == 0 || this.position >= this.header().layout.data_size {
+        if output.remaining() == 0 || this.position >= (this.parameters().layout.data_size as u64) {
             return Poll::Ready(Ok(()));
         }
         let result = this.poll_block(cx);
@@ -98,7 +99,8 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> AsyncRe
             this.phase = Phase::Idle;
         }
         ready!(result)?;
-        let within = (this.position % u64::from(this.header().data_block_size().get())) as usize;
+        let within =
+            (this.position % u64::from(this.parameters().data_block_size().get())) as usize;
         let count = output.remaining().min(this.buffer.len() - within);
         output.put_slice(&this.buffer[within..within + count]);
         this.position += count as u64;
@@ -123,8 +125,8 @@ impl<D, H> Geometry for Verity<D, H> {
     }
 
     fn count(&mut self) -> Pin<Box<dyn Future<Output = io::Result<u64>> + Send + '_>> {
-        Box::pin(std::future::ready(Ok(
-            self.header().layout.data_size / u64::from(self.block_size.get())
-        )))
+        Box::pin(std::future::ready(Ok((self.parameters().layout.data_size
+            as u64)
+            / u64::from(self.block_size.get()))))
     }
 }

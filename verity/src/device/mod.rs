@@ -3,7 +3,7 @@
 use std::io;
 use std::num::NonZeroU32;
 
-use crate::{Hashes, Header};
+use crate::{Hashes, Parameters};
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -61,8 +61,8 @@ impl<D, H> Verity<D, H> {
         block_size: NonZeroU32,
         count: u64,
     ) -> io::Result<Self> {
-        let header = hashes.header();
-        if root.len() != header.algorithm().digest_size() {
+        let parameters = hashes.parameters();
+        if root.len() != parameters.algorithm().digest_size() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "root digest length does not match the hash algorithm",
@@ -71,13 +71,13 @@ impl<D, H> Verity<D, H> {
         let length = count
             .checked_mul(u64::from(block_size.get()))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "data geometry overflows"))?;
-        if header.data_block_size().get() % block_size.get() != 0 {
+        if parameters.data_block_size().get() % block_size.get() != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "verity data block size is incompatible with the endpoint block size",
             ));
         }
-        if length < header.layout.data_size {
+        if length < parameters.layout.data_size as u64 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "data endpoint is shorter than the declared layout",
@@ -96,12 +96,13 @@ impl<D, H> Verity<D, H> {
         })
     }
 
-    /// Borrows the hash device's validated metadata without performing I/O.
-    ///
-    /// This does not authenticate the backing contents and remains available
-    /// during a pending asynchronous read.
-    pub fn header(&self) -> &Header {
-        self.hashes.header()
+    /// Borrows the hash device for metadata access without I/O.
+    pub const fn hashes(&self) -> &Hashes<H> {
+        &self.hashes
+    }
+
+    fn parameters(&self) -> &Parameters {
+        self.hashes.parameters()
     }
 
     #[cfg(feature = "tokio")]
@@ -120,11 +121,12 @@ impl<D, H> Verity<D, H> {
         // previous block's cache tag authenticate the new buffer contents.
         self.cached = None;
         self.buffer
-            .resize(self.header().data_block_size().get() as usize, 0);
+            .resize(self.parameters().data_block_size().get() as usize, 0);
     }
 
     fn copy_authenticated(&mut self, output: &mut [u8]) -> usize {
-        let within = (self.position % u64::from(self.header().data_block_size().get())) as usize;
+        let within =
+            (self.position % u64::from(self.parameters().data_block_size().get())) as usize;
         let count = output.len().min(self.buffer.len() - within);
         output[..count].copy_from_slice(&self.buffer[within..within + count]);
         self.position += count as u64;
@@ -138,7 +140,7 @@ impl<D, H> Verity<D, H> {
             io::SeekFrom::Start(position) => i128::from(position),
             io::SeekFrom::Current(delta) => i128::from(self.position) + i128::from(delta),
             io::SeekFrom::End(delta) => {
-                i128::from(self.header().layout.data_size) + i128::from(delta)
+                i128::from(self.parameters().layout.data_size as u64) + i128::from(delta)
             }
         };
         self.position = u64::try_from(next).map_err(|_| {

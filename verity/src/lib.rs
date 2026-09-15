@@ -12,7 +12,7 @@
 //! Inspect dm-verity metadata, build hash trees, and read authenticated data.
 //!
 //! [`Hashes`] opens metadata independently of the data device. With hashing
-//! enabled, `Formatter` builds hash devices and `Verity` authenticates reads.
+//! enabled, [`Parameters`] formats hash devices and `Verity` authenticates reads.
 //! The [`dm`] module describes kernel targets; activation belongs to a backend
 //! such as `devmap-linux`.
 //!
@@ -29,7 +29,7 @@
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let hashes = Hashes::open(File::open("hash.img")?)?;
-//! println!("{}", hashes.header().algorithm());
+//! println!("{}", hashes.parameters().algorithm());
 //! # Ok(())
 //! # }
 //! ```
@@ -68,6 +68,7 @@ mod device;
 ))]
 mod format;
 mod hashes;
+mod parameters;
 mod superblock;
 pub mod traits;
 #[cfg(any(
@@ -94,17 +95,7 @@ mod tree;
 ))]
 pub use device::Verity;
 pub use hashes::Hashes;
-#[cfg(any(
-    feature = "sha1",
-    feature = "sha2",
-    feature = "sha3",
-    feature = "ripemd",
-    feature = "whirlpool",
-    feature = "streebog",
-    feature = "sm3",
-    feature = "blake2"
-))]
-pub use superblock::Formatter;
-pub use superblock::{Algorithm, HashType, Header};
+
+pub use parameters::{Algorithm, Builder, HashType, Parameters};
 
 pub mod dm;

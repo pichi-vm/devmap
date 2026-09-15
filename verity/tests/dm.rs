@@ -2,28 +2,29 @@
 
 use devmap_core::parse::DevId;
 use devmap_verity::{
-    HashType, Hashes,
-    dm::{Builder, CorruptionPolicy as C, Fec, Info, IoErrorPolicy as E, VerityTarget},
+    Builder, HashType, Hashes, Parameters,
+    dm::{CorruptionPolicy as C, Fec, Info, IoErrorPolicy as E, VerityTarget},
     traits::std::OpenHashes as _,
 };
-use std::{
-    io::{self, Cursor},
-    num::NonZeroU64,
-};
+use std::{io::Cursor, num::NonZeroU64};
 mod common;
 
 fn id(minor: u32) -> DevId {
     DevId::new(252, minor).unwrap()
 }
 fn builder() -> Builder {
-    Builder::new(NonZeroU64::new(3).unwrap())
+    Parameters::builder()
         .data_block_size(512)
         .unwrap()
         .hash_block_size(512)
         .unwrap()
 }
 fn finish(builder: Builder) -> VerityTarget {
-    builder.build(id(1), id(2), &[0xbb; 32]).unwrap()
+    builder
+        .build(NonZeroU64::new(3).unwrap())
+        .unwrap()
+        .target(id(1), id(2), &[0xbb; 32])
+        .unwrap()
 }
 
 #[test]
@@ -31,28 +32,29 @@ fn all_parameters_round_trip_including_every_policy_combination() {
     for corruption in [C::Error, C::Ignore, C::Restart, C::Panic] {
         for errors in [E::Error, E::Restart, E::Panic] {
             for bits in 0u8..32 {
-                let mut b = builder()
-                    .hash_type(HashType::ChromeOs)
-                    .hash_start_block(7)
-                    .salt(&[0xaa; 257])
-                    .corruption_policy(corruption)
-                    .io_error_policy(errors)
-                    .ignore_zero_blocks(bits & 1 != 0)
-                    .check_at_most_once(bits & 2 != 0)
-                    .try_verify_in_tasklet(bits & 4 != 0);
+                let mut target = finish(builder().hash_type(HashType::ChromeOs).salt(&[0xaa; 257]))
+                    .with_hash_start_block(7)
+                    .unwrap()
+                    .with_corruption_policy(corruption)
+                    .with_io_error_policy(errors)
+                    .with_ignore_zero_blocks(bits & 1 != 0)
+                    .with_check_at_most_once(bits & 2 != 0)
+                    .unwrap()
+                    .with_try_verify_in_tasklet(bits & 4 != 0);
                 if bits & 8 != 0 {
-                    b = b.fec(
-                        Fec::new(id(3), NonZeroU64::new(4).unwrap(), 2)
-                            .unwrap()
-                            .start(11),
-                    );
-                }
-                if bits & 16 != 0 {
-                    b = b
-                        .root_hash_sig_key_desc("signature with spaces\\and-backslash")
+                    target = target
+                        .with_fec(
+                            Fec::new(id(3), NonZeroU64::new(4).unwrap(), 2)
+                                .unwrap()
+                                .start(11),
+                        )
                         .unwrap();
                 }
-                let target = finish(b);
+                if bits & 16 != 0 {
+                    target = target
+                        .with_root_hash_sig_key_desc("signature with spaces\\and-backslash")
+                        .unwrap();
+                }
                 let text = target.to_string();
                 assert_eq!(text.parse::<VerityTarget>().unwrap(), target, "{text}");
                 assert_eq!(target.data_sectors(), 3);
@@ -68,41 +70,43 @@ fn all_parameters_round_trip_including_every_policy_combination() {
 fn header_conversion_needs_no_hashing_and_preserves_all_shared_fields() {
     for &(name, algorithm, digest_size) in common::ALGORITHMS {
         let hashes = Hashes::open(Cursor::new(common::header(name))).unwrap();
-        let target = Builder::from(hashes.header())
-            .header_offset_bytes(8192)
+        let target = hashes
+            .parameters()
+            .target(id(1), id(2), &vec![0; digest_size])
             .unwrap()
-            .build(id(1), id(2), &vec![0; digest_size])
+            .with_header_offset_bytes(8192)
             .unwrap();
         assert_eq!(target.hash_start_block(), 3);
-        assert_eq!(target.algorithm(), algorithm.as_ref());
-        assert_eq!(target.data_block_size().get(), 512);
-        assert_eq!(target.hash_block_size().get(), 4096);
-        assert_eq!(
-            target.to_header(hashes.header().uuid()).unwrap(),
-            *hashes.header()
-        );
+        assert_eq!(target.parameters().algorithm(), algorithm);
+        assert_eq!(target.parameters().data_block_size().get(), 512);
+        assert_eq!(target.parameters().hash_block_size().get(), 4096);
+        assert_eq!(target.parameters(), hashes.parameters());
     }
 }
 
 #[test]
-fn raw_kernel_algorithms_and_headerless_trees_are_representable() {
-    let target = finish(
-        builder()
-            .algorithm("future-kernel-hash")
-            .unwrap()
-            .hash_start_block(0)
-            .salt(&[]),
-    );
-    let text = target.to_string();
-    assert!(text.ends_with(" -"));
-    assert_eq!(text.parse::<VerityTarget>().unwrap(), target);
-    assert_eq!(
-        target.to_header([0; 16]).unwrap_err().kind(),
-        io::ErrorKind::Unsupported
-    );
+fn headerless_trees_and_large_salts_need_no_header() {
+    let target = finish(builder().salt(&[0xaa; 257]))
+        .with_hash_start_block(0)
+        .unwrap();
+    assert_eq!(target.to_string().parse::<VerityTarget>().unwrap(), target);
+    assert_eq!(target.hash_start_block(), 0);
+    assert_eq!(target.parameters().salt().len(), 257);
+    assert!(finish(builder()).to_string().ends_with(" -"));
+}
+
+#[test]
+fn unknown_algorithms_are_rejected() {
+    let text = finish(builder()).to_string();
     assert!(
-        finish(builder().salt(&[0; 257]))
-            .to_header([0; 16])
+        text.replace("sha256", "future-kernel-hash")
+            .parse::<VerityTarget>()
+            .is_err()
+    );
+    assert!(text.replace("sha256", "").parse::<VerityTarget>().is_err());
+    assert!(
+        text.replace("sha256", "sha 256")
+            .parse::<VerityTarget>()
             .is_err()
     );
 }
@@ -113,37 +117,36 @@ fn invalid_parameters_and_conflicting_options_are_rejected() {
         assert!(builder().data_block_size(size).is_err());
         assert!(builder().hash_block_size(size).is_err());
     }
-    assert!(builder().header_offset_bytes(1).is_err());
-    assert!(builder().algorithm("").is_err());
-    assert!(builder().algorithm("sha 256").is_err());
-    assert!(builder().root_hash_sig_key_desc("bad\0key").is_err());
-    assert!(builder().build(id(1), id(2), &[0; 31]).is_err());
+    assert!(finish(builder()).with_header_offset_bytes(1).is_err());
     assert!(
-        Builder::new(NonZeroU64::new(u64::MAX).unwrap())
-            .build(id(1), id(2), &[0; 32])
+        finish(builder())
+            .with_root_hash_sig_key_desc("bad\0key")
             .is_err()
     );
     assert!(
         builder()
-            .hash_start_block(u64::MAX)
-            .build(id(1), id(2), &[0; 32])
+            .build(NonZeroU64::new(3).unwrap())
+            .unwrap()
+            .target(id(1), id(2), &[0; 31])
             .is_err()
     );
+    assert!(
+        Parameters::builder()
+            .build(NonZeroU64::new(u64::MAX).unwrap())
+            .is_err()
+    );
+    assert!(finish(builder()).with_hash_start_block(u64::MAX).is_err());
     for roots in [0, 1, 25, 255] {
         assert!(Fec::new(id(3), NonZeroU64::new(4).unwrap(), roots).is_err());
     }
     assert!(
-        builder()
-            .fec(Fec::new(id(3), NonZeroU64::new(3).unwrap(), 2).unwrap())
-            .build(id(1), id(2), &[0; 32])
+        finish(builder())
+            .with_fec(Fec::new(id(3), NonZeroU64::new(3).unwrap(), 2).unwrap())
             .is_err()
     );
     assert!(
-        builder()
-            .hash_block_size(4096)
-            .unwrap()
-            .fec(Fec::new(id(3), NonZeroU64::new(4).unwrap(), 2).unwrap())
-            .build(id(1), id(2), &[0; 32])
+        finish(builder().hash_block_size(4096).unwrap())
+            .with_fec(Fec::new(id(3), NonZeroU64::new(4).unwrap(), 2).unwrap())
             .is_err()
     );
     let base = finish(builder()).to_string();

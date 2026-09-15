@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::superblock::Header;
+use crate::Parameters;
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -29,7 +29,8 @@ mod sync;
 #[allow(missing_debug_implementations)]
 pub struct Hashes<H> {
     inner: H,
-    header: Header,
+    uuid: [u8; 16],
+    parameters: Parameters,
     #[cfg(any(
         feature = "sha1",
         feature = "sha2",
@@ -44,10 +45,12 @@ pub struct Hashes<H> {
 }
 
 impl<H> Hashes<H> {
-    fn new(inner: H, header: Header) -> Self {
+    // Callers validate header limits, including u64 byte extents, before construction.
+    pub(crate) fn new(inner: H, uuid: [u8; 16], parameters: Parameters) -> Self {
         Self {
             inner,
-            header,
+            uuid,
+            parameters,
             #[cfg(any(
                 feature = "sha1",
                 feature = "sha2",
@@ -62,11 +65,16 @@ impl<H> Hashes<H> {
         }
     }
 
-    /// Borrows the validated header without performing I/O.
+    /// Returns the stored volume UUID; it does not authenticate the contents.
+    pub const fn uuid(&self) -> [u8; 16] {
+        self.uuid
+    }
+
+    /// Borrows the validated hashing parameters without I/O.
     ///
     /// Available even while an asynchronous read is pending.
-    pub const fn header(&self) -> &Header {
-        &self.header
+    pub const fn parameters(&self) -> &Parameters {
+        &self.parameters
     }
 
     /// Consumes the handle and returns its backing storage.

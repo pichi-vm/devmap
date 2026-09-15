@@ -5,10 +5,10 @@ use std::io;
 use digest::DynDigest;
 
 use super::{Drain, Failure, FlushMode};
-use crate::superblock::Header;
+use crate::Parameters;
 
 pub(super) struct State {
-    superblock: Header,
+    pub(super) parameters: Parameters,
     hasher: Box<dyn DynDigest + Send + Sync>,
     digest: Box<[u8]>,
     maximum_size: u64,
@@ -23,30 +23,32 @@ pub(super) struct State {
 }
 
 impl State {
-    pub(super) fn new(superblock: Header, hasher: Box<dyn DynDigest + Send + Sync>) -> Self {
+    pub(super) fn new(parameters: Parameters, hasher: Box<dyn DynDigest + Send + Sync>) -> Self {
         let digest_size = hasher.output_size();
-        let layout = &superblock.layout;
-        let data_block_size = superblock.data_block_size().get();
+        let layout = &parameters.layout;
+        let data_block_size = parameters.data_block_size().get();
         let levels = layout
             .level_offsets
             .iter()
             .copied()
-            .map(|offset| HashLevel::new(offset, superblock.hash_block_size().get() as usize))
+            .map(|offset| {
+                HashLevel::new(offset as u64, parameters.hash_block_size().get() as usize)
+            })
             .collect();
 
         Self {
             hasher,
             digest: vec![0; digest_size].into_boxed_slice(),
-            maximum_size: layout.data_size,
+            maximum_size: layout.data_size as u64,
             written: 0,
             data_block: vec![0; data_block_size as usize].into_boxed_slice(),
             data_used: 0,
             levels,
             slot_size: layout.slot_size,
             hashes_per_block: layout.hashes_per_block,
-            tree_size: layout.tree_size,
+            tree_size: layout.tree_size as u64,
             root: None,
-            superblock,
+            parameters,
         }
     }
 
@@ -138,9 +140,9 @@ impl State {
             return Err(io::Error::other("invalid pending hash-tree block"));
         }
 
-        self.superblock.hash_type().digest(
+        self.parameters.hash_type().digest(
             self.hasher.as_mut(),
-            self.superblock.salt(),
+            self.parameters.salt(),
             &pending.bytes,
             &mut self.digest,
         )?;
@@ -174,9 +176,9 @@ impl State {
     }
 
     fn process_data_block(&mut self) -> io::Result<()> {
-        self.superblock.hash_type().digest(
+        self.parameters.hash_type().digest(
             self.hasher.as_mut(),
-            self.superblock.salt(),
+            self.parameters.salt(),
             &self.data_block,
             &mut self.digest,
         )?;
@@ -191,9 +193,9 @@ impl State {
     }
 
     fn process_block(&mut self, block: &[u8]) -> io::Result<()> {
-        self.superblock.hash_type().digest(
+        self.parameters.hash_type().digest(
             self.hasher.as_mut(),
-            self.superblock.salt(),
+            self.parameters.salt(),
             block,
             &mut self.digest,
         )?;

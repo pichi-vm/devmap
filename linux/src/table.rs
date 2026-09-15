@@ -460,9 +460,11 @@ mod tests {
 
     #[test]
     fn buf_for_verity_target_has_correct_layout_and_params() {
-        let t = devmap_verity::dm::Builder::new(std::num::NonZeroU64::new(7).unwrap())
+        let t = devmap_verity::Parameters::builder()
             .salt(&[0x55; 32])
-            .build(
+            .build(std::num::NonZeroU64::new(7).unwrap())
+            .unwrap()
+            .target(
                 DevId::new(253, 3).unwrap(),
                 DevId::new(253, 4).unwrap(),
                 &[0xCD; 32],
