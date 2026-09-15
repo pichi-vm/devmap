@@ -14,7 +14,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use devmap_core::parse::NoInfo;
+use devmap_core::parse::Empty;
 use devmap_snapshot::dm as snapshot;
 use devmap_verity::dm as verity;
 
@@ -35,11 +35,11 @@ where
 
 #[test]
 fn targets_with_no_runtime_status_accept_only_an_empty_line() {
-    assert_eq!("".parse::<NoInfo>(), Ok(NoInfo));
-    assert_eq!("   ".parse::<NoInfo>(), Ok(NoInfo));
+    assert_eq!("".parse::<Empty>(), Ok(Empty));
+    assert_eq!("   ".parse::<Empty>(), Ok(Empty));
     // A kernel that grew a status for one of these must not be silently
     // reported as "nothing to see".
-    assert!("something".parse::<NoInfo>().is_err());
+    assert!("something".parse::<Empty>().is_err());
 }
 
 #[test]

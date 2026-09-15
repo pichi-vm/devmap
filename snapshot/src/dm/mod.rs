@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use devmap_core::Target;
-use devmap_core::parse::{DevId, Error, Fraction, NoInfo};
+use devmap_core::parse::{DevId, Empty, Error, Fraction};
 
 /// Marks a device as the origin of a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,7 +18,7 @@ pub struct SnapshotOriginTarget {
 impl Target for SnapshotOriginTarget {
     const NAME: &'static str = "snapshot-origin";
     type Table = Self;
-    type Info = NoInfo;
+    type Info = Empty;
 }
 impl fmt::Display for SnapshotOriginTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -55,7 +55,7 @@
 //!
 //! The [`parse`] module supplies shared field values and errors.
 //! [`parse::Fraction`] handles the `a/b` syntax used for usage counts and progress
-//! without interpreting the relationship between the values. [`parse::NoInfo`]
+//! without interpreting the relationship between the values. [`parse::Empty`]
 //! validates empty status text, while [`String`] preserves arbitrary status text
 //! without validation.
 //!

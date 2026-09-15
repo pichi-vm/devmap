@@ -10,20 +10,20 @@ use std::{fmt, str::FromStr};
 /// text. Formatting emits an empty string. Use [`String`] as the associated
 /// status type when arbitrary text should be retained without validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct NoInfo;
+pub struct Empty;
 
-impl FromStr for NoInfo {
+impl FromStr for Empty {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.trim().is_empty() {
-            Ok(NoInfo)
+            Ok(Empty)
         } else {
             Err(Error)
         }
     }
 }
 
-impl fmt::Display for NoInfo {
+impl fmt::Display for Empty {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
     }

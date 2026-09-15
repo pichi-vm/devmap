@@ -20,6 +20,6 @@ pub trait Target: Sized {
     /// Parsed runtime status returned by a status query.
     ///
     /// Use [`String`] to retain status text without validation, or
-    /// [`NoInfo`](crate::parse::NoInfo) when only empty or whitespace-only status is valid.
+    /// [`Empty`](crate::parse::Empty) when only empty or whitespace-only status is valid.
     type Info: FromStr;
 }

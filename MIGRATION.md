@@ -26,7 +26,7 @@ Concrete targets live in their owner's `dm` module and implement
 `devmap_core::Target`. Send raw target messages with Linux's `Device::message`.
 Read typed runtime status with
 `device.target::<T>(sector).info()`.
-Import the `Target` trait from `devmap_core`; `DevId`, `Fraction`, `NoInfo`,
+Import the `Target` trait from `devmap_core`; `DevId`, `Fraction`, `Empty`,
 and `Error` live in `devmap_core::parse`. Linux exposes its own backend
 handles, builders, and rows.
 `devmap_zero::Zero` supplies the userspace zero-filled source;
@@ -34,7 +34,7 @@ handles, builders, and rows.
 supports reads and seeks; the kernel target also accepts and discards writes.
 
 `Target::Info` can be `String` when arbitrary status text should be preserved.
-Use core's `NoInfo` only when empty or whitespace-only status is required.
+Use core's `Empty` only when empty or whitespace-only status is required.
 
 Normal dependencies flow to core, not between Linux and target crates.
 LUKS is separate from raw crypt, with optional header-to-crypt conversion.
