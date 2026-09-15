@@ -5,12 +5,12 @@
 //! [`devmap_linux`], with no external tool.
 
 use std::fs::File;
-use std::os::unix::fs::FileExt as _;
-use std::path::Path;
 
 use anyhow::{Context as _, Result};
-use devmap_linux::DevId;
-use devmap_linux::targets::integrity::{Builder, Integrity, Mode};
+use devmap_core::DevId;
+use devmap_integrity::dm::Builder;
+use devmap_integrity::dm::Mode;
+use devmap_integrity::dm::Target as Integrity;
 
 use crate::cli::{IntegrityClose, IntegrityCmd, IntegrityFormat, IntegrityOpen, IntegrityStatus};
 use crate::control;
@@ -22,16 +22,6 @@ pub(crate) fn run(cmd: IntegrityCmd) -> Result<()> {
         IntegrityCmd::Close(a) => close(&a),
         IntegrityCmd::Status(a) => status(&a),
     }
-}
-
-/// Read `provided_data_sectors` from a formatted device's superblock — a
-/// little-endian u64 at offset 16, after magic/version/tag geometry.
-fn provided_data_sectors(dev: &Path) -> Result<u64> {
-    let file = File::open(dev).with_context(|| format!("open {}", dev.display()))?;
-    let mut sb = [0u8; 24];
-    file.read_exact_at(&mut sb, 0)
-        .with_context(|| format!("read superblock from {}", dev.display()))?;
-    Ok(u64::from_le_bytes(sb[16..24].try_into().unwrap()))
 }
 
 /// Build the integrity target for a device from the persona's shared
@@ -74,7 +64,11 @@ fn format(a: &IntegrityFormat) -> Result<()> {
 
 fn open(a: &IntegrityOpen) -> Result<()> {
     let device = DevId::from_path(&a.device).context("resolve device")?;
-    let sectors = provided_data_sectors(&a.device)?;
+    let sectors = devmap_integrity::Header::open(
+        File::open(&a.device).with_context(|| format!("open {}", a.device.display()))?,
+    )
+    .context("read integrity header")?
+    .data_sectors();
     let integrity = target(device, a.tag_size, &a.integrity, a.allow_discards);
 
     let control = control::open()?;

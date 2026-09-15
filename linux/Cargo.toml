@@ -11,12 +11,18 @@ keywords = ["linux", "device-mapper", "dm", "ioctl", "block-device"]
 categories = ["os::unix-apis", "api-bindings"]
 
 [dependencies]
+devmap-core = { version = "0.1.0", path = "../core" }
 iocuddle = "0.3"
 zerocopy = { version = "0.8", features = ["derive"] }
 
 # Tests only: a safe `poll()` wrapper, so the DM_DEV_ARM_POLL coverage can
 # wait on the control fd without this crate or its tests writing unsafe.
 [dev-dependencies]
+devmap-error = { version = "0.1.0", path = "../error" }
+devmap-raid = { version = "0.1.0", path = "../raid" }
+devmap-zero = { version = "0.1.0", path = "../zero" }
+devmap-linear = { version = "0.1.0", path = "../linear" }
+devmap-verity = { version = "0.1.0", path = "../verity", default-features = false }
 rustix = { version = "1", default-features = false, features = ["std", "event"] }
 
 [lints]

@@ -4,8 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-
-use crate::chunk_size::EXCEPTION_LEN;
+use std::ops::Bound::{Excluded, Unbounded};
 
 const HEADER_CHUNKS: u64 = 1;
 
@@ -29,11 +28,25 @@ pub(crate) struct State {
     count: u64,
     area: u64,
     per_area: u64,
-    buffer: Vec<u8>,
-    dirty: bool,
+    pub(super) buffer: Vec<u8>,
+    pub(super) dirty: bool,
 }
 
 impl State {
+    pub(crate) fn required_chunks(changed: u64, chunk_bytes: usize) -> io::Result<u64> {
+        let per_area = u64::try_from(chunk_bytes / Self::EXCEPTION_LEN)
+            .map_err(|_| malformed("snapshot chunk size is not addressable"))?;
+        let metadata = changed.div_ceil(per_area).max(1);
+        let terminator = u64::from(changed > 0 && changed % per_area == 0);
+        HEADER_CHUNKS
+            .checked_add(changed)
+            .and_then(|n| n.checked_add(metadata))
+            .and_then(|n| n.checked_add(terminator))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "COW size exceeds u64"))
+    }
+
+    pub(super) const EXCEPTION_LEN: usize = 16;
+
     pub(crate) fn new(chunk_bytes: usize) -> io::Result<Self> {
         Ok(Self {
             exceptions: BTreeMap::new(),
@@ -41,15 +54,11 @@ impl State {
             next_free: HEADER_CHUNKS,
             count: 0,
             area: 0,
-            per_area: u64::try_from(chunk_bytes / EXCEPTION_LEN)
+            per_area: u64::try_from(chunk_bytes / Self::EXCEPTION_LEN)
                 .map_err(|_| malformed("snapshot chunk size is not addressable"))?,
             buffer: buffer(chunk_bytes)?,
             dirty: false,
         })
-    }
-
-    pub(crate) const fn exception_count(&self) -> u64 {
-        self.count
     }
 
     pub(crate) fn lookup(&self, origin: u64) -> Option<u64> {
@@ -62,16 +71,15 @@ impl State {
             .map(|(&origin, &chunk)| (origin, chunk))
     }
 
-    pub(crate) fn buffer(&self) -> &[u8] {
-        &self.buffer
-    }
-
-    pub(crate) fn buffer_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer
-    }
-
-    pub(crate) const fn is_dirty(&self) -> bool {
-        self.dirty
+    pub(crate) fn next_exception(&self, previous: Option<u64>) -> Option<(u64, u64)> {
+        let entry = match previous {
+            Some(previous) => self
+                .exceptions
+                .range((Excluded(previous), Unbounded))
+                .next(),
+            None => self.exceptions.first_key_value(),
+        };
+        entry.map(|(&origin, &cow)| (origin, cow))
     }
 
     fn stride(&self) -> io::Result<u64> {
@@ -94,21 +102,14 @@ impl State {
         Ok(chunk >= HEADER_CHUNKS && (chunk - HEADER_CHUNKS) % self.stride()? == 0)
     }
 
-    fn skip_metadata(&self, candidate: u64) -> io::Result<u64> {
-        if self.is_metadata(candidate)? {
-            candidate
+    pub(crate) fn plan(&self, cow_chunks: u64) -> io::Result<u64> {
+        let chunk = if self.is_metadata(self.next_free)? {
+            self.next_free
                 .checked_add(1)
                 .ok_or_else(|| malformed("the copy-on-write store is not addressable"))
         } else {
-            Ok(candidate)
-        }
-    }
-
-    pub(crate) fn plan(&self, origin: u64, cow_chunks: u64) -> io::Result<(u64, bool)> {
-        if let Some(chunk) = self.lookup(origin) {
-            return Ok((chunk, false));
-        }
-        let chunk = self.skip_metadata(self.next_free)?;
+            Ok(self.next_free)
+        }?;
         let mut highest = chunk.max(self.current_metadata_chunk()?);
         if (self.count + 1) % self.per_area == 0 {
             highest = highest.max(self.metadata_chunk(self.area + 1)?);
@@ -119,23 +120,15 @@ impl State {
                 "the copy-on-write store is full",
             ));
         }
-        Ok((chunk, true))
+        Ok(chunk)
     }
 
-    pub(crate) fn commit(
-        &mut self,
-        origin: u64,
-        chunk: u64,
-        fresh: bool,
-    ) -> io::Result<Option<u64>> {
-        if !fresh {
-            return Ok(None);
-        }
+    pub(crate) fn commit(&mut self, origin: u64, chunk: u64) -> io::Result<Option<u64>> {
         let slot = usize::try_from(self.count % self.per_area)
             .map_err(|_| malformed("snapshot metadata slot is not addressable"))?;
-        let offset = slot * EXCEPTION_LEN;
+        let offset = slot * Self::EXCEPTION_LEN;
         self.buffer[offset..offset + 8].copy_from_slice(&origin.to_le_bytes());
-        self.buffer[offset + 8..offset + EXCEPTION_LEN].copy_from_slice(&chunk.to_le_bytes());
+        self.buffer[offset + 8..offset + Self::EXCEPTION_LEN].copy_from_slice(&chunk.to_le_bytes());
         self.exceptions.insert(origin, chunk);
         self.occupied.insert(chunk);
         self.next_free = chunk
@@ -159,23 +152,19 @@ impl State {
         self.dirty = false;
     }
 
-    pub(crate) fn published(&mut self) {
-        self.dirty = false;
-    }
-
     pub(crate) fn absorb_area(&mut self, area: u64, cow_chunks: u64) -> io::Result<bool> {
         self.area = area;
         for slot in 0..self.per_area {
             let offset = usize::try_from(slot)
                 .map_err(|_| malformed("snapshot metadata slot is not addressable"))?
-                * EXCEPTION_LEN;
+                * Self::EXCEPTION_LEN;
             let origin = u64::from_le_bytes(
                 self.buffer[offset..offset + 8]
                     .try_into()
                     .map_err(|_| malformed("truncated snapshot exception"))?,
             );
             let chunk = u64::from_le_bytes(
-                self.buffer[offset + 8..offset + EXCEPTION_LEN]
+                self.buffer[offset + 8..offset + Self::EXCEPTION_LEN]
                     .try_into()
                     .map_err(|_| malformed("truncated snapshot exception"))?,
             );

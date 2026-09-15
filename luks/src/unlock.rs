@@ -3,7 +3,7 @@
 //! Recovering the master key from a passphrase.
 //!
 //! Per keyslot: derive a key from the passphrase, decrypt the slot's
-//! keyslot area with it, [`af`](crate::af)-merge the plaintext to get a
+//! keyslot area with it, [`af`]-merge the plaintext to get a
 //! candidate master key, and check that candidate against the header's
 //! digest. The digest check is what makes a wrong passphrase a clean
 //! [`Error::NoKey`] rather than a garbage key.

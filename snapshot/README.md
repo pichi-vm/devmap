@@ -1,22 +1,25 @@
 # devmap-snapshot
 
-`devmap-snapshot` reads, writes, and merges the dm-snapshot persistent
-copy-on-write store, byte-exact per `drivers/md/dm-snap-persistent.c`.
+`devmap-snapshot` provides a seekable copy-on-write layer backed by the Linux
+dm-snapshot persistent COW format.
 
-A `Layer` is a seekable byte stream over an origin device. Reads are routed
-through its exception map and writes allocate full COW chunks. A layer uses
-standard byte-stream traits, so layers nest without project-specific block
-interfaces.
+Import `traits::std::*` for standard I/O or `traits::tokio::*` for Tokio I/O.
+The operation names are identical; asynchronous calls additionally require
+`.await`.
 
-`convert` and `convert_sparse` write a raw image into a new store over a zero
-origin, choosing the layer for a chunk size known at run time.
+The caller chooses and sizes both the origin and COW storage.
+`Layer::create` initializes metadata in a preallocated COW; it does not copy
+origin data or discover sparse-file holes. `Formatter::required_size` computes
+capacity for a change to every origin chunk. Before allocating a new COW
+chunk, writes are compared with the origin; matching bytes need no allocation.
+File import and sparse-file traversal belong to the caller.
 
-The same types support synchronous `std::io` and asynchronous Tokio traits.
-Enable the `tokio` feature for asynchronous I/O. `SyncData` and
-`AsyncSyncData` provide the persistence barrier that `flush` does not.
+The `dm` module always provides snapshot, snapshot-origin, and snapshot-merge
+table parameters. Pass them to a backend such as `devmap-linux` for activation;
+this crate does not create or activate device-mapper devices.
 
-See the [crate documentation](https://docs.rs/devmap-snapshot) for reading and
-writing examples.
+There are no default features. Enable `tokio` for the `traits::tokio` module
+and Tokio I/O implementations on `Layer`.
 
-This crate reads and writes the on-disk format. It does not create or activate
-Linux device-mapper devices.
+See the [API documentation](https://docs.rs/devmap-snapshot) for a complete
+example and the storage, flushing, and durability contracts.

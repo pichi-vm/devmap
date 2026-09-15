@@ -6,6 +6,16 @@ use std::io;
 
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
 use digest::DynDigest;
 #[cfg(feature = "blake2")]
 use digest::consts::{U16, U20, U28, U32, U48, U64};
@@ -25,6 +35,13 @@ use streebog::{Streebog256, Streebog512};
 use whirlpool::Whirlpool;
 
 /// A hash algorithm stored in a dm-verity superblock.
+///
+/// SHA-1 requires the `sha1` feature; SHA-2 variants require `sha2`; and the
+/// RIPEMD, Whirlpool, SHA-3, Streebog, SM3, and BLAKE2 families require the
+/// correspondingly named `ripemd`, `whirlpool`, `sha3`, `streebog`, `sm3`, and
+/// `blake2` features. Values can be parsed and stored without those features,
+/// but formatting or authenticated reading with an unavailable algorithm returns
+/// [`std::io::ErrorKind::Unsupported`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Algorithm {
@@ -83,6 +100,36 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
+    pub(crate) const fn digest_size(self) -> usize {
+        match self {
+            Self::Sha1 | Self::Ripemd160 | Self::Blake2b160 | Self::Blake2s160 => 20,
+            Self::Sha224 | Self::Sha3_224 | Self::Blake2s224 => 28,
+            Self::Sha256
+            | Self::Sha3_256
+            | Self::Streebog256
+            | Self::Sm3
+            | Self::Blake2b256
+            | Self::Blake2s256 => 32,
+            Self::Sha384 | Self::Sha3_384 | Self::Blake2b384 => 48,
+            Self::Sha512
+            | Self::Whirlpool
+            | Self::Sha3_512
+            | Self::Streebog512
+            | Self::Blake2b512 => 64,
+            Self::Blake2s128 => 16,
+        }
+    }
+
+    #[cfg(any(
+        feature = "sha1",
+        feature = "sha2",
+        feature = "sha3",
+        feature = "ripemd",
+        feature = "whirlpool",
+        feature = "streebog",
+        feature = "sm3",
+        feature = "blake2"
+    ))]
     #[allow(unreachable_patterns)]
     pub(crate) fn hasher(self) -> Option<Box<dyn DynDigest + Send + Sync>> {
         match self {

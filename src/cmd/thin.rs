@@ -10,7 +10,7 @@ use devmap_persistent::thin::Superblock;
 use devmap_persistent::{thin, thin_xml};
 
 use crate::cli::{ThinCheck, ThinCmd, ThinDump, ThinInfo, ThinRestore};
-use crate::size;
+use devmap_core::traits::std::{Geometry as _, Scale as _};
 
 pub(crate) fn run(cmd: ThinCmd) -> Result<()> {
     match cmd {
@@ -35,8 +35,16 @@ fn restore(a: &ThinRestore) -> Result<()> {
         .open(&a.output)
         .with_context(|| format!("open {}", a.output.display()))?;
     // The destination's own size bounds the allocator.
-    let len = size::of(&out).with_context(|| format!("size {}", a.output.display()))?;
-    let metadata_blocks = len / devmap_persistent::BLOCK_SIZE as u64;
+    let block_size = std::num::NonZeroU32::new(
+        devmap_persistent::BLOCK_SIZE
+            .try_into()
+            .context("metadata block size exceeds u32")?,
+    )
+    .context("invalid metadata block size")?;
+    let mut out = (&mut out)
+        .scale_to(block_size)
+        .context("apply metadata block size")?;
+    let metadata_blocks = out.count().context("size metadata device")?;
 
     devmap_persistent::restore::restore(&pool, &mut out, metadata_blocks)
         .with_context(|| format!("write metadata to {}", a.output.display()))?;

@@ -10,114 +10,19 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::table::{Row, TableBuilder, Target, mode};
+use crate::table::{Row, TableBuilder, mode};
 use crate::uapi::{
     DM_ACTIVE_PRESENT_FLAG, DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT,
     DM_INACTIVE_PRESENT_FLAG, DM_IOCTL_VERSION_MAJOR, DM_READONLY_FLAG, DM_SUSPEND_FLAG,
     DM_TABLE_CLEAR, DM_UEVENT_GENERATED_FLAG,
 };
 
-/// A device-mapper device's `(major, minor)` identity — a block device
-/// number (`dev_t`). Construct with [`DevId::new`]; renders as the kernel's
-/// `major:minor` syntax via [`fmt::Display`].
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
-pub struct DevId {
-    major: u32,
-    minor: u32,
-}
+use devmap_core::{DevId, Target};
 
-impl DevId {
-    /// The classic 32-bit dm `dev_t` field widths: 12-bit major, 20-bit minor.
-    const MAX_MAJOR: u32 = 0xfff;
-    const MAX_MINOR: u32 = 0x000f_ffff;
-
-    /// A `DevId` from an explicit major/minor pair, or `None` if either
-    /// exceeds the classic 32-bit dm `dev_t` field widths (12-bit major,
-    /// 20-bit minor). Values beyond those can't be encoded and would
-    /// otherwise silently alias a different device.
-    pub const fn new(major: u32, minor: u32) -> Option<Self> {
-        if major <= Self::MAX_MAJOR && minor <= Self::MAX_MINOR {
-            Some(Self { major, minor })
-        } else {
-            None
-        }
-    }
-
-    /// The major number.
-    pub const fn major(self) -> u32 {
-        self.major
-    }
-
-    /// The minor number.
-    pub const fn minor(self) -> u32 {
-        self.minor
-    }
-
-    /// The `DevId` of the block device at `path`, read from its `st_rdev`.
-    ///
-    /// A `dmsetup`/`veritysetup`-style front end names backing devices by
-    /// path (`/dev/loop0`, `/dev/sdb`); the kernel table line needs their
-    /// `major:minor`. This stats the path and decodes `st_rdev` with
-    /// [`DevId::from_dev_t`].
-    ///
-    /// # Errors
-    ///
-    /// The underlying `io::Error` if `path` can't be stat'd, or
-    /// `InvalidInput` if it is not a block device (a regular file's
-    /// `st_rdev` is meaningless — catching it here beats loading a table
-    /// that names device `0:0`).
-    pub fn from_path(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
-        use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
-        let meta = std::fs::metadata(path)?;
-        if !meta.file_type().is_block_device() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "not a block device",
-            ));
-        }
-        Ok(Self::from_dev_t(meta.rdev()))
-    }
-
-    /// The kernel's own node for this device: `/dev/dm-<minor>`.
-    ///
-    /// This is the node devtmpfs creates, not the `/dev/mapper/<name>`
-    /// symlink — that one belongs to udev, is named rather than numbered,
-    /// and appears some milliseconds after the device does. The kernel node
-    /// is derived purely from the minor number, so it needs no lookup and
-    /// is readable as soon as the device has a live table (that is, after
-    /// [`Device::resume`], not merely after `DM_DEV_CREATE`).
-    ///
-    /// Pure string construction — no filesystem access, and no claim that
-    /// the node exists yet.
-    pub fn node_path(self) -> std::path::PathBuf {
-        std::path::PathBuf::from(format!("/dev/dm-{}", self.minor))
-    }
-
-    /// Decode a Linux `dev_t` into `(major, minor)`, matching the classic
-    /// 32-bit packed encoding device-mapper uses (and glibc's
-    /// `gnu_dev_major`/`gnu_dev_minor` within that range): `dev` bits
-    /// `[7:0]` = minor low 8 bits, `[19:8]` = major (12 bits), `[31:20]` =
-    /// minor high 12 bits. Only the low 32 bits are consulted.
-    #[allow(clippy::cast_possible_truncation)] // intentional: the classic 32-bit dev_t encoding
-    pub(crate) fn from_dev_t(dev: u64) -> Self {
-        let dev = dev as u32;
-        let major = (dev >> 8) & 0xfff;
-        let minor = (dev & 0xff) | ((dev >> 12) & 0x000f_ff00);
-        Self { major, minor }
-    }
-
-    /// Inverse of [`DevId::from_dev_t`]. `major`/`minor` are constrained to
-    /// the field widths by construction, so no masking is needed.
-    pub(crate) fn to_dev_t(self) -> u64 {
-        let dev = (self.minor & 0xff) | (self.major << 8) | ((self.minor >> 8) << 20);
-        u64::from(dev)
-    }
-}
-
-impl fmt::Display for DevId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.major, self.minor)
-    }
+/// Decode the kernel's 32-bit `dev_t` stored in its 64-bit ioctl field.
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) fn decode_dev_t(value: u64) -> DevId {
+    DevId::from(value as u32)
 }
 
 /// Assert the kernel returned the dm-ioctl major version this crate is
@@ -186,12 +91,12 @@ impl Device {
     }
 
     /// Where this device's block node lives: `/dev/dm-<minor>`. See
-    /// [`DevId::node_path`] for why this and not `/dev/mapper/<name>`.
+    /// the kernel device number for why this and not `/dev/mapper/<name>`.
     ///
     /// Pure string construction; [`open`](Device::open) and
     /// [`open_rw`](Device::open_rw) are the ones that touch the filesystem.
     pub fn node_path(&self) -> std::path::PathBuf {
-        self.dev_t.node_path()
+        std::path::PathBuf::from(format!("/dev/dm-{}", self.dev_t.minor()))
     }
 
     /// Open this device's block node for reading.
@@ -223,7 +128,8 @@ impl Device {
     /// staged table activates on the next [`Device::resume`].
     ///
     /// ```no_run
-    /// # use devmap_linux::{Control, targets::Zero};
+    /// # use devmap_linux::Control;
+    /// use devmap_zero::dm::Target as Zero;
     /// # fn f(dev: &devmap_linux::Device) -> std::io::Result<()> {
     /// dev.builder().add(0, 8192, Zero)?.load()?;
     /// # Ok(()) }
@@ -234,7 +140,7 @@ impl Device {
     }
 
     fn suspend_or_resume(&self, suspend: bool) -> io::Result<()> {
-        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         header.set_suspend(suspend);
         DM_DEV_SUSPEND.ioctl(&*self.control, &mut header)?;
         check_version(&header)
@@ -262,7 +168,7 @@ impl Device {
     }
 
     fn remove_now(&self, deferred: bool) -> io::Result<()> {
-        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         if deferred {
             header.set_deferred_remove();
         }
@@ -308,7 +214,7 @@ impl Device {
     /// The kernel's `io::Error` if it rejects the query (e.g. the device
     /// doesn't exist — `NotFound`/`ENXIO`).
     pub fn status(&self) -> io::Result<Status> {
-        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         DM_DEV_STATUS.ioctl(&*self.control, &mut header)?;
         check_version(&header)?;
         Ok(Status::from_header(&header))
@@ -334,7 +240,7 @@ impl Device {
     /// the device is gone). Interrupted by a signal surfaces as
     /// `ErrorKind::Interrupted` (`ERESTARTSYS`).
     pub fn wait_event(&self, event_nr: u32) -> io::Result<Status> {
-        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         header.set_event_nr(event_nr);
         DM_DEV_WAIT.ioctl(&*self.control, &mut header)?;
         check_version(&header)?;
@@ -352,7 +258,7 @@ impl Device {
     /// The kernel's `io::Error` if it rejects the clear. Clearing when no
     /// inactive table is staged is not an error.
     pub fn clear_inactive_table(&self) -> io::Result<()> {
-        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         DM_TABLE_CLEAR.ioctl(&*self.control, &mut header)?;
         check_version(&header)
     }
@@ -376,7 +282,7 @@ impl Device {
         let buf = crate::control::ioctl_with_growing_buffer(
             &self.control,
             |fd, h| crate::uapi::DM_TABLE_DEPS.ioctl(fd, h),
-            DmHeader::by_dev(self.dev_t.to_dev_t()),
+            DmHeader::by_dev(u64::from(self.dev_t)),
             &[],
             4096,
         )?;
@@ -393,7 +299,7 @@ impl Device {
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
     pub fn table(&self) -> io::Result<impl Iterator<Item = Row<mode::Spec>>> {
-        let mut header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         header.set_status_table();
         self.table_status_iter(header)
     }
@@ -408,7 +314,7 @@ impl Device {
     /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
     /// indicate a kernel bug.
     pub fn info(&self) -> io::Result<impl Iterator<Item = Row<mode::Info>>> {
-        let header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let header = DmHeader::by_dev(u64::from(self.dev_t));
         self.table_status_iter(header)
     }
 
@@ -443,7 +349,7 @@ impl Device {
     /// `parse` interprets a status row as kind `T`, this interprets a live
     /// region of the device as kind `T`. Naming the kind is the caller's
     /// assertion; the kernel rejects a message aimed at the wrong target.
-    /// Message verbs live on the per-kind impls in [`crate::targets`] — a
+    /// Message verbs live in extension traits in the target crates — a
     /// kind with no messages simply has none.
     #[must_use]
     pub fn target<T: Target>(&self, sector: u64) -> LiveTarget<'_, T> {
@@ -481,7 +387,7 @@ impl Device {
                 "dm target message contains a NUL byte",
             ));
         }
-        let header = DmHeader::by_dev(self.dev_t.to_dev_t());
+        let header = DmHeader::by_dev(u64::from(self.dev_t));
         let mut payload = Vec::with_capacity(8 + message.len() + 1);
         payload.extend_from_slice(&sector.to_ne_bytes());
         payload.extend_from_slice(message.as_bytes());
@@ -501,10 +407,19 @@ impl Device {
 /// A handle to one target within a live device's active table, at a known
 /// sector and of a known kind `T`. Obtained from [`Device::target`].
 ///
-/// The read face is [`info`](LiveTarget::info), shared by every kind. The
-/// write face is each kind's messages, added as inherent methods on
-/// `LiveTarget<'_, ThatKind>` in [`crate::targets`]; a kind with no
-/// messages simply has no such methods.
+/// [`info`](LiveTarget::info) reads typed runtime status. To send typed
+/// messages, import the target crate's `dm::Commands` extension trait. It
+/// operates through [`devmap_core::TargetEndpoint`], which this handle
+/// implements. Targets without messages need no command trait.
+///
+/// ```no_run
+/// use devmap_linux::Device;
+/// use devmap_raid::dm::{Commands as _, Target};
+///
+/// fn start_scrub(device: &Device) -> std::io::Result<()> {
+///     device.target::<Target>(0).check()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LiveTarget<'d, T> {
     device: &'d Device,
@@ -528,7 +443,7 @@ impl<'d, T> LiveTarget<'d, T> {
     }
 
     /// Send a raw message to this target. The typed verbs in
-    /// [`crate::targets`] are thin wrappers over this.
+    /// the target crates are thin wrappers over this.
     pub(crate) fn send(&self, message: &str) -> io::Result<Option<String>> {
         self.device.message(self.sector, message)
     }
@@ -581,7 +496,7 @@ fn parse_deps(buf: &[u8]) -> Vec<DevId> {
         .map(|i| {
             let off = first + i * 8;
             let dev = u64::from_ne_bytes(buf[off..off + 8].try_into().unwrap());
-            DevId::from_dev_t(dev)
+            decode_dev_t(dev)
         })
         .collect()
 }
@@ -684,6 +599,28 @@ impl Status {
     }
 }
 
+impl devmap_core::Device for Device {
+    type TableBuilder = TableBuilder;
+    fn builder(&self) -> TableBuilder {
+        Device::builder(self)
+    }
+    fn resume(&self) -> io::Result<()> {
+        Device::resume(self)
+    }
+    fn remove(self) -> io::Result<()> {
+        Device::remove(self)
+    }
+    fn remove_deferred(self) -> io::Result<()> {
+        Device::remove_deferred(self)
+    }
+}
+impl<T: Target> devmap_core::TargetEndpoint for LiveTarget<'_, T> {
+    type Target = T;
+    fn message(&self, command: &str) -> io::Result<Option<String>> {
+        self.send(command)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,7 +669,7 @@ mod tests {
         for (major, minor) in [(0u32, 0u32), (252, 5), (7, 0), (0xfff, 0xf_ffff), (1, 1)] {
             let id = DevId::new(major, minor).unwrap();
             assert_eq!(
-                DevId::from_dev_t(id.to_dev_t()),
+                decode_dev_t(u64::from(id)),
                 id,
                 "major={major} minor={minor}"
             );
@@ -744,16 +681,13 @@ mod tests {
         // Pin the packing against concrete constants, not just a round trip
         // (which can't catch an encode/decode pair that share the same bug).
         // 252 = 0xfc, minor 5 -> 0xfc05 in the classic packed encoding.
-        assert_eq!(DevId::new(252, 5).unwrap().to_dev_t(), 0xfc05);
-        assert_eq!(DevId::from_dev_t(0xfc05), DevId::new(252, 5).unwrap());
+        assert_eq!(u64::from(DevId::new(252, 5).unwrap()), 0xfc05);
+        assert_eq!(decode_dev_t(0xfc05), DevId::new(252, 5).unwrap());
 
         // A minor large enough to spill into the high bits [31:20].
         // major=1 -> [19:8], minor=0x12345 -> low 8 at [7:0], high 12 at [31:20].
-        assert_eq!(DevId::new(1, 0x1_2345).unwrap().to_dev_t(), 0x1230_0145);
-        assert_eq!(
-            DevId::from_dev_t(0x1230_0145),
-            DevId::new(1, 0x1_2345).unwrap()
-        );
+        assert_eq!(u64::from(DevId::new(1, 0x1_2345).unwrap()), 0x1230_0145);
+        assert_eq!(decode_dev_t(0x1230_0145), DevId::new(1, 0x1_2345).unwrap());
     }
 
     #[test]
@@ -761,7 +695,7 @@ mod tests {
         // from_dev_t operates on the low 32 bits only; garbage above bit 31
         // in the kernel-returned u64 must not leak into the result.
         assert_eq!(
-            DevId::from_dev_t(0xffff_ffff_0000_fc05),
+            decode_dev_t(0xffff_ffff_0000_fc05),
             DevId::new(252, 5).unwrap()
         );
     }
@@ -813,8 +747,8 @@ mod tests {
     #[test]
     fn parse_deps_reads_the_device_array() {
         let devs = [
-            DevId::new(7, 0).unwrap().to_dev_t(),
-            DevId::new(252, 5).unwrap().to_dev_t(),
+            u64::from(DevId::new(7, 0).unwrap()),
+            u64::from(DevId::new(252, 5).unwrap()),
         ];
         let buf = synthetic_deps_response(2, &devs);
         assert_eq!(
@@ -832,7 +766,7 @@ mod tests {
     fn parse_deps_clamps_a_count_past_the_buffer_end() {
         // The kernel claims 100 devices but only one is present: reading
         // all 100 would slice out of bounds.
-        let buf = synthetic_deps_response(100, &[DevId::new(7, 0).unwrap().to_dev_t()]);
+        let buf = synthetic_deps_response(100, &[u64::from(DevId::new(7, 0).unwrap())]);
         assert_eq!(parse_deps(&buf), [DevId::new(7, 0).unwrap()]);
     }
 

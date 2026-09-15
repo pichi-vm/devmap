@@ -231,23 +231,121 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "devmap-core",
+ "devmap-crypt",
+ "devmap-delay",
+ "devmap-dust",
+ "devmap-era",
+ "devmap-error",
+ "devmap-flakey",
+ "devmap-integrity",
+ "devmap-linear",
  "devmap-linux",
+ "devmap-log-writes",
  "devmap-luks",
  "devmap-persistent",
+ "devmap-raid",
  "devmap-snapshot",
+ "devmap-striped",
+ "devmap-thin",
+ "devmap-thin-pool",
+ "devmap-unstriped",
  "devmap-verity",
+ "devmap-writecache",
+ "devmap-zero",
  "devmap-zoned",
  "keyutils",
  "rpassword",
+ "rustix",
+ "tempfile",
+]
+
+[[package]]
+name = "devmap-core"
+version = "0.1.0"
+dependencies = [
+ "iocuddle",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "devmap-crypt"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-delay"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-dust"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-era"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-error"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-flakey"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-integrity"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+ "tempfile",
+]
+
+[[package]]
+name = "devmap-linear"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
 ]
 
 [[package]]
 name = "devmap-linux"
 version = "0.1.0"
 dependencies = [
+ "devmap-core",
+ "devmap-error",
+ "devmap-linear",
+ "devmap-raid",
+ "devmap-verity",
+ "devmap-zero",
  "iocuddle",
  "rustix",
  "zerocopy",
+]
+
+[[package]]
+name = "devmap-log-writes"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
 ]
 
 [[package]]
@@ -257,6 +355,8 @@ dependencies = [
  "aes",
  "argon2",
  "base64",
+ "devmap-core",
+ "devmap-crypt",
  "hmac",
  "pbkdf2",
  "serde",
@@ -280,13 +380,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "devmap-raid"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
 name = "devmap-snapshot"
 version = "0.1.0"
 dependencies = [
- "devmap-linux",
- "rustix",
+ "devmap-core",
+ "devmap-zero",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "devmap-striped"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-thin"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-thin-pool"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-unstriped"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
 ]
 
 [[package]]
@@ -294,6 +429,7 @@ name = "devmap-verity"
 version = "0.1.0"
 dependencies = [
  "blake2",
+ "devmap-core",
  "digest",
  "hex",
  "ripemd",
@@ -305,14 +441,28 @@ dependencies = [
  "tempfile",
  "tokio",
  "whirlpool",
- "zerocopy",
+]
+
+[[package]]
+name = "devmap-writecache"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+]
+
+[[package]]
+name = "devmap-zero"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+ "tokio",
 ]
 
 [[package]]
 name = "devmap-zoned"
 version = "0.1.0"
 dependencies = [
- "devmap-linux",
+ "devmap-core",
  "libc",
 ]
 

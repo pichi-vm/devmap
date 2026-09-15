@@ -1,0 +1,33 @@
+[package]
+name = "devmap-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+readme = "README.md"
+description = "Shared storage capabilities, I/O adapters, and device-mapper interfaces."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+keywords = ["device-mapper", "storage", "block-device"]
+categories = ["filesystem"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+tokio = { version = "1", features = ["fs", "io-util"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+iocuddle = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt"] }
+
+[[test]]
+name = "async"
+required-features = ["tokio"]
+
+[lints]
+workspace = true

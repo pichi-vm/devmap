@@ -136,7 +136,7 @@ pub fn format(path: impl AsRef<Path>, options: &FormatOptions) -> Result<Layout,
     Ok(layout)
 }
 
-/// Why [`format`] failed.
+/// Why [`format()`] failed.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum FormatError {

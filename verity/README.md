@@ -1,17 +1,28 @@
 # devmap-verity
 
-`devmap-verity` reads dm-verity v1 superblocks and writes compatible hash
-trees. Superblocks are validated before use, and tree data is streamed to a
-seekable output.
+`devmap-verity` opens dm-verity hash devices for metadata inspection, formats
+hash trees, and exposes authenticated data through standard or Tokio I/O.
 
-The same types support synchronous `std::io` and asynchronous Tokio I/O.
-Enable the `tokio` feature for asynchronous tree writing. Hash
-implementations are selected with the optional `sha1`, `sha2`, `sha3`,
-`ripemd`, `whirlpool`, `streebog`, `sm3`, and `blake2` features. `sha2` is
-enabled by default.
+Start with `Hashes::open` and `.header()` to inspect a hash device without
+its data device or trusted root. With `default-features = false`, header
+inspection and target descriptions depend only on `devmap-core` and its
+dependencies, not on hashing implementations.
 
-See the [crate documentation](https://docs.rs/devmap-verity) for reading and
-writing examples.
+Build kernel parameters with `dm::Builder::from(hashes.header())`, supplying
+the data and hash device IDs and an independently trusted root digest to
+`build`. Pass the resulting `dm::Target` to a backend such as `devmap-linux`;
+`add_full` adds a full-size read-only row without loading or activating it.
+The `dm` module and its header conversions are available in every build.
 
-This crate creates superblocks and hash trees. It does not create or activate
-Linux device-mapper devices.
+Enable a hashing implementation to use `Formatter` and `Verity`.
+Formatting returns a root digest to keep in trusted storage; `Verity`
+authenticates data lazily when read. The crate does not activate Linux
+device-mapper devices or manage trusted root storage.
+
+SHA-2 support (`sha2`) is enabled by default. Optional `sha1`, `sha3`,
+`ripemd`, `whirlpool`, `streebog`, `sm3`, and `blake2` features enable
+those algorithms. The independent `tokio` feature adds asynchronous
+operations, including metadata-only opening.
+
+See the [API documentation](https://docs.rs/devmap-verity) for inspection,
+formatting, authenticated-reading examples, and operational contracts.

@@ -1,8 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The **LUKS1 and LUKS2 on-disk formats** — a pure-Rust way to read (and
-//! create) encrypted volumes and hand them to dm-crypt, with no
-//! `cryptsetup`.
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+//! Read, format, and unlock LUKS1 and LUKS2 volumes without invoking cryptsetup.
+//!
+//! [`Header::open`] reads metadata from a seekable stream. The library supplies
+//! payload geometry and optional dm-crypt target construction; it does not
+//! publish keys or activate device-mapper mappings.
+//!
+//! ```no_run
+//! use std::fs::File;
+//! use devmap_luks::Header;
+//!
+//! # fn main() -> Result<(), devmap_luks::Error> {
+//! let header = Header::open(File::open("encrypted.img")?)?;
+//! println!("{}: payload starts at byte {}",
+//!     header.uuid(), header.payload_offset_bytes()?);
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # What a LUKS volume is
 //!
@@ -19,13 +35,28 @@
 //! 3. [`af`]-merge the result to recover the candidate master key;
 //! 4. check that candidate against the header's digest.
 //!
-//! A wrong passphrase fails at step 4, so the digest is what distinguishes
-//! "wrong passphrase" from "corrupt volume".
+//! A candidate that fails the digest check is not accepted. This alone cannot
+//! distinguish a wrong passphrase from damaged keyslot material.
 //!
 //! # Key material
 //!
 //! [`Secret`] zeroizes on drop and redacts in `Debug`. Nothing in this
 //! crate prints key bytes; keep it that way.
+//!
+//! # Preparing kernel activation
+//!
+//! Use [`Header::payload_sectors`] with the backing device's byte extent to
+//! obtain the table length in 512-byte sectors. With target conversion enabled,
+//! `Header::crypt_target` combines the header's cipher and offsets with a
+//! caller-supplied device ID and key reference. Pass that target and length to
+//! a backend such as `devmap-linux`; unlocking, key publication, and activation
+//! remain separate operations.
+//!
+//! # Cargo features
+//!
+//! The optional `devmap-crypt` dependency enables `Header::crypt_target`, which
+//! converts header settings and a supplied key reference into a kernel target
+//! description. It does not activate the device. There are no default features.
 
 pub mod af;
 pub mod format;
@@ -194,6 +225,27 @@ impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Secret(<{} bytes redacted>)", self.0.len())
     }
+}
+
+fn payload_offset_sectors(offset: u64) -> Result<u64, Error> {
+    if !offset.is_multiple_of(SECTOR_SIZE) {
+        return Err(Error::Malformed(
+            "payload offset is not sector aligned".into(),
+        ));
+    }
+    Ok(offset / SECTOR_SIZE)
+}
+
+fn payload_sectors(total: u64, offset: u64) -> Result<u64, Error> {
+    total
+        .checked_sub(offset)
+        .map(|bytes| bytes / SECTOR_SIZE)
+        .filter(|sectors| *sectors != 0)
+        .ok_or_else(|| {
+            Error::Malformed(format!(
+                "{total} bytes leaves no payload after the {offset}-byte header"
+            ))
+        })
 }
 
 #[cfg(test)]

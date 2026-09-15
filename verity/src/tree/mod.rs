@@ -6,7 +6,7 @@ use std::io;
 use state::PendingBlock;
 use state::State;
 
-use crate::Verified;
+use crate::superblock::Header;
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -25,7 +25,7 @@ mod sync;
 /// does not flush it. The writer cannot be used after an output error.
 #[allow(missing_debug_implementations)]
 #[must_use = "dropping a tree writer does not finish the hash tree"]
-pub struct TreeWriter<W> {
+pub(crate) struct TreeWriter<W> {
     output: W,
     tree: State,
     output_range: Option<OutputRange>,
@@ -37,15 +37,15 @@ pub struct TreeWriter<W> {
 impl<W> TreeWriter<W> {
     /// Creates a tree writer at the output's current position.
     ///
-    /// This writes only the hash tree. Write the [`Unverified`](crate::Unverified)
-    /// superblock and its [`padding`](Verified::padding) first. Creating the
+    /// This writes only the hash tree. Write the encoded
+    /// superblock and its block padding first. Creating the
     /// writer performs no I/O.
     ///
     /// # Errors
     ///
     /// Returns [`io::ErrorKind::Unsupported`] if the feature for the selected
     /// hash algorithm is not enabled.
-    pub fn new(output: W, superblock: Verified) -> io::Result<Self> {
+    pub(crate) fn new(output: W, superblock: Header) -> io::Result<Self> {
         let hasher = superblock.algorithm().hasher().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -55,12 +55,16 @@ impl<W> TreeWriter<W> {
 
         Ok(Self {
             output,
-            tree: State::new(superblock, hasher)?,
+            tree: State::new(superblock, hasher),
             output_range: None,
             phase: Phase::Open,
             #[cfg(feature = "tokio")]
             initializing: false,
         })
+    }
+
+    pub(crate) const fn output_mut(&mut self) -> &mut W {
+        &mut self.output
     }
 
     /// Returns the root digest after the tree is complete and flushed.
@@ -70,7 +74,7 @@ impl<W> TreeWriter<W> {
     /// Returns [`io::ErrorKind::UnexpectedEof`] if more input is needed,
     /// [`io::ErrorKind::WouldBlock`] if the tree needs to be flushed, or
     /// [`io::ErrorKind::Other`] after an output error.
-    pub fn digest(&self) -> io::Result<&[u8]> {
+    pub(crate) fn digest(&self) -> io::Result<&[u8]> {
         match &self.phase {
             Phase::Open => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,

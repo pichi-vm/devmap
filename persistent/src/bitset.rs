@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! `dm-bitset`: a bit per index, stored as an [`array`](crate::array) of
+//! `dm-bitset`: a bit per index, stored as an [`mod@array`] of
 //! 64-bit words.
 //!
 //! dm-cache uses one for its version-2 dirty bits, and dm-era uses one per
@@ -30,7 +30,7 @@ const ENTRY_SIZE: ValueSize = ValueSize(8);
 ///
 /// # Panics
 ///
-/// Never: the array yields entries of exactly [`ENTRY_SIZE`] bytes, which
+/// Never: the array yields entries of exactly `ENTRY_SIZE` bytes, which
 /// is what the conversion below reads.
 pub fn collect<B: Blocks + ?Sized>(
     blocks: &B,

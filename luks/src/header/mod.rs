@@ -30,6 +30,89 @@ pub enum Header {
 }
 
 impl Header {
+    /// Reads a LUKS header from byte zero, including both LUKS2 metadata copies.
+    ///
+    /// Reads only the fixed LUKS1 record or the declared LUKS2 header copies.
+    /// LUKS2 header sizes are the supported powers of two from 16 KiB to 4 MiB;
+    /// allocation is bounded independently of the data-device size.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error for incomplete input, or the existing header
+    /// validation error. The stream position may change on failure.
+    pub fn open(mut storage: impl std::io::Read + std::io::Seek) -> Result<Self, Error> {
+        use std::io::{Read as _, SeekFrom};
+        storage.seek(SeekFrom::Start(0))?;
+        let mut prefix = [0; 16];
+        storage.read_exact(&mut prefix[..8])?;
+        if prefix[..6] != LUKS_MAGIC {
+            return Err(Error::BadMagic);
+        }
+        let (minimum, length) = match u16::from_be_bytes([prefix[6], prefix[7]]) {
+            1 => (luks1::HEADER_SIZE as u64, luks1::HEADER_SIZE as u64),
+            2 => {
+                storage.read_exact(&mut prefix[8..])?;
+                let mut size = [0; 8];
+                size.copy_from_slice(&prefix[8..]);
+                let size = u64::from_be_bytes(size);
+                if !(16 * 1024..=4 * 1024 * 1024).contains(&size) || !size.is_power_of_two() {
+                    return Err(Error::Malformed("unsupported LUKS2 header size".into()));
+                }
+                (size, 2 * size)
+            }
+            other => return Err(Error::BadVersion(other)),
+        };
+        storage.seek(SeekFrom::Start(0))?;
+        let mut raw = Vec::new();
+        storage.take(length).read_to_end(&mut raw)?;
+        if (raw.len() as u64) < minimum {
+            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+        }
+        Self::parse(&raw)
+    }
+
+    /// Returns the payload offset in 512-byte sectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns a malformed-header error if the byte offset is not sector aligned.
+    pub fn payload_offset_sectors(&self) -> Result<u64, Error> {
+        crate::payload_offset_sectors(self.payload_offset_bytes()?)
+    }
+
+    /// Returns the usable payload length in 512-byte sectors.
+    ///
+    /// # Errors
+    ///
+    /// Returns a malformed-header/extent error if no complete payload sector fits.
+    pub fn payload_sectors(&self, total_bytes: u64) -> Result<u64, Error> {
+        crate::payload_sectors(total_bytes, self.payload_offset_bytes()?)
+    }
+
+    /// Builds dm-crypt parameters from this header and a caller-supplied key.
+    ///
+    /// Does not unlock the volume, publish keys, or activate a device.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the header cannot supply the payload's cipher/offset.
+    #[cfg(feature = "devmap-crypt")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "devmap-crypt")))]
+    pub fn crypt_target(
+        &self,
+        device: devmap_core::DevId,
+        key: devmap_crypt::dm::Key,
+    ) -> Result<devmap_crypt::dm::Target, Error> {
+        let offset = self.payload_offset_sectors()?;
+        let sector_size = self.sector_size();
+        Ok(devmap_crypt::dm::Target {
+            offset,
+            iv_offset: self.iv_tweak(),
+            sector_size: (sector_size != 512).then_some(sector_size),
+            ..devmap_crypt::dm::Target::new(self.cipher_spec()?, key, device)
+        })
+    }
+
     /// Identify and parse the header at the start of `raw`.
     ///
     /// # Errors

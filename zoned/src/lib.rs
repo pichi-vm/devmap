@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //! The dm-zoned on-disk metadata format — a pure-Rust `dmzadm`.
 //!
-//! dm-zoned is the one device-mapper target that cannot be brought up
-//! without an external formatter: the kernel reads a metadata region
+//! Before activation, dm-zoned needs formatted metadata: the kernel reads a region
 //! (superblocks, a chunk mapping table, and per-zone bitmaps) that it
 //! never writes from scratch, so `dmzadm --format` has to run first. This
 //! crate produces that region so a caller never shells out.
@@ -19,6 +20,17 @@
 //! primary and a secondary mirror) each hold, in order: a 4 KiB
 //! superblock, the chunk mapping table, then the per-zone bitmaps. All
 //! multi-byte fields are little-endian.
+//!
+//! [`Superblock::open`] reads the primary superblock from a seekable stream;
+//! [`Superblock::logical_sectors`] computes its data extent using supplied
+//! zone geometry. [`dm::Target`] supplies the kernel table parameters and
+//! [`dm::Commands`] adds typed reclaim messages to a backend target endpoint.
+//!
+//! # Cargo features
+//!
+//! There are no optional features. Layout computation, superblock inspection,
+//! and target descriptions are available without a Linux backend. Device-path
+//! formatting and physical zone queries are available only on Linux.
 
 // Lint posture for a byte-format crate. The CRC seed deliberately
 // truncates the u64 generation to u32, matching the kernel passing it into
@@ -111,6 +123,40 @@ pub struct Superblock {
 }
 
 impl Superblock {
+    /// Reads the primary superblock at byte zero and checks its magic and CRC.
+    ///
+    /// # Errors
+    ///
+    /// Returns transport errors or `InvalidData` for a malformed record.
+    pub fn open(mut storage: impl std::io::Read + std::io::Seek) -> std::io::Result<Self> {
+        storage.seek(std::io::SeekFrom::Start(0))?;
+        let mut block = [0; BLOCK_SIZE];
+        storage.read_exact(&mut block)?;
+        Self::from_block(&block)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    }
+
+    /// Returns the data extent in 512-byte sectors for the supplied zone geometry.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidData` if counts are incompatible or arithmetic overflows.
+    pub fn logical_sectors(&self, geometry: Geometry) -> std::io::Result<u64> {
+        if geometry.zone_size_blocks == 0
+            || self.nr_chunks == 0
+            || self.nr_chunks > geometry.total_zones
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid zoned data extent",
+            ));
+        }
+        u64::from(self.nr_chunks)
+            .checked_mul(u64::from(geometry.zone_size_blocks))
+            .and_then(|blocks| blocks.checked_mul(BLOCK_SIZE as u64 / 512))
+            .ok_or_else(|| std::io::ErrorKind::InvalidData.into())
+    }
+
     /// Serialise to a full [`BLOCK_SIZE`] block, with the CRC computed
     /// over the whole block exactly as the kernel does.
     #[must_use]
@@ -198,3 +244,6 @@ impl core::fmt::Display for ParseError {
 }
 
 impl core::error::Error for ParseError {}
+
+/// Device-mapper target parameters, status, and commands.
+pub mod dm;

@@ -20,7 +20,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: install veritysetup
-        run: sudo apt-get update && sudo apt-get install --yes cryptsetup-bin
+        run: sudo apt-get update && sudo apt-get install --yes cryptsetup-bin jq ripgrep
       - name: require veritysetup
         run: command -v veritysetup
       - name: format
@@ -31,10 +31,14 @@ jobs:
         run: cargo test -p devmap-verity --all-features --doc
       - name: test feature isolation
         run: |
-          for feature in blake2 futures-io ripemd sha1 sha2 sha3 sm3 streebog whirlpool; do
-            cargo test -p devmap-verity --no-default-features --features "$feature" --test metadata
+          cargo test -p devmap-verity --no-default-features --all-targets
+          cargo test -p devmap-verity --no-default-features --doc
+          cargo test -p devmap-verity --no-default-features --features tokio --all-targets
+          cargo test -p devmap-verity --no-default-features --features tokio --doc
+          for feature in blake2 ripemd sha1 sha2 sha3 sm3 streebog whirlpool; do
+            cargo test -p devmap-verity --no-default-features --features "$feature" --all-targets
           done
+      - name: check dependency boundaries and feature names
+        run: bash scripts/check-dependencies.sh
       - name: clippy
         run: cargo clippy -p devmap-verity --all-features --all-targets -- -D warnings
-      - name: package
-        run: cargo package -p devmap-verity

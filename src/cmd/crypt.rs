@@ -15,14 +15,16 @@
 //! keyring entry is deleted immediately afterwards. The mapping keeps
 //! working, and the key is exposed for the shortest possible window.
 
+use devmap_core::traits::std::Geometry as _;
 use std::fs::File;
 use std::io::Read as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
-use devmap_linux::DevId;
-use devmap_linux::targets::Crypt;
-use devmap_linux::targets::crypt::{Key, KeyType};
+use devmap_core::DevId;
+use devmap_crypt::dm::Key;
+use devmap_crypt::dm::KeyType;
+use devmap_crypt::dm::Target as Crypt;
 use devmap_luks::format::{Entropy, FormatOptions, Version};
 use devmap_luks::kdf::Kdf;
 use devmap_luks::{Hash, Header, MasterKey};
@@ -31,7 +33,7 @@ use keyutils::keytypes::{Logon, logon};
 use crate::cli::{
     CryptClose, CryptCmd, CryptDump, CryptFormat, CryptOpen, CryptStatus, LuksVersion,
 };
-use crate::{control, size, uuid};
+use crate::{control, uuid};
 
 /// The logon-key subtype devmap publishes master keys under. Distinct from
 /// cryptsetup's `cryptsetup:` so the two can never resolve to each other's
@@ -69,33 +71,9 @@ impl Entropy for UrandomEntropy {
     }
 }
 
-/// Read and parse the LUKS header at the start of `device`.
-///
-/// Only the header itself is read. The keyslot *areas* sit far beyond it —
-/// megabytes in, for both versions — and are read on demand during
-/// unlocking through the device handle instead of being slurped into
-/// memory.
 fn read_header(device: &Path) -> Result<Header> {
-    let mut file = File::open(device).with_context(|| format!("open {}", device.display()))?;
-    // 256 KiB comfortably covers a LUKS2 primary and secondary header at
-    // the default 16 KiB hdr_size, and dwarfs LUKS1's 592-byte header.
-    let mut raw = vec![0u8; 256 * 1024];
-    let read = read_as_much_as_possible(&mut file, &mut raw)
-        .with_context(|| format!("read header from {}", device.display()))?;
-    raw.truncate(read);
-    Header::parse(&raw).context("parse LUKS header")
-}
-
-/// Fill `buf` as far as the device allows, tolerating a short device.
-fn read_as_much_as_possible(file: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match file.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
-        }
-    }
-    Ok(filled)
+    Header::open(File::open(device).with_context(|| format!("open {}", device.display()))?)
+        .context("read LUKS header")
 }
 
 /// The passphrase, from a key file or an unechoed terminal prompt.
@@ -115,21 +93,6 @@ fn read_passphrase(key_file: Option<&Path>) -> Result<Vec<u8>> {
             .context("read passphrase")?
             .into_bytes()),
     }
-}
-
-/// The complaint to make about a device with no room for a payload after
-/// its header, or `None` if it has room.
-///
-/// A LUKS2 payload starts 16 MiB in by default, so a small device can carry
-/// a perfectly valid header and still have nowhere to put data. `format`
-/// and `open` both have to notice, and say the same thing about it.
-fn no_payload_room(device: &Path, total: u64, payload_offset: u64) -> Option<String> {
-    (total <= payload_offset).then(|| {
-        format!(
-            "{} is {total} bytes, which leaves no payload after the {payload_offset}-byte header",
-            device.display()
-        )
-    })
 }
 
 /// Publish `key` into the thread keyring as a `logon` key that dm-crypt can
@@ -154,20 +117,16 @@ fn open(a: &CryptOpen) -> Result<()> {
     let header = read_header(&a.device)?;
     let passphrase = read_passphrase(a.key_file.as_deref())?;
     // Keyslot areas are read straight off the device rather than buffered.
-    let device_handle =
+    let mut device_handle =
         File::open(&a.device).with_context(|| format!("open {}", a.device.display()))?;
     let master_key = header
         .unlock(&passphrase, &device_handle)
         .context("unlock the volume")?;
 
-    let payload_offset = header.payload_offset_bytes().context("payload offset")?;
-    // The handle opened above is the same device, so size it rather than
-    // opening it a second time.
-    let total = size::of(&device_handle).with_context(|| format!("size {}", a.device.display()))?;
-    if let Some(complaint) = no_payload_room(&a.device, total, payload_offset) {
-        bail!(complaint);
-    }
-    let length_sectors = (total - payload_offset) / size::SECTOR;
+    let total = device_handle.byte_size().context("size data device")?;
+    let length_sectors = header
+        .payload_sectors(total)
+        .context("validate payload extent")?;
 
     // The table refers to the key by `<subtype>:<description>`, which is how
     // the kernel renders a logon key's description.
@@ -175,22 +134,17 @@ fn open(a: &CryptOpen) -> Result<()> {
     let keyring_key = publish_key(header.uuid(), &master_key)?;
     drop(master_key);
 
-    let sector_size = header.sector_size();
-    let target = Crypt {
-        iv_offset: header.iv_tweak(),
-        offset: payload_offset / size::SECTOR,
-        sector_size: (sector_size != 512).then_some(sector_size),
-        allow_discards: a.allow_discards,
-        ..Crypt::new(
-            header.cipher_spec().context("cipher spec")?,
+    let mut target = header
+        .crypt_target(
+            DevId::from_path(&a.device).context("resolve backing device")?,
             Key::Keyring {
                 size: header.key_bytes(),
                 kind: KeyType::Logon,
                 description,
             },
-            DevId::from_path(&a.device).context("resolve backing device")?,
         )
-    };
+        .context("construct dm-crypt target")?;
+    target.allow_discards = a.allow_discards;
 
     let activated = activate(&a.name, length_sectors, target);
 
@@ -265,7 +219,9 @@ fn format(a: &CryptFormat) -> Result<()> {
         .write(true)
         .open(&a.device)
         .with_context(|| format!("open {}", a.device.display()))?;
-    let total = size::of(&device).with_context(|| format!("size {}", a.device.display()))?;
+    let total = device
+        .byte_size()
+        .with_context(|| format!("size {}", a.device.display()))?;
     let mut entropy = UrandomEntropy::open()?;
     let formatted = devmap_luks::format::format(&mut device, &options, &passphrase, &mut entropy)
         .with_context(|| format!("format {}", a.device.display()))?;
@@ -280,14 +236,19 @@ fn format(a: &CryptFormat) -> Result<()> {
     println!("  Key size:       \t{} bits", options.key_size * 8);
     println!(
         "  Payload offset: \t{} sectors",
-        formatted.payload_offset / size::SECTOR
+        formatted
+            .payload_offset_sectors()
+            .context("payload offset")?
     );
     // The header is written and valid either way, and the device may yet be
     // grown, so this is a warning rather than a refusal — but a bare
     // "Formatted" on a volume nothing can ever be stored in is worse than
     // no output at all.
-    if let Some(complaint) = no_payload_room(&a.device, total, formatted.payload_offset) {
-        eprintln!("devmap: warning: {complaint}, so it cannot be opened until the device grows");
+    if let Err(complaint) = formatted.payload_sectors(total) {
+        eprintln!(
+            "devmap: warning: {}: {complaint}, so it cannot be opened until the device grows",
+            a.device.display()
+        );
     }
     Ok(())
 }
@@ -379,7 +340,7 @@ fn dump(a: &CryptDump) -> Result<()> {
     println!("MK bits:        \t{}", header.key_bytes() * 8);
     println!(
         "Payload offset: \t{} sectors",
-        header.payload_offset_bytes().context("payload offset")? / size::SECTOR
+        header.payload_offset_sectors().context("payload offset")?
     );
     println!("Sector size:    \t{}", header.sector_size());
     for slot in header.keyslot_summaries() {
@@ -393,29 +354,4 @@ fn dump(a: &CryptDump) -> Result<()> {
         println!("  AF stripes:   \t{}", slot.stripes);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_payload_needs_strictly_more_room_than_the_header() {
-        let dev = Path::new("/dev/loop0");
-        // A device exactly the size of the header holds no payload either:
-        // the first data sector would start one byte past the end.
-        assert!(no_payload_room(dev, 16 << 20, 16 << 20).is_some());
-        assert!(no_payload_room(dev, (16 << 20) - 1, 16 << 20).is_some());
-        assert!(no_payload_room(dev, (16 << 20) + 1, 16 << 20).is_none());
-    }
-
-    #[test]
-    fn the_complaint_names_the_device_and_both_sizes() {
-        // It is the whole diagnostic in both the warning and the refusal,
-        // so it has to carry enough to act on.
-        let complaint = no_payload_room(Path::new("/dev/loop0"), 2048, 4096).expect("too small");
-        assert!(complaint.contains("/dev/loop0"), "{complaint}");
-        assert!(complaint.contains("2048"), "{complaint}");
-        assert!(complaint.contains("4096"), "{complaint}");
-    }
 }

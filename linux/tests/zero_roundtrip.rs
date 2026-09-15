@@ -18,7 +18,8 @@ mod common;
 use std::io::Read as _;
 
 use common::{Owned, open_control};
-use devmap_linux::{DevId, targets::Zero};
+use devmap_core::{DevId, NoInfo};
+use devmap_zero::dm::Target as Zero;
 
 #[test]
 fn create_load_resume_read_zeros_remove() {
@@ -53,7 +54,7 @@ fn create_load_resume_read_zeros_remove() {
     let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
     assert_eq!(info.len(), 1);
     assert_eq!(info[0].params(), "");
-    assert_eq!(info[0].parse::<Zero>(), Some(devmap_linux::NoInfo));
+    assert_eq!(info[0].parse::<Zero>(), Some(NoInfo));
 
     // The test harness's `Owned` guard drops here and removes the mapping;
     // the library itself never removes anything implicitly.

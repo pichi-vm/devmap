@@ -3,9 +3,11 @@
 // `i % 251` is provably in u8 range; keep the fixture generation readable.
 #![allow(clippy::cast_possible_truncation)]
 
-use devmap_verity::*;
-use std::io::{Cursor, Read as _, Write as _};
-use std::num::NonZeroU64;
+use devmap_core::traits::std::Scale as _;
+use devmap_verity::traits::std::Format as _;
+use devmap_verity::{Algorithm, Formatter, HashType};
+use std::io::Cursor;
+use std::num::NonZeroU32;
 
 /// Format a 16-byte UUID as the canonical 8-4-4-4-12 hex string that
 /// `veritysetup format --uuid` accepts and writes back byte-identically.
@@ -43,35 +45,16 @@ fn assert_matches_veritysetup(
         .map(|i| i.wrapping_mul(7).wrapping_add(1))
         .collect();
     let uuid = [0x5a; 16];
-    let superblock = Verified::builder()
+    let formatter = Formatter::new(uuid)
         .algorithm(algorithm)
         .hash_type(hash_type)
-        .data_block_size(4096)
-        .unwrap()
-        .hash_block_size(4096)
-        .unwrap()
         .salt(&salt)
-        .unwrap()
-        .build(
-            uuid,
-            NonZeroU64::new(blocks as u64).expect("test data is nonempty"),
-        )
         .unwrap();
-    let mut blob = Cursor::new(Vec::new());
-    let bytes = Unverified::from(&superblock);
-    blob.write_all(bytes.as_ref()).unwrap();
-    std::io::copy(
-        &mut std::io::repeat(0).take(superblock.padding()),
-        &mut blob,
-    )
-    .unwrap();
-    let root_hash = {
-        let mut tree = TreeWriter::new(&mut blob, superblock).unwrap();
-        tree.write_all(&data).unwrap();
-        tree.flush().unwrap();
-        tree.digest().unwrap().to_vec()
-    };
-    let blob = blob.into_inner();
+    let block_size = NonZeroU32::new(4096).unwrap();
+    let input = Cursor::new(&data).scale(block_size).unwrap();
+    let mut blob = Cursor::new(Vec::new()).scale(block_size).unwrap();
+    let root_hash = formatter.format(input, &mut blob).unwrap();
+    let blob = blob.into_inner().into_inner();
 
     let tmp = tempfile::TempDir::new().unwrap();
     let datap = tmp.path().join("data.img");

@@ -23,6 +23,65 @@ fn root_hash_of(format_output: &str) -> String {
 }
 
 #[test]
+fn regular_files_support_format_verify_and_header_only_dump() {
+    use std::io::{Seek as _, Write as _};
+
+    let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data.img");
+    let hashes = directory.path().join("hash.img");
+    std::fs::write(&data, vec![0x5a; 8192]).unwrap();
+    let hash_file = std::fs::File::create(&hashes).unwrap();
+    hash_file.set_len(8192).unwrap();
+    let data_path = data.to_str().unwrap();
+    let hash_path = hashes.to_str().unwrap();
+    let (ok, formatted) = run(
+        BIN,
+        &[
+            "verity",
+            "format",
+            data_path,
+            hash_path,
+            "--uuid",
+            "07070707-0707-0707-0707-070707070707",
+            "--salt",
+            "090909",
+        ],
+    );
+    assert!(ok, "{formatted}");
+    let root = root_hash_of(&formatted);
+    let (ok, verified) = run(BIN, &["verity", "verify", data_path, hash_path, &root]);
+    assert!(ok && verified.contains("successful"), "{verified}");
+    let (ok, _) = run(
+        BIN,
+        &["verity", "verify", data_path, hash_path, &"00".repeat(32)],
+    );
+    assert!(!ok);
+
+    // Neither the data device nor a complete tree is needed for inspection.
+    std::fs::remove_file(&data).unwrap();
+    hash_file.set_len(512).unwrap();
+    let (ok, dumped) = run(BIN, &["verity", "dump", hash_path]);
+    assert!(ok, "{dumped}");
+    assert!(
+        dumped.contains("07070707-0707-0707-0707-070707070707"),
+        "{dumped}"
+    );
+    assert!(
+        dumped.contains("sha256") && dumped.contains("090909"),
+        "{dumped}"
+    );
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&hashes)
+        .unwrap();
+    file.seek(std::io::SeekFrom::Start(344)).unwrap();
+    file.write_all(&[1]).unwrap();
+    let (ok, _) = run(BIN, &["verity", "dump", hash_path]);
+    assert!(!ok, "noncanonical metadata must be rejected");
+}
+
+#[test]
 fn verity_persona_format_open_verify() {
     if !have_dm() {
         eprintln!("skipping: no device-mapper access (run as root)");

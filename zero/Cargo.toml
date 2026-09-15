@@ -1,0 +1,30 @@
+[package]
+name = "devmap-zero"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+readme = "README.md"
+description = "A seekable zero-filled device and Linux device-mapper zero target."
+repository = "https://github.com/pichi-vm/devmap"
+
+[dependencies]
+devmap-core = { version = "0.1.0", path = "../core" }
+tokio = { version = "1", features = ["io-util"], optional = true }
+
+[features]
+tokio = ["dep:tokio", "devmap-core/tokio"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "macros", "rt"] }
+
+[[test]]
+name = "async"
+required-features = ["tokio"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

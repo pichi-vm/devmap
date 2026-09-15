@@ -4,7 +4,7 @@
 //!
 //! A cache maps *cache* blocks to the origin blocks they hold, which is a
 //! dense sequence — one entry per cache block — so unlike thin's sparse
-//! mappings these live in an [`array`](crate::array) rather than a btree.
+//! mappings these live in an [`mod@array`] rather than a btree.
 //! The policy's per-block hints live in a second array alongside.
 //!
 //! Two metadata versions are in use and they differ in where dirtiness is
@@ -165,7 +165,7 @@ pub struct Mapping {
 ///
 /// # Panics
 ///
-/// Never: the array is walked expecting [`MAPPING_SIZE`], so every value is
+/// Never: the array is walked expecting `MAPPING_SIZE`, so every value is
 /// a whole `u64`, and a cache block index is bounded by `cache_blocks`, a
 /// `u32`.
 pub fn mappings<B: Blocks + ?Sized>(
