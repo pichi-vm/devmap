@@ -19,6 +19,9 @@ mod sync;
 ///
 /// Backing contents must remain unchanged while the view is in use. The
 /// reported size is the protected extent; seeking beyond its end is allowed.
+/// Only read blocks are checked. Copy the complete view to an I/O sink to
+/// verify the entire protected extent.
+///
 /// A cancelled Tokio read resumes on the next read, even with a different
 /// output-buffer size. Seeking during a pending read returns
 /// [`io::ErrorKind::WouldBlock`]; resume the read first. An I/O or

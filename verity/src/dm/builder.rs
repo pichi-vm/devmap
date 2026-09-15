@@ -13,7 +13,7 @@ const BLOCK: NonZeroU32 = NonZeroU32::new(4096).unwrap();
 ///
 /// Defaults are format 1, SHA-256, 4096-byte data/hash blocks, tree start
 /// block 1, no salt, and ordinary error handling. Use [`From<&Header>`]
-/// to copy all format fields from an opened hash device instead.
+/// to copy stored hashing parameters from an opened hash device instead.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct Builder {
@@ -127,6 +127,9 @@ impl Builder {
     }
 
     /// Places the header at a byte offset in the actual Linux hash device.
+    ///
+    /// Open an embedded header through a zero-based storage region; this
+    /// offset is its location in the complete device supplied to Linux.
     ///
     /// # Errors
     ///

@@ -21,12 +21,11 @@ mod sync;
 ///
 /// Open with [`crate::traits::std::OpenHashes`] or its Tokio counterpart.
 /// Opening reads only the header; it neither authenticates the tree nor checks
-/// the backing device's capacity or logical-block geometry. Those geometry
-/// checks occur when constructing a `Verity` view.
+/// storage geometry or capacity.
 ///
 /// The backing contents must remain unchanged while this handle is in use.
 /// Pass an adapter as the backing storage to select a region or add caching.
-/// This type does not expose a raw byte-stream interface.
+/// This type does not expose raw bytes.
 #[allow(missing_debug_implementations)]
 pub struct Hashes<H> {
     inner: H,
@@ -65,7 +64,6 @@ impl<H> Hashes<H> {
 
     /// Borrows the validated header without performing I/O.
     ///
-    /// Header validity does not authenticate the tree or protected data.
     /// Available even while an asynchronous read is pending.
     pub const fn header(&self) -> &Header {
         &self.header

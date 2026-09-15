@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Verity operations grouped by I/O ecosystem.
+//! Construction and formatting operations.
+//!
+//! Choose `std` for synchronous I/O or `tokio` for Tokio streams.
 
-/// Standard-library synchronous operations.
 pub mod std;
 
-/// Tokio asynchronous operations.
 #[cfg(feature = "tokio")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 pub mod tokio;

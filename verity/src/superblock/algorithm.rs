@@ -36,11 +36,8 @@ use whirlpool::Whirlpool;
 
 /// A hash algorithm stored in a dm-verity superblock.
 ///
-/// SHA-1 requires the `sha1` feature; SHA-2 variants require `sha2`; and the
-/// RIPEMD, Whirlpool, SHA-3, Streebog, SM3, and BLAKE2 families require the
-/// correspondingly named `ripemd`, `whirlpool`, `sha3`, `streebog`, `sm3`, and
-/// `blake2` features. Values can be parsed and stored without those features,
-/// but formatting or authenticated reading with an unavailable algorithm returns
+/// Values remain representable without their hash-family features. Formatting
+/// or authenticated reading with an unavailable algorithm returns
 /// [`std::io::ErrorKind::Unsupported`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
