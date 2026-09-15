@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-use devmap_core::parse::{DevId, Error, Fraction, NoInfo};
+use devmap_core::parse::{DevId, Empty, Error, Fraction};
 
 #[test]
 fn identifiers_round_trip_without_a_linux_dependency() {
@@ -18,9 +18,9 @@ fn identifiers_round_trip_without_a_linux_dependency() {
 
 #[test]
 fn empty_status_rejects_unexpected_text() {
-    assert!("".parse::<NoInfo>().is_ok());
-    assert!(" \t\n".parse::<NoInfo>().is_ok());
-    assert!("unexpected".parse::<NoInfo>().is_err());
+    assert!("".parse::<Empty>().is_ok());
+    assert!(" \t\n".parse::<Empty>().is_ok());
+    assert!("unexpected".parse::<Empty>().is_err());
 }
 
 #[test]

@@ -11,7 +11,7 @@ a persistence boundary. `scale()` and `slice()` work in multipliers and
 logical blocks respectively.
 
 The crate exports `Target`, `Region`, and `Scaled` at its root. The `parse`
-module supplies `DevId`, `Fraction`, `NoInfo`, and `Error` for target parameters
+module supplies `DevId`, `Fraction`, `Empty`, and `Error` for target parameters
 and status. Concrete targets implement `Target` in their owning crates;
 `devmap-linux` uses these descriptions to load tables and parse replies.
 A finite zero-filled source is available separately as `devmap_zero::Zero`.

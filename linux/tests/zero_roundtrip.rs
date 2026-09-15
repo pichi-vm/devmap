@@ -18,7 +18,7 @@ mod common;
 use std::io::Read as _;
 
 use common::{Owned, open_control};
-use devmap_core::parse::{DevId, NoInfo};
+use devmap_core::parse::{DevId, Empty};
 use devmap_zero::dm::ZeroTarget;
 
 #[test]
@@ -49,12 +49,12 @@ fn create_load_resume_read_zeros_remove() {
     );
 
     // dm-zero has no `.status` callback at all, so the kernel emits an
-    // empty params field for it — which is exactly what `NoInfo` accepts
+    // empty params field for it — which is exactly what `Empty` accepts
     // and nothing else.
     let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
     assert_eq!(info.len(), 1);
     assert_eq!(info[0].params(), "");
-    assert_eq!(info[0].parse::<ZeroTarget>(), Some(NoInfo));
+    assert_eq!(info[0].parse::<ZeroTarget>(), Some(Empty));
 
     // The test harness's `Owned` guard drops here and removes the mapping;
     // the library itself never removes anything implicitly.

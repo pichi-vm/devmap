@@ -7,7 +7,7 @@ use std::fmt::{self, Write as _};
 use std::str::FromStr;
 
 use devmap_core::Target;
-use devmap_core::parse::{DevId, Error, NoInfo};
+use devmap_core::parse::{DevId, Empty, Error};
 
 /// Where dm-crypt gets the key for a mapping.
 ///
@@ -265,7 +265,7 @@ impl Target for CryptTarget {
     type Table = Self;
     // dm-crypt's STATUSTYPE_INFO writes an empty string — it reports no
     // runtime state at all.
-    type Info = NoInfo;
+    type Info = Empty;
 }
 
 impl fmt::Display for CryptTarget {

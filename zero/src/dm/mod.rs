@@ -7,7 +7,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use devmap_core::Target;
-use devmap_core::parse::{Error, NoInfo};
+use devmap_core::parse::{Empty, Error};
 
 /// Discards writes, returns zeroed reads. No parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,7 +15,7 @@ pub struct ZeroTarget;
 impl Target for ZeroTarget {
     const NAME: &'static str = "zero";
     type Table = Self;
-    type Info = NoInfo;
+    type Info = Empty;
 }
 impl fmt::Display for ZeroTarget {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
