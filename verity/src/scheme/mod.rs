@@ -23,7 +23,7 @@ pub use hash_type::HashType;
 ///     traits::std::{Format as _, Open as _, Scale as _}};
 ///
 /// let data = vec![0x5a; 8192];
-/// let block_size = BlockSize::default().into();
+/// let block_size = BlockSize::<512>::default().into();
 /// let input = Cursor::new(&data).scale_to(block_size)?;
 /// let output = Cursor::new(Vec::new()).scale_to(block_size)?;
 /// let (hashes, root) = Scheme::default().format(input, output, [7; 16])?;
