@@ -10,9 +10,9 @@ use std::num::NonZeroU64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Shape {
     /// Size of each protected data block.
-    pub data_block_size: BlockSize,
+    pub data_block_size: BlockSize<512>,
     /// Size of each hash-tree block.
-    pub hash_block_size: BlockSize,
+    pub hash_block_size: BlockSize<512>,
     /// Number of protected data blocks.
     pub data_blocks: NonZeroU64,
 }
@@ -28,13 +28,13 @@ impl Shape {
     }
     /// Changes the data-block size.
     #[must_use]
-    pub const fn with_data_block_size(mut self, value: BlockSize) -> Self {
+    pub const fn with_data_block_size(mut self, value: BlockSize<512>) -> Self {
         self.data_block_size = value;
         self
     }
     /// Changes the hash-block size.
     #[must_use]
-    pub const fn with_hash_block_size(mut self, value: BlockSize) -> Self {
+    pub const fn with_hash_block_size(mut self, value: BlockSize<512>) -> Self {
         self.hash_block_size = value;
         self
     }

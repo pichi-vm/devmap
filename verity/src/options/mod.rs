@@ -112,7 +112,11 @@ impl<'a> Options<'a> {
     /// # Errors
     ///
     /// Returns `InvalidInput` if the offset is not hash-block aligned.
-    pub fn with_header_offset_bytes(self, offset: u64, block_size: BlockSize) -> io::Result<Self> {
+    pub fn with_header_offset_bytes(
+        self,
+        offset: u64,
+        block_size: BlockSize<512>,
+    ) -> io::Result<Self> {
         let size = u64::from(u32::from(block_size));
         if offset % size != 0 {
             return Err(io::Error::new(
