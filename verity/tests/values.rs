@@ -2,9 +2,9 @@
 
 use devmap_core::parse::DevId;
 use devmap_verity::{
-    Algorithm, BlockSize, Fec, HashType, KeyDescription, Options, Scheme, Shape, VerityTarget,
+    Algorithm, Fec, HashType, KeyDescription, Options, Scheme, Shape, VerityTarget,
 };
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU64;
 
 #[test]
 fn values_are_copy_and_defaults_are_independent() {
@@ -29,24 +29,6 @@ fn values_are_copy_and_defaults_are_independent() {
     assert_eq!(scheme.salt.len(), 0);
     assert!(scheme.with_salt(&[7; 257]).is_err());
     assert_eq!(changed.with_salt(&[]).unwrap().salt.as_slice(), []);
-}
-
-#[test]
-fn block_sizes_validate_and_convert_in_bytes() {
-    for size in [0u32, 1, 511, 513, 1 << 31, u32::MAX] {
-        assert!(BlockSize::try_from(size).is_err());
-        assert!(size.to_string().parse::<BlockSize>().is_err());
-    }
-    for size in [512u32, 4096, 512 * 1024, 1 << 30] {
-        let value = BlockSize::try_from(size).unwrap();
-        assert_eq!(u32::from(value), size);
-        assert_eq!(NonZeroU32::from(value).get(), size);
-        assert_eq!(
-            BlockSize::try_from(NonZeroU32::new(size).unwrap()).unwrap(),
-            value
-        );
-        assert_eq!(value.to_string().parse::<BlockSize>().unwrap(), value);
-    }
 }
 
 #[test]

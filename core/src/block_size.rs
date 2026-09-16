@@ -2,10 +2,11 @@
 
 use std::{fmt, io, num::NonZeroU32, str::FromStr};
 
-/// A power-of-two verity block size in bytes.
+/// A power-of-two size for sector-based blocks, in bytes.
 ///
-/// Accepts 512 through 2³⁰ bytes. Header-based I/O additionally limits blocks
-/// to 512 KiB. The default is 4096 bytes.
+/// Accepts 512 through 2³⁰ bytes. The default is 4096 bytes.
+/// Formats may impose narrower limits; general byte-stream geometry uses
+/// [`NonZeroU32`] instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlockSize(NonZeroU32);
 
@@ -21,7 +22,7 @@ impl TryFrom<u32> for BlockSize {
         if bytes < 512 || !bytes.is_power_of_two() || bytes > i32::MAX as u32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "invalid verity block size",
+                "invalid block size",
             ));
         }
         NonZeroU32::new(bytes)
