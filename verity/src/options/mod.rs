@@ -115,7 +115,7 @@ impl<'a> Options<'a> {
     pub fn with_header_offset_bytes(
         self,
         offset: u64,
-        block_size: BlockSize<512>,
+        block_size: BlockSize<9>,
     ) -> io::Result<Self> {
         let size = u64::from(u32::from(block_size));
         if offset % size != 0 {

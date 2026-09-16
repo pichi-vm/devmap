@@ -2,43 +2,39 @@
 
 use std::{fmt, io, num::NonZeroU32, str::FromStr};
 
-/// A power-of-two block size with a compile-time minimum, in bytes.
+/// A power-of-two block size with a minimum base-two exponent.
 ///
-/// Accepts nonzero powers of two from `MIN` through 2³⁰ bytes. The minimum
-/// defaults to 512; `BlockSize<1>` also permits byte-sized blocks.
-/// Formats may impose narrower limits.
+/// Accepts byte sizes from 2^`MIN` through 2³⁰. `MIN` defaults to 9
+/// (512 bytes); `BlockSize<0>` permits byte-sized blocks. Construction,
+/// parsing, and display use bytes. Formats may impose narrower limits.
 ///
 /// ```
 /// use devmap_core::BlockSize;
 ///
 /// # fn main() -> std::io::Result<()> {
-/// let byte = BlockSize::<1>::try_from(1u32)?;
+/// let byte = BlockSize::<0>::try_from(1u32)?;
 /// assert_eq!(u32::from(byte), 1);
-/// assert!(BlockSize::<4096>::try_from(512u32).is_err());
+/// assert!(BlockSize::<12>::try_from(512u32).is_err());
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BlockSize<const MIN: u32 = 512>(NonZeroU32);
+pub struct BlockSize<const MIN: u32 = 9>(NonZeroU32);
 
 impl<const MIN: u32> Default for BlockSize<MIN> {
-    /// Returns 4096 bytes, or the smallest permitted size if `MIN` is larger.
+    /// Returns 4096 bytes, or 2^`MIN` bytes when `MIN` exceeds 12.
     ///
-    /// A minimum above 2³⁰ has no representable default and fails at compile time.
+    /// A minimum exponent above 30 has no representable default and fails at compile time.
     ///
     /// ```compile_fail
     /// use devmap_core::BlockSize;
-    /// let _ = BlockSize::<{ 1 << 31 }>::default();
+    /// let _ = BlockSize::<31>::default();
     /// ```
     fn default() -> Self {
         Self(
             const {
-                assert!(MIN <= 1 << 30, "block-size minimum exceeds the maximum");
-                let bytes = if MIN > 4096 {
-                    MIN.next_power_of_two()
-                } else {
-                    4096
-                };
+                assert!(MIN <= 30, "block-size minimum exceeds the maximum");
+                let bytes = 1u32 << if MIN > 12 { MIN } else { 12 };
                 NonZeroU32::new(bytes).unwrap()
             },
         )
@@ -48,7 +44,7 @@ impl<const MIN: u32> Default for BlockSize<MIN> {
 impl<const MIN: u32> TryFrom<u32> for BlockSize<MIN> {
     type Error = io::Error;
     fn try_from(bytes: u32) -> io::Result<Self> {
-        if bytes < MIN || !bytes.is_power_of_two() || bytes > i32::MAX as u32 {
+        if !bytes.is_power_of_two() || bytes.trailing_zeros() < MIN || bytes > i32::MAX as u32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "invalid block size",

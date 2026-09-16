@@ -82,7 +82,8 @@ including cleanup after a failed load or resume. The
 - Verity uses independent, public-field `Scheme`, `Shape`, and `Options`
   values with `with_*` helpers. There is no `dm` module or configuration builder.
   `devmap_core::BlockSize<MIN>` validates power-of-two byte sizes with a
-  compile-time minimum; verity uses `BlockSize<512>`. Salt uses inline, copyable storage.
+  minimum base-two exponent; verity uses `BlockSize<9>` (512 bytes).
+  Salt uses inline, copyable storage.
   `Scheme::format(data, hashes, uuid)` derives geometry and persists output.
   `Options::open(data, hashes, root)` constructs a userspace verifier.
   Stored metadata is available through `Hashes::uuid()`, `scheme()`, and `shape()`.

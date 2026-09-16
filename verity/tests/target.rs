@@ -128,7 +128,7 @@ fn unknown_algorithms_are_rejected() {
 #[test]
 fn invalid_parameters_and_conflicting_options_are_rejected() {
     for size in [0u32, 511, 513, 1 << 31] {
-        assert!(BlockSize::<512>::try_from(size).is_err());
+        assert!(BlockSize::<9>::try_from(size).is_err());
     }
     assert!(
         Options::default()

@@ -20,7 +20,7 @@
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let mut region = Cursor::new(vec![7; 8192])
-//!     .scale_to(BlockSize::<512>::default().into())?
+//!     .scale_to(BlockSize::<9>::default().into())?
 //!     .slice(1..2)?;
 //! let mut block = [0; 4096];
 //! region.read_exact(&mut block)?;
