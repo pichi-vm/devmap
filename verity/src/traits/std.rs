@@ -31,30 +31,29 @@ pub use devmap_core::traits::std::{Geometry, Scale, Slice, SliceBytes, SyncData}
     )))
 )]
 pub trait Format<D, H>: Sized {
-    /// Writes a header and tree, returning their handle and root digest.
+    /// Writes and persists a hash volume, returning its handle and root digest.
     ///
-    /// Implemented for [`crate::Parameters`]. Reads exactly the declared data
-    /// extent from the current input position; trailing bytes remain unread.
-    /// Each configured block size must be a multiple of the endpoint's block
-    /// size. Writes hash storage from byte zero. Fixed storage must fit the
-    /// image; growable storage expands as needed. The UUID identifies the
-    /// volume but does not authenticate it.
+    /// Implemented for [`crate::Scheme`]. Data geometry supplies the protected
+    /// block size and count; output geometry supplies the hash-block size.
+    /// Position input at its beginning. Exactly the exposed extent is read.
+    /// Use [`Scale::scale_to`] and regions to select sizes and extents.
     ///
-    /// Header-based formatting accepts block sizes up to 512 KiB and salts
-    /// up to 256 bytes. Extents must fit in `u64` bytes. Configuration is
-    /// checked before writing.
+    /// Writes output from byte zero. Header-based I/O accepts power-of-two
+    /// block sizes from 512 bytes through 512 KiB, a nonzero count, and extents
+    /// fitting in `u64` bytes. Fixed output must fit the image; growable output
+    /// expands as needed. Configuration is checked before writing.
     ///
-    /// Output is flushed, not persisted. Call [`SyncData::sync_data`] on the
-    /// returned handle for durability. Keep the root in independently trusted
-    /// storage. Failure may leave partial output and advance either stream;
-    /// no completed handle or root is returned.
+    /// Output is flushed and then persisted with [`SyncData::sync_data`].
+    /// The UUID identifies the volume; it does not authenticate it. Keep the
+    /// returned root independently trusted. Data-input persistence remains
+    /// the caller's responsibility. Failure can leave partial output and
+    /// advance either stream, but returns no completed handle or root.
     ///
     /// # Errors
     ///
-    /// Returns [`io::ErrorKind::InvalidInput`] for incompatible endpoint
-    /// geometry or unrepresentable header fields, [`io::ErrorKind::UnexpectedEof`] for short input, or
-    /// [`io::ErrorKind::Unsupported`] for a disabled hash implementation.
-    /// Other errors come from the streams.
+    /// Returns `InvalidInput` for incompatible geometry or header limits,
+    /// `UnexpectedEof` for short input, and `Unsupported` for an unavailable
+    /// hashing implementation. Other errors come from I/O or persistence.
     fn format(
         self,
         data: D,
@@ -88,21 +87,27 @@ pub trait Format<D, H>: Sized {
     )))
 )]
 pub trait Open<D, H>: Sized {
-    /// Checks endpoint geometry and the supplied root digest's length.
+    /// Opens a userspace view using these options and an independently trusted root.
     ///
-    /// Pass an opened [`crate::Hashes`]. Each stored block size must be a
-    /// multiple of its backing storage's block size, and both devices must
-    /// fit the declared layout. Use [`Region`](devmap_core::Region) for embedded devices.
+    /// Implemented for [`crate::Options`]. Pass an opened [`crate::Hashes`].
+    /// Stored block sizes must be multiples of the backing block sizes, and
+    /// both endpoints must fit the layout. Use regions for embedded volumes.
     ///
-    /// The view starts at logical byte zero. Opening authenticates no blocks;
-    /// [`crate::Verity`] checks them on read.
+    /// Opening authenticates no blocks. [`crate::Verity`] applies the selected
+    /// read policies lazily, with strict verification by default.
     ///
     /// # Errors
     ///
-    /// Returns [`io::ErrorKind::InvalidInput`] for a root digest of the wrong
-    /// length, [`io::ErrorKind::InvalidData`] for incompatible geometry or
-    /// storage shorter than the declared layout. Other errors come from storage.
-    fn open(data: D, hashes: H, root_digest: &[u8]) -> io::Result<Self>;
+    /// Returns `InvalidInput` for a wrong root length or incompatible options,
+    /// `InvalidData` for incompatible geometry or insufficient capacity, and
+    /// `Unsupported` for kernel-only settings, FEC, or a tree start other than 1.
+    /// Other errors come from storage or allocating first-read tracking state.
+    fn open(
+        self,
+        data: D,
+        hashes: crate::Hashes<H>,
+        root_digest: &[u8],
+    ) -> io::Result<crate::Verity<D, H>>;
 }
 
 /// Opens a hash device without requiring data storage or hashing support.

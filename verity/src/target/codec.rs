@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{CorruptionPolicy, Fec, IoErrorPolicy, VerityTarget};
-use crate::{HashType, Parameters};
+use super::VerityTarget;
+use crate::{
+    CorruptionPolicy, Fec, HashType, IoErrorPolicy, KeyDescription, Options, Scheme, Shape,
+};
 use devmap_core::parse::{DevId, Error};
+use std::borrow::Cow;
 use std::{
     fmt::{self, Write as _},
     num::NonZeroU64,
@@ -17,21 +20,41 @@ impl VerityTarget {
         Ok(())
     }
 
-    fn unhex(value: &str) -> Result<Vec<u8>, Error> {
-        let nibble = |byte| match byte {
-            b'0'..=b'9' => Ok(byte - b'0'),
-            b'a'..=b'f' => Ok(byte - b'a' + 10),
-            b'A'..=b'F' => Ok(byte - b'A' + 10),
-            _ => Err(Error),
-        };
-        let bytes = value.as_bytes();
-        if bytes.len() % 2 != 0 {
-            return Err(Error);
+    fn chars(value: &str) -> impl Iterator<Item = char> + '_ {
+        let mut chars = value.chars();
+        std::iter::from_fn(move || {
+            chars.next().map(|c| {
+                if c == '\\' {
+                    chars.next().unwrap_or(c)
+                } else {
+                    c
+                }
+            })
+        })
+    }
+
+    fn unhex(value: &str) -> impl Iterator<Item = Result<u8, Error>> + '_ {
+        let mut chars = Self::chars(value);
+        std::iter::from_fn(move || {
+            let first = chars.next()?;
+            Some((|| {
+                let high = first
+                    .to_digit(16)
+                    .filter(|_| first.is_ascii())
+                    .ok_or(Error)?;
+                let last = chars.next().ok_or(Error)?;
+                let low = last.to_digit(16).filter(|_| last.is_ascii()).ok_or(Error)?;
+                Ok((high * 16 + low) as u8)
+            })())
+        })
+    }
+
+    fn word(value: &str) -> Cow<'_, str> {
+        if value.contains('\\') {
+            Cow::Owned(Self::chars(value).collect())
+        } else {
+            Cow::Borrowed(value)
         }
-        bytes
-            .chunks_exact(2)
-            .map(|pair| Ok(nibble(pair[0])? * 16 + nibble(pair[1])?))
-            .collect()
     }
 
     fn token(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
@@ -44,26 +67,29 @@ impl VerityTarget {
         Ok(())
     }
 
-    fn words(input: &str) -> Result<Vec<String>, Error> {
+    fn words(input: &str) -> Result<Vec<&str>, Error> {
         if input.contains('\0') {
             return Err(Error);
         }
         let mut words = Vec::new();
-        let mut word = String::new();
-        let mut chars = input.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\\' {
-                word.push(chars.next().unwrap_or('\\'));
-            } else if c.is_ascii_whitespace() {
-                if !word.is_empty() {
-                    words.push(std::mem::take(&mut word));
+        let mut start = None;
+        let mut escaped = false;
+        for (index, c) in input.char_indices() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if c.is_ascii_whitespace() {
+                if let Some(start) = start.take() {
+                    words.push(&input[start..index]);
                 }
             } else {
-                word.push(c);
+                start.get_or_insert(index);
+                escaped = c == '\\';
             }
         }
-        if !word.is_empty() {
-            words.push(word);
+        if let Some(start) = start {
+            words.push(&input[start..]);
         }
         Ok(words)
     }
@@ -88,58 +114,61 @@ impl fmt::Display for VerityTarget {
         write!(
             f,
             "{} {} {} {} {} {} {} {} ",
-            self.parameters.hash_type(),
+            self.scheme.hash_type,
             self.data_dev,
             self.hash_dev,
-            self.parameters.data_block_size(),
-            self.parameters.hash_block_size(),
-            self.parameters.data_blocks(),
-            self.hash_start_block(),
-            self.parameters.algorithm()
+            self.shape.data_block_size,
+            self.shape.hash_block_size,
+            self.shape.data_blocks,
+            self.options.hash_start_block,
+            self.scheme.algorithm
         )?;
         Self::hex(f, &self.root)?;
         f.write_char(' ')?;
-        if self.parameters.salt().is_empty() {
+        if self.scheme.salt.as_slice().is_empty() {
             f.write_str("-")?;
         } else {
-            Self::hex(f, self.parameters.salt())?;
+            Self::hex(f, self.scheme.salt.as_slice())?;
         }
-        let count = usize::from(self.corruption != CorruptionPolicy::Error)
-            + usize::from(self.io_error != IoErrorPolicy::Error)
-            + usize::from(self.ignore_zero)
-            + usize::from(self.at_most_once)
-            + usize::from(self.tasklet)
-            + usize::from(self.fec.is_some()) * 8
+        let count = usize::from(self.options.corruption_policy != CorruptionPolicy::Error)
+            + usize::from(self.options.io_error_policy != IoErrorPolicy::Error)
+            + usize::from(self.options.ignore_zero_blocks)
+            + usize::from(self.options.check_at_most_once)
+            + usize::from(self.options.try_verify_in_tasklet)
+            + usize::from(self.options.fec.is_some()) * 8
             + usize::from(self.signature.is_some()) * 2;
         if count == 0 {
             return Ok(());
         }
         write!(f, " {count}")?;
-        match self.corruption {
+        match self.options.corruption_policy {
             CorruptionPolicy::Error => {}
             CorruptionPolicy::Ignore => f.write_str(" ignore_corruption")?,
             CorruptionPolicy::Restart => f.write_str(" restart_on_corruption")?,
             CorruptionPolicy::Panic => f.write_str(" panic_on_corruption")?,
         }
-        match self.io_error {
+        match self.options.io_error_policy {
             IoErrorPolicy::Error => {}
             IoErrorPolicy::Restart => f.write_str(" restart_on_error")?,
             IoErrorPolicy::Panic => f.write_str(" panic_on_error")?,
         }
-        if self.ignore_zero {
+        if self.options.ignore_zero_blocks {
             f.write_str(" ignore_zero_blocks")?;
         }
-        if self.at_most_once {
+        if self.options.check_at_most_once {
             f.write_str(" check_at_most_once")?;
         }
-        if self.tasklet {
+        if self.options.try_verify_in_tasklet {
             f.write_str(" try_verify_in_tasklet")?;
         }
-        if let Some(fec) = &self.fec {
+        if let Some(fec) = &self.options.fec {
             write!(
                 f,
                 " use_fec_from_device {} fec_roots {} fec_blocks {} fec_start {}",
-                fec.device, fec.roots, fec.blocks, fec.start
+                fec.device(),
+                fec.roots(),
+                fec.blocks(),
+                fec.start_block()
             )?;
         }
         if let Some(key) = &self.signature {
@@ -155,11 +184,23 @@ impl FromStr for VerityTarget {
     // Keep option counts, ordering, and conflict checks in one parser.
     #[allow(clippy::too_many_lines)]
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let words = Self::words(input)?;
+        let raw = Self::words(input)?;
+        // Keep the salt token borrowed even when escaped; decode it directly below.
+        let words: Vec<_> = raw
+            .iter()
+            .enumerate()
+            .map(|(i, word)| {
+                if i == 9 {
+                    Cow::Borrowed(*word)
+                } else {
+                    Self::word(word)
+                }
+            })
+            .collect();
         if words.len() < 10 {
             return Err(Error);
         }
-        let hash_type = match words[0].as_str() {
+        let hash_type = match words[0].as_ref() {
             "0" => HashType::ChromeOs,
             "1" => HashType::Normal,
             _ => return Err(Error),
@@ -171,24 +212,26 @@ impl FromStr for VerityTarget {
             .ok()
             .and_then(NonZeroU64::new)
             .ok_or(Error)?;
-        let mut builder = Parameters::builder()
-            .hash_type(hash_type)
-            .data_block_size(words[3].parse().map_err(|_| Error)?)
-            .map_err(|_| Error)?
-            .hash_block_size(words[4].parse().map_err(|_| Error)?)
-            .map_err(|_| Error)?
-            .algorithm(words[7].parse().map_err(|_| Error)?);
-        let root = Self::unhex(&words[8])?;
-        if words[9] != "-" {
-            builder = builder.salt(&Self::unhex(&words[9])?);
+        let mut scheme = Scheme {
+            hash_type,
+            algorithm: words[7].parse().map_err(|_| Error)?,
+            ..Scheme::default()
+        };
+        let shape = Shape {
+            data_blocks: count,
+            data_block_size: words[3].parse().map_err(|_| Error)?,
+            hash_block_size: words[4].parse().map_err(|_| Error)?,
+        };
+        let root = Self::unhex(&words[8]).collect::<Result<Vec<_>, _>>()?;
+        if !Self::chars(&words[9]).eq("-".chars()) {
+            for byte in Self::unhex(&words[9]) {
+                if scheme.salt.len() == 256 {
+                    return Err(Error);
+                }
+                scheme.salt.push(byte?);
+            }
         }
-        let mut target = builder
-            .build(count)
-            .map_err(|_| Error)?
-            .target(data, hashes, &root)
-            .map_err(|_| Error)?
-            .with_hash_start_block(words[6].parse()?)
-            .map_err(|_| Error)?;
+        let mut options = Options::default().with_hash_start_block(words[6].parse()?);
         if words.len() > 10 {
             let extra: usize = words[10].parse().map_err(|_| Error)?;
             if extra != words.len() - 11 {
@@ -206,7 +249,7 @@ impl FromStr for VerityTarget {
             let mut value = || -> Result<&str, Error> {
                 let value = words.get(index).ok_or(Error)?;
                 index += 1;
-                Ok(value)
+                Ok(value.as_ref())
             };
             match option.as_str() {
                 "ignore_corruption" | "restart_on_corruption" | "panic_on_corruption" => {
@@ -214,7 +257,7 @@ impl FromStr for VerityTarget {
                         return Err(Error);
                     }
                     corruption = true;
-                    target = target.with_corruption_policy(match option.as_str() {
+                    options = options.with_corruption_policy(match option.as_str() {
                         "ignore_corruption" => CorruptionPolicy::Ignore,
                         "restart_on_corruption" => CorruptionPolicy::Restart,
                         _ => CorruptionPolicy::Panic,
@@ -225,25 +268,25 @@ impl FromStr for VerityTarget {
                         return Err(Error);
                     }
                     io_error = true;
-                    target = target.with_io_error_policy(if option == "restart_on_error" {
+                    options = options.with_io_error_policy(if option == "restart_on_error" {
                         IoErrorPolicy::Restart
                     } else {
                         IoErrorPolicy::Panic
                     });
                 }
-                "ignore_zero_blocks" => target = target.with_ignore_zero_blocks(true),
+                "ignore_zero_blocks" => options = options.with_ignore_zero_blocks(true),
                 "check_at_most_once" => {
-                    target = target.with_check_at_most_once(true).map_err(|_| Error)?;
+                    options = options.with_check_at_most_once(true);
                 }
-                "try_verify_in_tasklet" => target = target.with_try_verify_in_tasklet(true),
+                "try_verify_in_tasklet" => options = options.with_try_verify_in_tasklet(true),
                 "root_hash_sig_key_desc" => {
                     if signature {
                         return Err(Error);
                     }
                     signature = true;
-                    target = target
-                        .with_root_hash_sig_key_desc(value()?)
-                        .map_err(|_| Error)?;
+                    options = options.with_root_hash_sig_key_desc(
+                        KeyDescription::try_from(value()?).map_err(|_| Error)?,
+                    );
                 }
                 "use_fec_from_device" => {
                     if fec_device.is_some() {
@@ -266,18 +309,18 @@ impl FromStr for VerityTarget {
             }
         }
         if fec_device.is_some() || fec_roots.is_some() || fec_blocks.is_some() || fec_start != 0 {
-            target = target
-                .with_fec(
-                    Fec::new(
-                        fec_device.ok_or(Error)?,
-                        fec_blocks.ok_or(Error)?,
-                        fec_roots.ok_or(Error)?,
-                    )
-                    .map_err(|_| Error)?
-                    .start(fec_start),
+            options = options.with_fec(
+                Fec::new(
+                    fec_device.ok_or(Error)?,
+                    fec_blocks.ok_or(Error)?,
+                    fec_roots.ok_or(Error)?,
                 )
-                .map_err(|_| Error)?;
+                .map_err(|_| Error)?
+                .start(fec_start),
+            );
         }
-        Ok(target)
+        options
+            .target(scheme, shape, data, hashes, &root)
+            .map_err(|_| Error)
     }
 }

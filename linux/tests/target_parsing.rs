@@ -50,7 +50,7 @@ fn table_parsers_preserve_required_optional_and_trailing_fields() {
 #[test]
 fn status_parsers_preserve_required_optional_and_trailing_fields() {
     row::<devmap_snapshot::dm::Info>("12/64 8", &[]);
-    row::<devmap_verity::dm::Info>("V -", &[]);
+    row::<devmap_verity::Info>("V -", &[]);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn malformed_optional_fields_are_not_treated_as_absent() {
         "aes-xts-plain64 - 0 7:0 0 1",
         "aes-xts-plain64 - 0 7:0 0 1 unknown",
     ]);
-    reject::<devmap_verity::dm::Info>(&["V bad"]);
+    reject::<devmap_verity::Info>(&["V bad"]);
 }
 
 #[test]

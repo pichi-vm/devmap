@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::Unverified;
-use crate::{HashType, Parameters};
+use crate::{HashType, Scheme, Shape, layout::Layout};
 use std::{io, num::NonZeroU64};
 
 impl Unverified {
-    pub(crate) fn decode(&self) -> io::Result<([u8; 16], Parameters)> {
+    pub(crate) fn decode(&self) -> io::Result<([u8; 16], Layout)> {
         let bytes = self.as_ref();
         let invalid = |message| io::Error::new(io::ErrorKind::InvalidData, message);
         if bytes[..Unverified::VERSION] != Unverified::SIGNATURE {
@@ -48,21 +48,19 @@ impl Unverified {
         if bytes[Unverified::PADDING..].iter().any(|byte| *byte != 0) {
             return Err(invalid("nonzero verity superblock padding"));
         }
-        let parameters = Parameters::builder()
-            .hash_type(hash_type)
-            .algorithm(algorithm)
-            .data_block_size(data_block_size)
-            .and_then(|builder| builder.hash_block_size(hash_block_size))
-            .and_then(|builder| {
-                builder
-                    .salt(&bytes[Unverified::SALT..Unverified::SALT + usize::from(salt_size)])
-                    .build(data_blocks)
-            })
-            .and_then(|parameters| {
-                parameters.validate_header()?;
-                Ok(parameters)
-            })
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        Ok((self.field(Unverified::UUID), parameters))
+        let layout = (|| {
+            let scheme = Scheme::default()
+                .with_hash_type(hash_type)
+                .with_algorithm(algorithm)
+                .with_salt(&bytes[Unverified::SALT..Unverified::SALT + usize::from(salt_size)])?;
+            let shape = Shape::new(data_blocks)
+                .with_data_block_size(data_block_size.try_into()?)
+                .with_hash_block_size(hash_block_size.try_into()?);
+            let layout = Layout::new(&scheme, shape)?;
+            layout.validate_header()?;
+            Ok::<_, io::Error>(layout)
+        })()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok((self.field(Unverified::UUID), layout))
     }
 }

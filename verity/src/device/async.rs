@@ -9,7 +9,7 @@ use devmap_core::traits::tokio::Geometry;
 use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 
 use super::Verity;
-use crate::{Hashes, traits::tokio::Open};
+use crate::{Hashes, Options, traits::tokio::Open};
 
 #[derive(Clone, Copy)]
 pub(super) enum Phase {
@@ -17,15 +17,20 @@ pub(super) enum Phase {
     Start { block: u64 },
     Seeking { block: u64 },
     Reading { block: u64, filled: usize },
-    Authenticating { block: u64 },
+    Lookup { block: u64 },
 }
 
-impl<D: Geometry + Send, H: Geometry + Send> Open<D, Hashes<H>> for Verity<D, H> {
-    async fn open(mut data: D, mut hashes: Hashes<H>, root: &[u8]) -> io::Result<Self> {
+impl<D: Geometry + Send, H: Geometry + Send> Open<D, H> for Options<'_> {
+    async fn open(
+        self,
+        mut data: D,
+        mut hashes: Hashes<H>,
+        root: &[u8],
+    ) -> io::Result<Verity<D, H>> {
         hashes.validate_storage_async().await?;
         let block_size = data.block_size()?;
         let count = data.count().await?;
-        Self::new(data, hashes, root, block_size, count)
+        Verity::new(data, hashes, root, self, block_size, count)
     }
 }
 
@@ -34,17 +39,40 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> Verity<
         loop {
             match self.phase {
                 Phase::Idle => {
-                    let block =
-                        self.position / u64::from(self.parameters().data_block_size().get());
+                    let block = self.position / self.data_block_size();
                     if self.cached == Some(block) {
                         return Poll::Ready(Ok(()));
                     }
-                    self.prepare_buffer();
+                    self.prepare_buffer()?;
+                    self.phase = if self.was_verified(block) {
+                        Phase::Start { block }
+                    } else {
+                        Phase::Lookup { block }
+                    };
+                }
+                Phase::Lookup { block } => {
+                    match ready!(self.hashes.poll_lookup(cx, block, &self.root)) {
+                        Ok(expected) => {
+                            let d = self
+                                .digests
+                                .as_mut()
+                                .ok_or_else(|| io::Error::other("missing data verifier"))?;
+                            d.expected.copy_from_slice(expected);
+                            self.compare = true;
+                        }
+                        Err(error)
+                            if Self::ignore_mismatch(self.options.corruption_policy, &error) => {}
+                        Err(error) => return Poll::Ready(Err(error)),
+                    }
+                    if self.zero_block(block) {
+                        self.phase = Phase::Idle;
+                        return Poll::Ready(Ok(()));
+                    }
                     self.phase = Phase::Start { block };
                 }
                 Phase::Start { block } => {
                     ready!(Pin::new(&mut self.data).poll_complete(cx))?;
-                    let offset = block * u64::from(self.parameters().data_block_size().get());
+                    let offset = block * self.data_block_size();
                     Pin::new(&mut self.data).start_seek(io::SeekFrom::Start(offset))?;
                     self.phase = Phase::Seeking { block };
                 }
@@ -63,19 +91,12 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> Verity<
                         return Poll::Ready(Err(io::ErrorKind::UnexpectedEof.into()));
                     }
                     let filled = filled + count;
-                    self.phase = if filled == self.buffer.len() {
-                        Phase::Authenticating { block }
-                    } else {
-                        Phase::Reading { block, filled }
-                    };
-                }
-                Phase::Authenticating { block } => {
-                    ready!(
-                        self.hashes
-                            .poll_authenticate(cx, block, &self.buffer, &self.root)
-                    )?;
-                    self.cached = Some(block);
-                    return Poll::Ready(Ok(()));
+                    if filled == self.buffer.len() {
+                        self.finish_block(block)?;
+                        self.phase = Phase::Idle;
+                        return Poll::Ready(Ok(()));
+                    }
+                    self.phase = Phase::Reading { block, filled };
                 }
             }
         }
@@ -91,7 +112,7 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> AsyncRe
         output: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        if output.remaining() == 0 || this.position >= (this.parameters().layout.data_size as u64) {
+        if output.remaining() == 0 || this.position >= this.data_size() {
             return Poll::Ready(Ok(()));
         }
         let result = this.poll_block(cx);
@@ -99,8 +120,7 @@ impl<D: AsyncRead + AsyncSeek + Unpin, H: AsyncRead + AsyncSeek + Unpin> AsyncRe
             this.phase = Phase::Idle;
         }
         ready!(result)?;
-        let within =
-            (this.position % u64::from(this.parameters().data_block_size().get())) as usize;
+        let within = (this.position % this.data_block_size()) as usize;
         let count = output.remaining().min(this.buffer.len() - within);
         output.put_slice(&this.buffer[within..within + count]);
         this.position += count as u64;
@@ -125,8 +145,8 @@ impl<D, H> Geometry for Verity<D, H> {
     }
 
     fn count(&mut self) -> Pin<Box<dyn Future<Output = io::Result<u64>> + Send + '_>> {
-        Box::pin(std::future::ready(Ok((self.parameters().layout.data_size
-            as u64)
-            / u64::from(self.block_size.get()))))
+        Box::pin(std::future::ready(Ok(
+            self.data_size() / u64::from(self.block_size.get())
+        )))
     }
 }

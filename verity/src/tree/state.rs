@@ -5,10 +5,10 @@ use std::io;
 use digest::DynDigest;
 
 use super::{Drain, Failure, FlushMode};
-use crate::Parameters;
+use crate::layout::Layout;
 
 pub(super) struct State {
-    pub(super) parameters: Parameters,
+    pub(super) layout: Layout,
     hasher: Box<dyn DynDigest + Send + Sync>,
     digest: Box<[u8]>,
     maximum_size: u64,
@@ -23,17 +23,14 @@ pub(super) struct State {
 }
 
 impl State {
-    pub(super) fn new(parameters: Parameters, hasher: Box<dyn DynDigest + Send + Sync>) -> Self {
+    pub(super) fn new(layout: Layout, hasher: Box<dyn DynDigest + Send + Sync>) -> Self {
         let digest_size = hasher.output_size();
-        let layout = &parameters.layout;
-        let data_block_size = parameters.data_block_size().get();
+        let data_block_size = layout.data_block_size().get();
         let levels = layout
             .level_offsets
             .iter()
             .copied()
-            .map(|offset| {
-                HashLevel::new(offset as u64, parameters.hash_block_size().get() as usize)
-            })
+            .map(|offset| HashLevel::new(offset as u64, layout.hash_block_size().get() as usize))
             .collect();
 
         Self {
@@ -48,7 +45,7 @@ impl State {
             hashes_per_block: layout.hashes_per_block,
             tree_size: layout.tree_size as u64,
             root: None,
-            parameters,
+            layout,
         }
     }
 
@@ -140,9 +137,9 @@ impl State {
             return Err(io::Error::other("invalid pending hash-tree block"));
         }
 
-        self.parameters.hash_type().digest(
+        self.layout.hash_type().digest(
             self.hasher.as_mut(),
-            self.parameters.salt(),
+            self.layout.salt(),
             &pending.bytes,
             &mut self.digest,
         )?;
@@ -176,9 +173,9 @@ impl State {
     }
 
     fn process_data_block(&mut self) -> io::Result<()> {
-        self.parameters.hash_type().digest(
+        self.layout.hash_type().digest(
             self.hasher.as_mut(),
-            self.parameters.salt(),
+            self.layout.salt(),
             &self.data_block,
             &mut self.digest,
         )?;
@@ -193,9 +190,9 @@ impl State {
     }
 
     fn process_block(&mut self, block: &[u8]) -> io::Result<()> {
-        self.parameters.hash_type().digest(
+        self.layout.hash_type().digest(
             self.hasher.as_mut(),
-            self.parameters.salt(),
+            self.layout.salt(),
             block,
             &mut self.digest,
         )?;

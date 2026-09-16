@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io;
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 
-use super::{Algorithm, HashType};
+use crate::{HashType, Scheme, Shape};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Layout {
-    pub(crate) data_blocks: NonZeroU64,
-    pub(crate) data_block_size: NonZeroU32,
-    pub(crate) hash_block_size: NonZeroU32,
+    pub(crate) scheme: Scheme,
+    pub(crate) shape: Shape,
     pub(crate) data_size: u128,
     pub(crate) hashes_per_block: usize,
     pub(crate) slot_size: usize,
@@ -19,13 +18,12 @@ pub(crate) struct Layout {
 }
 
 impl Layout {
-    pub(super) fn new(
-        data_blocks: NonZeroU64,
-        data_block_size: NonZeroU32,
-        hash_block_size: NonZeroU32,
-        hash_type: HashType,
-        algorithm: Algorithm,
-    ) -> io::Result<Self> {
+    pub(crate) fn new(scheme: &Scheme, shape: Shape) -> io::Result<Self> {
+        let data_blocks = shape.data_blocks;
+        let data_block_size = NonZeroU32::from(shape.data_block_size);
+        let hash_block_size = NonZeroU32::from(shape.hash_block_size);
+        let hash_type = scheme.hash_type;
+        let algorithm = scheme.algorithm;
         let overflow = || io::Error::new(io::ErrorKind::InvalidInput, "verity layout overflows");
         // Kernel extents count sectors; header-based I/O must also fit in u64 bytes.
         let data_size = u128::from(data_blocks.get()) * u128::from(data_block_size.get());
@@ -62,9 +60,8 @@ impl Layout {
             return Err(overflow());
         }
         Ok(Self {
-            data_blocks,
-            data_block_size,
-            hash_block_size,
+            scheme: *scheme,
+            shape,
             data_size,
             hashes_per_block,
             slot_size,
@@ -72,5 +69,53 @@ impl Layout {
             tree_size,
             hash_size,
         })
+    }
+    pub(crate) fn validate_header(&self) -> io::Result<()> {
+        if self.data_size > u128::from(u64::MAX) || self.hash_size > u128::from(u64::MAX) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "verity layout exceeds byte-addressable storage",
+            ));
+        }
+        if u32::from(self.shape.data_block_size) > 512 * 1024
+            || u32::from(self.shape.hash_block_size) > 512 * 1024
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid verity header block size",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+impl Layout {
+    pub(crate) fn data_block_size(&self) -> NonZeroU32 {
+        self.shape.data_block_size.into()
+    }
+    pub(crate) fn hash_block_size(&self) -> NonZeroU32 {
+        self.shape.hash_block_size.into()
+    }
+    pub(crate) const fn data_blocks(&self) -> std::num::NonZeroU64 {
+        self.shape.data_blocks
+    }
+    pub(crate) const fn hash_type(&self) -> HashType {
+        self.scheme.hash_type
+    }
+    pub(crate) const fn algorithm(&self) -> crate::Algorithm {
+        self.scheme.algorithm
+    }
+    pub(crate) fn salt(&self) -> &[u8] {
+        self.scheme.salt.as_slice()
     }
 }

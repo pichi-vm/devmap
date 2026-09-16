@@ -11,8 +11,8 @@ impl<H: Read + Seek> OpenHashes<H> for Hashes<H> {
         storage.seek(SeekFrom::Start(0))?;
         let mut encoded = Unverified::default();
         storage.read_exact(encoded.as_mut())?;
-        let (uuid, parameters) = encoded.decode()?;
-        Ok(Self::new(storage, uuid, parameters))
+        let (uuid, layout) = encoded.decode()?;
+        Ok(Self::new(storage, uuid, layout))
     }
 }
 

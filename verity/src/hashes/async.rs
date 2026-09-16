@@ -13,8 +13,8 @@ impl<H: AsyncRead + AsyncSeek + Unpin + Send> OpenHashes<H> for Hashes<H> {
         storage.seek(io::SeekFrom::Start(0)).await?;
         let mut encoded = Unverified::default();
         storage.read_exact(encoded.as_mut()).await?;
-        let (uuid, parameters) = encoded.decode()?;
-        Ok(Self::new(storage, uuid, parameters))
+        let (uuid, layout) = encoded.decode()?;
+        Ok(Self::new(storage, uuid, layout))
     }
 }
 

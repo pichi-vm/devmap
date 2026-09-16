@@ -4,39 +4,11 @@ use devmap_core::parse::DevId;
 use std::io;
 use std::num::NonZeroU64;
 
-/// Action when a block does not match its expected hash.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum CorruptionPolicy {
-    /// Fail the read.
-    #[default]
-    Error,
-    /// Log corruption and allow the read.
-    Ignore,
-    /// Restart the machine.
-    Restart,
-    /// Panic the kernel.
-    Panic,
-}
-
-/// Action when the backing storage reports an I/O error.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum IoErrorPolicy {
-    /// Return the I/O error.
-    #[default]
-    Error,
-    /// Restart the machine.
-    Restart,
-    /// Panic the kernel.
-    Panic,
-}
-
 /// Forward-error-correction storage and Reed-Solomon parameters.
 ///
 /// Counts and offsets use the target's data-block size. This describes existing
 /// parity storage; it does not generate parity. Kernel support is checked on load.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fec {
     pub(super) device: DevId,
     pub(super) blocks: NonZeroU64,

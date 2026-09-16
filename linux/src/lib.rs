@@ -64,12 +64,14 @@
 //! use std::fs::File;
 //! use devmap_core::parse::DevId;
 //! use devmap_linux::Control;
-//! use devmap_verity::{Hashes, traits::std::OpenHashes as _};
+//! use devmap_verity::{Hashes, Options, traits::std::OpenHashes as _};
 //!
 //! # fn activate(trusted_root: &[u8]) -> std::io::Result<devmap_linux::Device> {
 //! let hash_path = "/dev/loop1";
 //! let hashes = Hashes::open(File::open(hash_path)?)?;
-//! let target = hashes.parameters().target(
+//! let target = Options::default().target(
+//!     hashes.scheme(),
+//!     hashes.shape(),
 //!     DevId::from_path("/dev/loop0")?,
 //!     DevId::from_path(hash_path)?,
 //!     trusted_root,
@@ -88,10 +90,11 @@
 //!
 //! This example assumes the header starts at byte zero of the hash device.
 //! For an embedded header, read through a zero-based storage region and pass
-//! its physical byte offset to the target's `with_header_offset_bytes`.
+//! its physical byte offset and stored hash-block size to
+//! `Options::with_header_offset_bytes`.
 //! Header validation does not authenticate data or check actual device capacity;
 //! the kernel checks the mapping on load and verifies data on reads. Newly
-//! formatted storage must be persisted before it is handed to the kernel.
+//! formatted hash storage is persisted by the format operation before it returns.
 //!
 //! # Reading tables, status, and sending commands
 //!

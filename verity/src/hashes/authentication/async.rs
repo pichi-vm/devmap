@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll, ready};
-
-use devmap_core::traits::tokio::Geometry;
-use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
-
 use super::{Hashes, State};
+use crate::layout::Layout;
+use devmap_core::traits::tokio::Geometry;
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
+use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 
 #[derive(Clone, Copy)]
 pub(super) enum Phase {
     Idle,
-    Start {
-        level: usize,
-        child: u64,
-    },
-    Seeking {
-        level: usize,
-        child: u64,
-    },
-    Reading {
-        level: usize,
-        child: u64,
-        filled: usize,
-    },
+    Start { level: usize },
+    Seeking { level: usize },
+    Reading { level: usize, filled: usize },
 }
 
 impl<H: Geometry> Hashes<H> {
@@ -36,70 +27,58 @@ impl<H: Geometry> Hashes<H> {
 }
 
 impl<H: AsyncRead + AsyncSeek + Unpin> Hashes<H> {
-    pub(crate) fn poll_authenticate(
+    pub(crate) fn poll_lookup(
         &mut self,
         cx: &mut Context<'_>,
         index: u64,
-        data: &[u8],
         root: &[u8],
-    ) -> Poll<io::Result<()>> {
+    ) -> Poll<io::Result<&[u8]>> {
         if self.authentication.is_none() {
-            self.authentication = Some(State::new(&self.parameters)?);
+            self.authentication = Some(State::new(&self.layout)?);
         }
         let state = self
             .authentication
             .as_mut()
             .ok_or_else(|| io::Error::other("missing verifier"))?;
-        let result =
-            state.poll_authenticate(cx, &mut self.inner, &self.parameters, index, data, root);
-        if result.is_ready() {
-            state.phase = Phase::Idle;
+        match state.poll_lookup(cx, &mut self.inner, &self.layout, index, root) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(result) => {
+                state.phase = Phase::Idle;
+                Poll::Ready(result.map(|()| state.expected.as_ref()))
+            }
         }
-        result
     }
 }
 
 impl State {
-    fn poll_authenticate<H: AsyncRead + AsyncSeek + Unpin>(
+    fn poll_lookup<H: AsyncRead + AsyncSeek + Unpin>(
         &mut self,
         cx: &mut Context<'_>,
         storage: &mut H,
-        parameters: &crate::Parameters,
+        layout: &Layout,
         index: u64,
-        data: &[u8],
         root: &[u8],
     ) -> Poll<io::Result<()>> {
         loop {
             match self.phase {
                 Phase::Idle => {
-                    self.begin(parameters, index, data)?;
-                    self.phase = Phase::Start {
-                        level: 0,
-                        child: index,
+                    self.begin(layout, index, root)?;
+                    let Some(level) = layout.level_offsets.len().checked_sub(1) else {
+                        return Poll::Ready(Ok(()));
                     };
+                    self.phase = Phase::Start { level };
                 }
-                Phase::Start { level, child } => {
-                    if level == parameters.layout.level_offsets.len() {
-                        return Poll::Ready(self.check_root(root));
-                    }
+                Phase::Start { level } => {
                     ready!(Pin::new(&mut *storage).poll_complete(cx))?;
                     Pin::new(&mut *storage)
-                        .start_seek(io::SeekFrom::Start(Self::offset(parameters, level, child)))?;
-                    self.phase = Phase::Seeking { level, child };
+                        .start_seek(io::SeekFrom::Start(Self::offset(layout, level, index)))?;
+                    self.phase = Phase::Seeking { level };
                 }
-                Phase::Seeking { level, child } => {
+                Phase::Seeking { level } => {
                     ready!(Pin::new(&mut *storage).poll_complete(cx))?;
-                    self.phase = Phase::Reading {
-                        level,
-                        child,
-                        filled: 0,
-                    };
+                    self.phase = Phase::Reading { level, filled: 0 };
                 }
-                Phase::Reading {
-                    level,
-                    child,
-                    filled,
-                } => {
+                Phase::Reading { level, filled } => {
                     let mut output = ReadBuf::new(&mut self.block[filled..]);
                     match ready!(Pin::new(&mut *storage).poll_read(cx, &mut output)) {
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -111,17 +90,13 @@ impl State {
                     }
                     let filled = filled + count;
                     if filled == self.block.len() {
-                        self.advance(parameters, child)?;
-                        self.phase = Phase::Start {
-                            level: level + 1,
-                            child: child / parameters.layout.hashes_per_block as u64,
-                        };
+                        self.advance(layout, level, index)?;
+                        if level == 0 {
+                            return Poll::Ready(Ok(()));
+                        }
+                        self.phase = Phase::Start { level: level - 1 };
                     } else {
-                        self.phase = Phase::Reading {
-                            level,
-                            child,
-                            filled,
-                        };
+                        self.phase = Phase::Reading { level, filled };
                     }
                 }
             }

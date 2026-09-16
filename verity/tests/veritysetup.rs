@@ -5,9 +5,9 @@
 
 use devmap_core::traits::std::Scale as _;
 use devmap_verity::traits::std::Format as _;
-use devmap_verity::{Algorithm, HashType, Parameters};
+use devmap_verity::{Algorithm, HashType, Scheme};
 use std::io::Cursor;
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 
 /// Format a 16-byte UUID as the canonical 8-4-4-4-12 hex string that
 /// `veritysetup format --uuid` accepts and writes back byte-identically.
@@ -45,11 +45,10 @@ fn assert_matches_veritysetup(
         .map(|i| i.wrapping_mul(7).wrapping_add(1))
         .collect();
     let uuid = [0x5a; 16];
-    let parameters = Parameters::builder()
-        .algorithm(algorithm)
-        .hash_type(hash_type)
-        .salt(&salt)
-        .build(NonZeroU64::new(blocks as u64).unwrap())
+    let parameters = Scheme::default()
+        .with_algorithm(algorithm)
+        .with_hash_type(hash_type)
+        .with_salt(&salt)
         .unwrap();
     let block_size = NonZeroU32::new(4096).unwrap();
     let input = Cursor::new(&data).scale(block_size).unwrap();

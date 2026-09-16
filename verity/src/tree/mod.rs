@@ -6,7 +6,7 @@ use std::io;
 use state::PendingBlock;
 use state::State;
 
-use crate::Parameters;
+use crate::layout::Layout;
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -16,7 +16,7 @@ mod sync;
 /// Writes a dm-verity hash tree to a seekable output.
 ///
 /// Write exactly the number of complete data blocks declared by the
-/// parameters. Input slices may have any length; only fragments are copied
+/// layout. Input slices may have any length; only fragments are copied
 /// into the internal block buffer. Complete aligned blocks are hashed directly.
 ///
 /// `flush` has its conventional meaning: it drains available hash output but
@@ -45,8 +45,8 @@ impl<W> TreeWriter<W> {
     ///
     /// Returns [`io::ErrorKind::Unsupported`] if the feature for the selected
     /// hash algorithm is not enabled.
-    pub(crate) fn new(output: W, parameters: Parameters) -> io::Result<Self> {
-        let hasher = parameters.algorithm().hasher().ok_or_else(|| {
+    pub(crate) fn new(output: W, layout: Layout) -> io::Result<Self> {
+        let hasher = layout.algorithm().hasher().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "hash algorithm support is not enabled",
@@ -55,7 +55,7 @@ impl<W> TreeWriter<W> {
 
         Ok(Self {
             output,
-            tree: State::new(parameters, hasher),
+            tree: State::new(layout, hasher),
             output_range: None,
             phase: Phase::Open,
             #[cfg(feature = "tokio")]
@@ -67,10 +67,10 @@ impl<W> TreeWriter<W> {
         &mut self.output
     }
 
-    /// Returns the output, parameters, and root only after a successful final flush.
-    pub(crate) fn finish(self) -> io::Result<(W, Parameters, Box<[u8]>)> {
+    /// Returns the output, layout, and root only after a successful final flush.
+    pub(crate) fn finish(self) -> io::Result<(W, Layout, Box<[u8]>)> {
         match self.phase {
-            Phase::Complete(digest) => Ok((self.output, self.tree.parameters, digest)),
+            Phase::Complete(digest) => Ok((self.output, self.tree.layout, digest)),
             Phase::Open => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "verity input has not reached its final data block",

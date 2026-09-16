@@ -12,9 +12,9 @@
 //! Inspect dm-verity metadata, build hash trees, and read authenticated data.
 //!
 //! [`Hashes`] opens metadata independently of the data device. With hashing
-//! enabled, [`Parameters`] formats hash devices and `Verity` authenticates reads.
-//! The [`dm`] module describes kernel targets; activation belongs to a backend
-//! such as `devmap-linux`.
+//! enabled, [`Scheme`] formats hash devices and [`Options`] opens userspace
+//! verification. [`VerityTarget`] describes a Linux mapping; activation belongs
+//! to a backend such as `devmap-linux`.
 //!
 //! Reading a header does not authenticate data. Verification requires a root
 //! digest from an independently trusted source.
@@ -29,7 +29,7 @@
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let hashes = Hashes::open(File::open("hash.img")?)?;
-//! println!("{}", hashes.parameters().algorithm());
+//! println!("{}", hashes.scheme().algorithm);
 //! # Ok(())
 //! # }
 //! ```
@@ -45,6 +45,7 @@
 //! - `tokio` provides matching asynchronous operations through `traits::tokio`;
 //!   it does not enable hashing.
 
+mod block_size;
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -68,8 +69,12 @@ mod device;
 ))]
 mod format;
 mod hashes;
-mod parameters;
+mod layout;
+mod options;
+mod scheme;
+mod shape;
 mod superblock;
+mod target;
 pub mod traits;
 #[cfg(any(
     feature = "sha1",
@@ -96,6 +101,8 @@ mod tree;
 pub use device::Verity;
 pub use hashes::Hashes;
 
-pub use parameters::{Algorithm, Builder, HashType, Parameters};
-
-pub mod dm;
+pub use block_size::BlockSize;
+pub use options::{CorruptionPolicy, Fec, IoErrorPolicy, KeyDescription, Options};
+pub use scheme::{Algorithm, HashType, Scheme};
+pub use shape::Shape;
+pub use target::{Info, VerityTarget};
