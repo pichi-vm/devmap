@@ -18,7 +18,8 @@ pub use hash_type::HashType;
 /// # #[cfg(feature = "sha2")]
 /// # fn main() -> std::io::Result<()> {
 /// use std::io::{Cursor, Read};
-/// use devmap_verity::{BlockSize, Options, Scheme,
+/// use devmap_core::BlockSize;
+/// use devmap_verity::{Options, Scheme,
 ///     traits::std::{Format as _, Open as _, Scale as _}};
 ///
 /// let data = vec![0x5a; 8192];

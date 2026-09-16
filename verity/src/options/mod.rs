@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::BlockSize;
 use crate::layout::Layout;
+use devmap_core::BlockSize;
 use std::io;
 
 mod fec;

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::BlockSize;
+use devmap_core::BlockSize;
 use std::num::NonZeroU64;
 
 /// Editable block geometry, independent of hashing choices.
 ///
 /// Field values are valid individually; consumers check the complete extent.
+/// Header-based operations limit block sizes to 512 KiB.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Shape {
     /// Size of each protected data block.

@@ -45,7 +45,6 @@
 //! - `tokio` provides matching asynchronous operations through `traits::tokio`;
 //!   it does not enable hashing.
 
-mod block_size;
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -101,7 +100,6 @@ mod tree;
 pub use device::Verity;
 pub use hashes::Hashes;
 
-pub use block_size::BlockSize;
 pub use options::{CorruptionPolicy, Fec, IoErrorPolicy, KeyDescription, Options};
 pub use scheme::{Algorithm, HashType, Scheme};
 pub use shape::Shape;

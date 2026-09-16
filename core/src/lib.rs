@@ -15,13 +15,12 @@
 //! then read and write through the usual I/O traits:
 //!
 //! ```
-//! use devmap_core::traits::std::{Scale as _, Slice as _};
+//! use devmap_core::{BlockSize, traits::std::{Scale as _, Slice as _}};
 //! use std::io::{Cursor, Read};
-//! use std::num::NonZeroU32;
 //!
 //! # fn main() -> std::io::Result<()> {
 //! let mut region = Cursor::new(vec![7; 8192])
-//!     .scale_to(NonZeroU32::new(4096).unwrap())?
+//!     .scale_to(BlockSize::default().into())?
 //!     .slice(1..2)?;
 //! let mut block = [0; 4096];
 //! region.read_exact(&mut block)?;
@@ -41,6 +40,7 @@
 //! No default features. `tokio` enables `traits::tokio` and asynchronous I/O
 //! on the same adapters.
 
+mod block_size;
 pub mod parse;
 mod region;
 mod scaled;
@@ -48,6 +48,7 @@ mod storage;
 mod target;
 pub mod traits;
 
+pub use block_size::BlockSize;
 pub use region::Region;
 pub use scaled::Scaled;
 pub use target::Target;

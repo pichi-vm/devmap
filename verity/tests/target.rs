@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use devmap_core::BlockSize;
 use devmap_core::parse::DevId;
 use devmap_verity::{
-    BlockSize, CorruptionPolicy as C, Fec, HashType, Hashes, Info, IoErrorPolicy as E,
-    KeyDescription, Options, Scheme, Shape, VerityTarget, traits::std::OpenHashes as _,
+    CorruptionPolicy as C, Fec, HashType, Hashes, Info, IoErrorPolicy as E, KeyDescription,
+    Options, Scheme, Shape, VerityTarget, traits::std::OpenHashes as _,
 };
 use std::{io::Cursor, num::NonZeroU64};
 mod common;
