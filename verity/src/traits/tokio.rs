@@ -36,8 +36,9 @@ pub trait Format<D, H>: Sized {
     /// Asynchronously performs the same operation as
     /// [`crate::traits::std::Format::format`].
     ///
-    /// Uses the same sizing, alignment, and flushing contracts. Cancellation
-    /// may leave partial output and advance either stream.
+    /// Uses the same sizing, alignment, and persistence contracts. Cancellation
+    /// may leave partial output and advance either stream, including while
+    /// waiting for persistence. No completed handle or root is returned.
     ///
     /// # Errors
     ///
@@ -80,17 +81,18 @@ pub trait Open<D, H>: Sized {
     /// Asynchronously performs the same validation as
     /// [`crate::traits::std::Open::open`].
     ///
-    /// Uses the same layout, alignment, and authentication contracts.
+    /// Implemented for [`crate::Options`], with the same option and geometry checks.
     /// Cancellation may advance either stream.
     ///
     /// # Errors
     ///
     /// Returns the same error kinds as [`crate::traits::std::Open::open`].
     fn open(
+        self,
         data: D,
-        hashes: H,
+        hashes: crate::Hashes<H>,
         root_digest: &[u8],
-    ) -> impl Future<Output = io::Result<Self>> + Send;
+    ) -> impl Future<Output = io::Result<crate::Verity<D, H>>> + Send;
 }
 
 /// Opens a hash device without requiring data storage or hashing support.

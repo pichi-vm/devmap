@@ -59,17 +59,18 @@ For an existing verity hash device:
 1. Open its hash storage with `Hashes::open`, importing `OpenHashes` from
    `devmap_verity::traits::std` or `traits::tokio`. No data device or root is
    required for this step.
-2. Call `hashes.parameters().target(data_id, hash_id, trusted_root)`.
-   The header does not contain that root.
+2. Call `Options::default().target(hashes.scheme(), hashes.shape(), data_id,
+   hash_id, trusted_root)`. The header does not contain that root.
 3. For an embedded header, open through a zero-based region and set the
-   target's `with_header_offset_bytes` to its offset in the Linux hash device.
+   options' `with_header_offset_bytes` using its Linux device offset and stored
+   hash-block size.
 4. Create a Linux device. On `device.builder()`, call `read_only()` and
    `add(0, target.data_sectors(), target)` for a full-size row. `load()` stages
    the table and `device.resume()` activates it.
 
 The ordinary table builder also accepts an explicitly selected shorter row.
-Header validation is not data authentication. Persist newly formatted hash
-storage with `SyncData` before kernel activation. Device removal is explicit,
+Header validation is not data authentication. Formatting persists the hash
+output before returning; callers remain responsible for data-input durability. Device removal is explicit,
 including cleanup after a failed load or resume. The
 [Linux API documentation](https://docs.rs/devmap-linux) has a compiling example.
 
@@ -78,9 +79,12 @@ including cleanup after a failed load or resume. The
 - Core's `scale_to(bytes)` selects a final logical-block size,
   `slice_bytes(range)` selects an aligned byte range, and `byte_size()` reports
   the complete extent. Scaling does not resize storage.
-- Verity's `Parameters::builder()` configures both formatting and targets.
-  The format traits take `format(data, hashes, uuid)` and return `(Hashes, root)`.
-  Stored metadata is available through `Hashes::uuid()` and `parameters()`.
+- Verity uses independent, public-field `Scheme`, `Shape`, and `Options`
+  values with `with_*` helpers. There is no `dm` module or configuration builder.
+  `BlockSize` validates byte sizes; salt uses inline, copyable storage.
+  `Scheme::format(data, hashes, uuid)` derives geometry and persists output.
+  `Options::open(data, hashes, root)` constructs a userspace verifier.
+  Stored metadata is available through `Hashes::uuid()`, `scheme()`, and `shape()`.
 - Snapshot's `Layer::create` initializes metadata in preallocated COW storage.
   Before allocating a new chunk, a write matching the origin succeeds without
   promotion. Raw-image import and sparse-file traversal belong in application

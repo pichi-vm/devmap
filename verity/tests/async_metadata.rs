@@ -71,7 +71,7 @@ async fn tokio_only_build_inspects_every_algorithm_with_borrowed_storage() {
             ready: false,
         };
         let hashes = Hashes::open(&mut source).await.unwrap();
-        assert_eq!(hashes.parameters().algorithm(), algorithm);
+        assert_eq!(hashes.scheme().algorithm, algorithm);
         assert_eq!(hashes.into_inner().inner.position(), 512);
     }
 }
@@ -90,7 +90,7 @@ async fn cancelled_header_open_can_restart_at_zero() {
     .await;
     drop(opening);
     let hashes = Hashes::open(&mut source).await.unwrap();
-    assert_eq!(hashes.parameters().salt(), [1, 2, 3]);
+    assert_eq!(hashes.scheme().salt.as_slice(), [1, 2, 3]);
     assert_eq!(hashes.into_inner().inner.position(), 512);
 }
 

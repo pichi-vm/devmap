@@ -12,14 +12,15 @@ fn every_algorithm_header_is_available_independently_of_hash_features() {
         assert_eq!(name.parse::<devmap_verity::Algorithm>().unwrap(), algorithm);
         assert_eq!(algorithm.as_ref(), name);
         let hashes = Hashes::open(Cursor::new(common::header(name))).unwrap();
-        let header = hashes.parameters();
-        assert_eq!(header.algorithm(), algorithm);
-        assert_eq!(header.hash_type(), HashType::Normal);
+        let scheme = hashes.scheme();
+        let shape = hashes.shape();
+        assert_eq!(scheme.algorithm, algorithm);
+        assert_eq!(scheme.hash_type, HashType::Normal);
         assert_eq!(hashes.uuid(), [0x5a; 16]);
-        assert_eq!(header.data_block_size().get(), 512);
-        assert_eq!(header.hash_block_size().get(), 4096);
-        assert_eq!(header.data_blocks().get(), 3);
-        assert_eq!(header.salt(), [1, 2, 3]);
+        assert_eq!(u32::from(shape.data_block_size), 512);
+        assert_eq!(u32::from(shape.hash_block_size), 4096);
+        assert_eq!(shape.data_blocks.get(), 3);
+        assert_eq!(scheme.salt.as_slice(), [1, 2, 3]);
     }
 }
 
@@ -55,7 +56,7 @@ fn inspection_requires_only_one_readable_seekable_endpoint() {
     ));
     storage.0.set_position(123);
     let hashes = Hashes::open(&mut storage).unwrap();
-    assert_eq!(hashes.parameters().salt(), [1, 2, 3]);
+    assert_eq!(hashes.scheme().salt.as_slice(), [1, 2, 3]);
     let storage = hashes.into_inner();
     assert_eq!(storage.0.position(), 512);
 }
@@ -71,12 +72,9 @@ fn all_block_sizes_and_hash_types_decode_without_implementations() {
                     bytes[64..68].copy_from_slice(&(1u32 << data_order).to_le_bytes());
                     bytes[68..72].copy_from_slice(&(1u32 << hash_order).to_le_bytes());
                     let hashes = Hashes::open(Cursor::new(bytes)).unwrap();
-                    assert_eq!(hashes.parameters().data_block_size().get(), 1 << data_order);
-                    assert_eq!(hashes.parameters().hash_block_size().get(), 1 << hash_order);
-                    assert_eq!(
-                        hashes.parameters().hash_type().to_string(),
-                        hash_type.to_string()
-                    );
+                    assert_eq!(u32::from(hashes.shape().data_block_size), 1 << data_order);
+                    assert_eq!(u32::from(hashes.shape().hash_block_size), 1 << hash_order);
+                    assert_eq!(hashes.scheme().hash_type.to_string(), hash_type.to_string());
                 }
             }
         }
@@ -123,7 +121,10 @@ fn salt_boundaries_and_largest_addressable_data_extent_are_valid() {
         bytes[88..88 + usize::from(size)].fill(0xff);
         bytes[72..80].copy_from_slice(&(u64::MAX / 512).to_le_bytes());
         let hashes = Hashes::open(Cursor::new(bytes)).unwrap();
-        assert_eq!(hashes.parameters().salt(), vec![0xff; usize::from(size)]);
+        assert_eq!(
+            hashes.scheme().salt.as_slice(),
+            vec![0xff; usize::from(size)]
+        );
     }
 }
 

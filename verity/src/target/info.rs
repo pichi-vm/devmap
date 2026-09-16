@@ -1,18 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Linux verity target descriptions, available without hashing dependencies.
-//!
-//! Construct a target through [`crate::Parameters::target`] and pass it to a backend
-//! such as `devmap-linux` for activation.
-
 use devmap_core::parse::Error;
 use std::{fmt, str::FromStr};
-
-mod codec;
-mod options;
-mod target;
-pub use options::{CorruptionPolicy, Fec, IoErrorPolicy};
-pub use target::VerityTarget;
 
 /// Runtime corruption status and number of FEC-corrected blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

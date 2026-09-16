@@ -1,14 +1,14 @@
 # devmap-verity
 
-Inspect dm-verity metadata, build hash trees, and read authenticated data.
-Start with `Hashes` for metadata, `Parameters::builder()` to configure formatting or a target, or
-`Verity` to verify reads against a trusted root. Kernel activation belongs
+Inspect verity hash volumes, format and persist hash trees, and read verified
+data. `Scheme` selects hashing, `Shape` describes geometry, and `Options`
+constructs a userspace reader or a `VerityTarget`. Linux activation belongs
 to `devmap-linux`.
 
-Disable default features for metadata and target descriptions without hashing
-dependencies. `sha2` is the default; `sha1`, `sha3`, `ripemd`, `whirlpool`,
-`streebog`, `sm3`, and `blake2` enable other families. `tokio` adds asynchronous
-operations independently of hashing.
+Salt is inline, limited to 256 bytes. Disable default features for metadata
+and target descriptions without hashing implementations. `sha2` is the default;
+`sha1`, `sha3`, `ripemd`, `whirlpool`, `streebog`, `sm3`, and `blake2`
+enable other families. `tokio` adds asynchronous operations independently.
 
-See the [API documentation](https://docs.rs/devmap-verity) for examples and
-the individual contracts.
+See the [API documentation](https://docs.rs/devmap-verity) for workflows and
+operation contracts.

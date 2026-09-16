@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io::{self, Cursor, Read as _, Seek as _, SeekFrom};
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 
 use devmap_verity::traits::std::{
     Format as _, Geometry as _, Open as _, OpenHashes as _, Scale as _, Slice as _,
 };
-use devmap_verity::{Algorithm, HashType, Hashes, Parameters, Verity};
+use devmap_verity::{Algorithm, HashType, Hashes, Options, Scheme};
 
 fn bytes(blocks: usize, block_size: usize) -> Vec<u8> {
     (0..blocks * block_size)
@@ -16,16 +16,10 @@ fn bytes(blocks: usize, block_size: usize) -> Vec<u8> {
 
 fn format(data: &[u8], block_size: u32) -> (Vec<u8>, Box<[u8]>) {
     let block_size = NonZeroU32::new(block_size).unwrap();
-    let count = data.len() as u64 / u64::from(block_size.get());
     let data = Cursor::new(data).scale(block_size).unwrap();
     let mut hashes = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let (_, root) = Parameters::builder()
-        .salt(&[7; 32])
-        .data_block_size(block_size.get())
-        .unwrap()
-        .hash_block_size(block_size.get())
-        .unwrap()
-        .build(NonZeroU64::new(count).unwrap())
+    let (_, root) = Scheme::default()
+        .with_salt(&[7; 32])
         .unwrap()
         .format(data, &mut hashes, [0x5a; 16])
         .unwrap();
@@ -42,20 +36,14 @@ fn format_accepts_a_stream_and_returns_the_trusted_root() {
 }
 
 #[test]
-fn format_uses_explicit_parameters_with_compatible_endpoints() {
+fn format_derives_geometry_from_the_endpoints() {
     let data = bytes(3, 512);
     let data_block_size = NonZeroU32::new(512).unwrap();
     let hash_block_size = NonZeroU32::new(4096).unwrap();
     let input = Cursor::new(&data).scale(data_block_size).unwrap();
     let mut hashes = Cursor::new(Vec::new()).scale(hash_block_size).unwrap();
 
-    let (_, root) = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(4096)
-        .unwrap()
-        .build(NonZeroU64::new(3).unwrap())
-        .unwrap()
+    let (_, root) = Scheme::default()
         .format(input, &mut hashes, [0; 16])
         .unwrap();
     let encoded = hashes.as_ref().get_ref();
@@ -68,7 +56,9 @@ fn format_uses_explicit_parameters_with_compatible_endpoints() {
 
     hashes.rewind().unwrap();
     let input = Cursor::new(data.clone()).scale(data_block_size).unwrap();
-    let mut device = Verity::open(input, Hashes::open(hashes).unwrap(), &root).unwrap();
+    let mut device = Options::default()
+        .open(input, Hashes::open(hashes).unwrap(), &root)
+        .unwrap();
     let mut actual = Vec::new();
     device.read_to_end(&mut actual).unwrap();
     assert_eq!(actual, data);
@@ -78,12 +68,13 @@ fn format_uses_explicit_parameters_with_compatible_endpoints() {
 fn authenticated_reads_and_seeks_reproduce_the_data() {
     let data = bytes(257, 512);
     let (hashes, root) = format(&data, 512);
-    let mut device = Verity::open(
-        Cursor::new(data.clone()),
-        Hashes::open(Cursor::new(hashes)).unwrap(),
-        &root,
-    )
-    .unwrap();
+    let mut device = Options::default()
+        .open(
+            Cursor::new(data.clone()),
+            Hashes::open(Cursor::new(hashes)).unwrap(),
+            &root,
+        )
+        .unwrap();
 
     assert_eq!(device.count().unwrap(), data.len() as u64);
     assert_eq!(device.block_size().unwrap().get(), 1);
@@ -103,13 +94,7 @@ fn endpoint_regions_define_independent_data_and_hash_devices() {
     let block_size = NonZeroU32::new(512).unwrap();
     let data_view = Cursor::new(payload.clone()).scale(block_size).unwrap();
     let mut hash_view = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let (_, root) = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(3).unwrap())
-        .unwrap()
+    let (_, root) = Scheme::default()
         .format(data_view, &mut hash_view, [0; 16])
         .unwrap();
 
@@ -125,7 +110,9 @@ fn endpoint_regions_define_independent_data_and_hash_devices() {
         .unwrap()
         .slice(1..1 + hash_blocks)
         .unwrap();
-    let mut device = Verity::open(data, Hashes::open(hashes).unwrap(), &root).unwrap();
+    let mut device = Options::default()
+        .open(data, Hashes::open(hashes).unwrap(), &root)
+        .unwrap();
     let mut actual = Vec::new();
     device.read_to_end(&mut actual).unwrap();
     assert_eq!(actual, payload);
@@ -136,12 +123,13 @@ fn reading_rejects_an_untrusted_root() {
     let data = bytes(3, 512);
     let (hashes, mut root) = format(&data, 512);
     root[0] ^= 1;
-    let mut device = Verity::open(
-        Cursor::new(data),
-        Hashes::open(Cursor::new(hashes)).unwrap(),
-        &root,
-    )
-    .unwrap();
+    let mut device = Options::default()
+        .open(
+            Cursor::new(data),
+            Hashes::open(Cursor::new(hashes)).unwrap(),
+            &root,
+        )
+        .unwrap();
     let error = device.read(&mut [0; 1]).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 }
@@ -153,12 +141,13 @@ fn reads_reject_corrupt_data_and_tree_blocks() {
 
     let mut corrupt_data = data.clone();
     corrupt_data[200 * 512] ^= 1;
-    let mut device = Verity::open(
-        Cursor::new(corrupt_data),
-        Hashes::open(Cursor::new(hashes.clone())).unwrap(),
-        &root,
-    )
-    .unwrap();
+    let mut device = Options::default()
+        .open(
+            Cursor::new(corrupt_data),
+            Hashes::open(Cursor::new(hashes.clone())).unwrap(),
+            &root,
+        )
+        .unwrap();
     device.seek(SeekFrom::Start(200 * 512)).unwrap();
     assert_eq!(
         device.read(&mut [0; 1]).unwrap_err().kind(),
@@ -167,12 +156,13 @@ fn reads_reject_corrupt_data_and_tree_blocks() {
 
     let mut corrupt_tree = hashes;
     *corrupt_tree.last_mut().unwrap() ^= 1;
-    let mut device = Verity::open(
-        Cursor::new(data),
-        Hashes::open(Cursor::new(corrupt_tree)).unwrap(),
-        &root,
-    )
-    .unwrap();
+    let mut device = Options::default()
+        .open(
+            Cursor::new(data),
+            Hashes::open(Cursor::new(corrupt_tree)).unwrap(),
+            &root,
+        )
+        .unwrap();
     device.seek(SeekFrom::Start(256 * 512)).unwrap();
     assert_eq!(
         device.read(&mut [0; 1]).unwrap_err().kind(),
@@ -214,13 +204,14 @@ fn open_rejects_truncated_endpoints() {
         (data[..data.len() - 1].to_vec(), hashes.clone()),
         (data.clone(), hashes[..hashes.len() - 1].to_vec()),
     ] {
-        let error = Verity::open(
-            Cursor::new(data),
-            Hashes::open(Cursor::new(hashes)).unwrap(),
-            &root,
-        )
-        .err()
-        .unwrap();
+        let error = Options::default()
+            .open(
+                Cursor::new(data),
+                Hashes::open(Cursor::new(hashes)).unwrap(),
+                &root,
+            )
+            .err()
+            .unwrap();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }
@@ -230,27 +221,30 @@ fn composition_checks_root_length_and_both_endpoint_block_sizes() {
     let data = bytes(4, 512);
     let (storage, root) = format(&data, 512);
     let hashes = Hashes::open(Cursor::new(storage.clone())).unwrap();
-    let error = Verity::open(Cursor::new(&data), hashes, &root[..31])
+    let error = Options::default()
+        .open(Cursor::new(&data), hashes, &root[..31])
         .err()
         .unwrap();
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
 
     let large_block = NonZeroU32::new(1024).unwrap();
     let hashes = Hashes::open(Cursor::new(storage.clone()).scale(large_block).unwrap()).unwrap();
-    assert_eq!(hashes.parameters().hash_block_size().get(), 512);
-    let error = Verity::open(Cursor::new(&data), hashes, &root)
+    assert_eq!(u32::from(hashes.shape().hash_block_size), 512);
+    let error = Options::default()
+        .open(Cursor::new(&data), hashes, &root)
         .err()
         .unwrap();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 
     let hashes = Hashes::open(Cursor::new(storage)).unwrap();
-    let error = Verity::open(
-        Cursor::new(&data).scale(large_block).unwrap(),
-        hashes,
-        &root,
-    )
-    .err()
-    .unwrap();
+    let error = Options::default()
+        .open(
+            Cursor::new(&data).scale(large_block).unwrap(),
+            hashes,
+            &root,
+        )
+        .err()
+        .unwrap();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 }
 
@@ -277,13 +271,7 @@ fn format_rejects_short_input_and_leaves_trailing_bytes_unread() {
     let hashes = Cursor::new(Vec::new())
         .scale(NonZeroU32::new(512).unwrap())
         .unwrap();
-    let error = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(1).unwrap())
-        .unwrap()
+    let error = Scheme::default()
         .format(Short(Cursor::new(vec![0; 511])), hashes, [0; 16])
         .err()
         .unwrap();
@@ -298,15 +286,7 @@ fn format_rejects_short_input_and_leaves_trailing_bytes_unread() {
     let hashes = Cursor::new(Vec::new())
         .scale(NonZeroU32::new(512).unwrap())
         .unwrap();
-    Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(1).unwrap())
-        .unwrap()
-        .format(data, hashes, [0; 16])
-        .unwrap();
+    Scheme::default().format(data, hashes, [0; 16]).unwrap();
     assert_eq!(input.position(), 512);
 }
 
@@ -335,13 +315,7 @@ fn format_rejects_incompatible_geometry_and_empty_input() {
         .scale(NonZeroU32::new(512).unwrap())
         .unwrap();
     assert_eq!(
-        Parameters::builder()
-            .data_block_size(512)
-            .unwrap()
-            .hash_block_size(512)
-            .unwrap()
-            .build(NonZeroU64::new(1).unwrap())
-            .unwrap()
+        Scheme::default()
             .format(data, hashes, [0; 16])
             .err()
             .unwrap()
@@ -352,32 +326,20 @@ fn format_rejects_incompatible_geometry_and_empty_input() {
     let data = Cursor::new(Vec::new()).scale(block_size).unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).unwrap();
     assert_eq!(
-        Parameters::builder()
-            .data_block_size(512)
-            .unwrap()
-            .hash_block_size(512)
-            .unwrap()
-            .build(NonZeroU64::new(1).unwrap())
-            .unwrap()
+        Scheme::default()
             .format(data, hashes, [0; 16])
             .err()
             .unwrap()
             .kind(),
-        io::ErrorKind::UnexpectedEof
+        io::ErrorKind::InvalidInput
     );
 
     let block_size = NonZeroU32::new(4096).unwrap();
     let data = Cursor::new(vec![0; 4096]).scale(block_size).unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let (_, root) = Parameters::builder()
-        .algorithm(Algorithm::Sha256)
-        .hash_type(HashType::Normal)
-        .data_block_size(4096)
-        .unwrap()
-        .hash_block_size(4096)
-        .unwrap()
-        .build(NonZeroU64::new(1).unwrap())
-        .unwrap()
+    let (_, root) = Scheme::default()
+        .with_algorithm(Algorithm::Sha256)
+        .with_hash_type(HashType::Normal)
         .format(data, hashes, [0; 16])
         .unwrap();
     assert_eq!(root.len(), 32);

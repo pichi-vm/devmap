@@ -3,14 +3,14 @@
 #![cfg(feature = "tokio")]
 
 use std::io::{self, Cursor, SeekFrom};
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use devmap_verity::traits::tokio::{
     Format as _, Geometry, Open as _, OpenHashes as _, Scale as _, Slice as _,
 };
-use devmap_verity::{Hashes, Parameters, Verity};
+use devmap_verity::{Hashes, Options, Scheme};
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _, ReadBuf};
 
 struct Short(Cursor<Vec<u8>>);
@@ -43,25 +43,20 @@ async fn tokio_uses_the_same_format_and_open_workflow() {
     let block_size = NonZeroU32::new(512).unwrap();
     let input = Cursor::new(&data).scale(block_size).await.unwrap();
     let mut hashes = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    let (_, root) = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(257).unwrap())
-        .unwrap()
+    let (_, root) = Scheme::default()
         .format(input, &mut hashes, [3; 16])
         .await
         .unwrap();
     hashes.seek(SeekFrom::Start(0)).await.unwrap();
 
-    let mut device = Verity::open(
-        Cursor::new(data.clone()),
-        Hashes::open(hashes).await.unwrap(),
-        &root,
-    )
-    .await
-    .unwrap();
+    let mut device = Options::default()
+        .open(
+            Cursor::new(data.clone()),
+            Hashes::open(hashes).await.unwrap(),
+            &root,
+        )
+        .await
+        .unwrap();
     device.seek(SeekFrom::Start(511)).await.unwrap();
     let mut output = [0; 1026];
     device.read_exact(&mut output).await.unwrap();
@@ -72,13 +67,7 @@ async fn tokio_uses_the_same_format_and_open_workflow() {
 async fn asynchronous_format_rejects_short_input_and_leaves_trailing_bytes_unread() {
     let block_size = NonZeroU32::new(512).unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    let error = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(1).unwrap())
-        .unwrap()
+    let error = Scheme::default()
         .format(Short(Cursor::new(vec![0; 511])), hashes, [0; 16])
         .await
         .err()
@@ -94,13 +83,7 @@ async fn asynchronous_format_rejects_short_input_and_leaves_trailing_bytes_unrea
         .await
         .unwrap();
     let hashes = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(1).unwrap())
-        .unwrap()
+    Scheme::default()
         .format(data, hashes, [0; 16])
         .await
         .unwrap();
@@ -210,13 +193,7 @@ async fn image(blocks: usize) -> (Vec<u8>, Vec<u8>, Box<[u8]>) {
     let block_size = NonZeroU32::new(512).unwrap();
     let input = Cursor::new(&data).scale(block_size).await.unwrap();
     let mut output = Cursor::new(Vec::new()).scale(block_size).await.unwrap();
-    let (_, root) = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(blocks as u64).unwrap())
-        .unwrap()
+    let (_, root) = Scheme::default()
         .format(input, &mut output, [7; 16])
         .await
         .unwrap();
@@ -236,7 +213,10 @@ async fn borrowed_endpoints_resume_cancelled_reads_with_smaller_buffers() {
         let hash_reads = storage.read_bytes.clone();
         let hashes = Hashes::open(&mut storage).await.unwrap();
         hash_reads.store(0, Relaxed);
-        let mut device = Verity::open(&mut data, hashes, &root).await.unwrap();
+        let mut device = Options::default()
+            .open(&mut data, hashes, &root)
+            .await
+            .unwrap();
         assert_eq!(data_reads.load(Relaxed), 0);
         assert_eq!(hash_reads.load(Relaxed), 0);
 
@@ -293,7 +273,10 @@ async fn asynchronous_failures_clear_progress_without_exposing_unauthenticated_b
                 (true, true) => storage.fail_seek.clone(),
             };
             let hashes = Hashes::open(&mut storage).await.unwrap();
-            let mut device = Verity::open(&mut data, hashes, &root).await.unwrap();
+            let mut device = Options::default()
+                .open(&mut data, hashes, &root)
+                .await
+                .unwrap();
             flag.store(true, Relaxed);
             let mut output = [0xaa; 17];
             assert_eq!(
@@ -316,7 +299,10 @@ async fn authentication_failure_cannot_reuse_an_old_data_cache_entry() {
     let mut data = Delayed::new(corrupt);
     let mut storage = Delayed::new(storage);
     let hashes = Hashes::open(&mut storage).await.unwrap();
-    let mut device = Verity::open(&mut data, hashes, &root).await.unwrap();
+    let mut device = Options::default()
+        .open(&mut data, hashes, &root)
+        .await
+        .unwrap();
     let mut output = [0; 17];
     device.read_exact(&mut output).await.unwrap();
     assert_eq!(output, bytes[..17]);
@@ -342,7 +328,8 @@ async fn single_block_authentication_is_lazy_and_needs_no_tree() {
     let hash_reads = storage.read_bytes.clone();
     let hashes = Hashes::open(storage).await.unwrap();
     hash_reads.store(0, Relaxed);
-    let mut volume = Verity::open(Cursor::new(data), hashes, &root)
+    let mut volume = Options::default()
+        .open(Cursor::new(data), hashes, &root)
         .await
         .unwrap();
     assert_eq!(hash_reads.load(Relaxed), 0);

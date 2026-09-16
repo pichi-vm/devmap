@@ -6,13 +6,13 @@ use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
 use devmap_core::parse::DevId;
 use devmap_core::traits::std::SyncData as _;
 use devmap_verity::{
-    HashType, Hashes, Parameters, dm,
+    HashType, Hashes, Options, Scheme, VerityTarget,
     traits::std::{Format as _, OpenHashes as _, Scale as _, SliceBytes as _},
 };
 use std::{
     fs::OpenOptions,
     io::{Read as _, Write as _},
-    num::{NonZeroU32, NonZeroU64},
+    num::NonZeroU32,
 };
 
 #[test]
@@ -49,14 +49,9 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
             .unwrap()
             .slice_bytes(16384..)
             .unwrap();
-        let (_, root) = Parameters::builder()
-            .hash_type(hash_type)
-            .salt(&[3; 17])
-            .data_block_size(data_size)
-            .unwrap()
-            .hash_block_size(hash_size)
-            .unwrap()
-            .build(NonZeroU64::new(65536 / u64::from(data_size)).unwrap())
+        let (_, root) = Scheme::default()
+            .with_hash_type(hash_type)
+            .with_salt(&[3; 17])
             .unwrap()
             .format(data_blocks, &mut output, [7; 16])
             .unwrap();
@@ -69,15 +64,16 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
                 .unwrap(),
         )
         .unwrap();
-        let target = hash_device
-            .parameters()
+        let target = Options::default()
+            .with_header_offset_bytes(16384, hash_device.shape().hash_block_size)
+            .unwrap()
             .target(
+                hash_device.scheme(),
+                hash_device.shape(),
                 DevId::from_path(&data.path).unwrap(),
                 DevId::from_path(&hashes.path).unwrap(),
                 &root,
             )
-            .unwrap()
-            .with_header_offset_bytes(16384)
             .unwrap();
         let device = Owned::create(
             &control,
@@ -102,6 +98,6 @@ fn kernel_accepts_both_hash_formats_nondefault_blocks_and_header_offsets() {
             });
         assert_eq!(actual, expected);
         let row = device.table().unwrap().next().unwrap();
-        assert_eq!(row.parse::<dm::VerityTarget>().unwrap(), target);
+        assert_eq!(row.parse::<VerityTarget>().unwrap(), target);
     }
 }

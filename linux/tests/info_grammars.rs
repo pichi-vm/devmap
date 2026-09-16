@@ -16,7 +16,7 @@ use std::str::FromStr;
 
 use devmap_core::parse::Empty;
 use devmap_snapshot::dm as snapshot;
-use devmap_verity::dm as verity;
+use devmap_verity as verity;
 
 /// Parse `line`, assert it renders back byte for byte, and hand back the
 /// parsed value for field assertions. The round trip is what proves the

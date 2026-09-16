@@ -10,7 +10,7 @@
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::{HashType, Parameters};
+use crate::{HashType, layout::Layout};
 
 /// The fixed-size record, excluding padding to the hash-block boundary.
 #[derive(Debug)]
@@ -67,33 +67,33 @@ impl AsMut<[u8]> for Unverified {
     feature = "sm3",
     feature = "blake2"
 ))]
-impl TryFrom<(&Parameters, [u8; 16])> for Unverified {
+impl TryFrom<(&Layout, [u8; 16])> for Unverified {
     type Error = std::io::Error;
 
-    fn try_from((parameters, uuid): (&Parameters, [u8; 16])) -> Result<Self, Self::Error> {
-        parameters.validate_header()?;
+    fn try_from((layout, uuid): (&Layout, [u8; 16])) -> Result<Self, Self::Error> {
+        layout.validate_header()?;
         let mut encoded = Self::default();
         let bytes = &mut encoded.0;
         bytes[..Self::VERSION].copy_from_slice(&Self::SIGNATURE);
         bytes[Self::VERSION..Self::HASH_TYPE].copy_from_slice(&1u32.to_le_bytes());
-        let hash_type: u32 = match parameters.hash_type() {
+        let hash_type: u32 = match layout.hash_type() {
             HashType::ChromeOs => 0,
             HashType::Normal => 1,
         };
         bytes[Self::HASH_TYPE..Self::UUID].copy_from_slice(&hash_type.to_le_bytes());
         bytes[Self::UUID..Self::ALGORITHM].copy_from_slice(&uuid);
-        let algorithm = parameters.algorithm();
+        let algorithm = layout.algorithm();
         let name = algorithm.as_ref().as_bytes();
         bytes[Self::ALGORITHM..Self::ALGORITHM + name.len()].copy_from_slice(name);
         bytes[Self::DATA_BLOCK_SIZE..Self::HASH_BLOCK_SIZE]
-            .copy_from_slice(&parameters.data_block_size().get().to_le_bytes());
+            .copy_from_slice(&layout.data_block_size().get().to_le_bytes());
         bytes[Self::HASH_BLOCK_SIZE..Self::DATA_BLOCKS]
-            .copy_from_slice(&parameters.hash_block_size().get().to_le_bytes());
+            .copy_from_slice(&layout.hash_block_size().get().to_le_bytes());
         bytes[Self::DATA_BLOCKS..Self::SALT_SIZE]
-            .copy_from_slice(&parameters.data_blocks().get().to_le_bytes());
+            .copy_from_slice(&layout.data_blocks().get().to_le_bytes());
         bytes[Self::SALT_SIZE..Self::SALT_PADDING]
-            .copy_from_slice(&(parameters.salt().len() as u16).to_le_bytes());
-        bytes[Self::SALT..Self::SALT + parameters.salt().len()].copy_from_slice(parameters.salt());
+            .copy_from_slice(&(layout.salt().len() as u16).to_le_bytes());
+        bytes[Self::SALT..Self::SALT + layout.salt().len()].copy_from_slice(layout.salt());
         Ok(encoded)
     }
 }

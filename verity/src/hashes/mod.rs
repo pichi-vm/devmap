@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::Parameters;
+use crate::{Scheme, Shape, layout::Layout};
 
 #[cfg(feature = "tokio")]
 mod r#async;
@@ -14,7 +14,7 @@ mod r#async;
     feature = "sm3",
     feature = "blake2"
 ))]
-mod authentication;
+pub(crate) mod authentication;
 mod sync;
 
 /// An opened dm-verity hash device with validated metadata.
@@ -30,7 +30,7 @@ mod sync;
 pub struct Hashes<H> {
     inner: H,
     uuid: [u8; 16],
-    parameters: Parameters,
+    pub(crate) layout: Layout,
     #[cfg(any(
         feature = "sha1",
         feature = "sha2",
@@ -46,11 +46,11 @@ pub struct Hashes<H> {
 
 impl<H> Hashes<H> {
     // Callers validate header limits, including u64 byte extents, before construction.
-    pub(crate) fn new(inner: H, uuid: [u8; 16], parameters: Parameters) -> Self {
+    pub(crate) fn new(inner: H, uuid: [u8; 16], layout: Layout) -> Self {
         Self {
             inner,
             uuid,
-            parameters,
+            layout,
             #[cfg(any(
                 feature = "sha1",
                 feature = "sha2",
@@ -70,11 +70,14 @@ impl<H> Hashes<H> {
         self.uuid
     }
 
-    /// Borrows the validated hashing parameters without I/O.
-    ///
-    /// Available even while an asynchronous read is pending.
-    pub const fn parameters(&self) -> &Parameters {
-        &self.parameters
+    /// Returns the stored hashing choices without I/O.
+    pub const fn scheme(&self) -> Scheme {
+        self.layout.scheme
+    }
+
+    /// Returns the stored geometry without I/O.
+    pub const fn shape(&self) -> Shape {
+        self.layout.shape
     }
 
     /// Consumes the handle and returns its backing storage.

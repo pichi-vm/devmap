@@ -460,11 +460,12 @@ mod tests {
 
     #[test]
     fn buf_for_verity_target_has_correct_layout_and_params() {
-        let t = devmap_verity::Parameters::builder()
-            .salt(&[0x55; 32])
-            .build(std::num::NonZeroU64::new(7).unwrap())
-            .unwrap()
+        let t = devmap_verity::Options::default()
             .target(
+                devmap_verity::Scheme::default()
+                    .with_salt(&[0x55; 32])
+                    .unwrap(),
+                devmap_verity::Shape::new(std::num::NonZeroU64::new(7).unwrap()),
                 DevId::new(253, 3).unwrap(),
                 DevId::new(253, 4).unwrap(),
                 &[0xCD; 32],
@@ -689,7 +690,7 @@ mod tests {
             .expect("one row");
         assert_eq!(row.type_name(), "verity");
         let info = row
-            .parse::<devmap_verity::dm::VerityTarget>()
+            .parse::<devmap_verity::VerityTarget>()
             .expect("verity info parses");
         assert!(info.corrupted);
         assert_eq!(info.fec_corrected, Some(42));

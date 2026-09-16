@@ -12,9 +12,9 @@
 ))]
 
 use std::io::{self, Cursor, Read as _, Seek as _, SeekFrom};
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 
-use devmap_verity::{Algorithm, Hashes, Parameters, Verity, traits::std::*};
+use devmap_verity::{Algorithm, Hashes, Options, Scheme, traits::std::*};
 
 mod common;
 
@@ -61,15 +61,10 @@ fn every_enabled_algorithm_formats_and_authenticates() {
                     .collect();
                 let block_size = NonZeroU32::new(512).unwrap();
                 let mut storage = Cursor::new(Vec::new()).scale(block_size).unwrap();
-                let (_, root) = Parameters::builder()
-                    .algorithm(algorithm)
-                    .hash_type(hash_type)
-                    .salt(&[9; 17])
-                    .data_block_size(512)
-                    .unwrap()
-                    .hash_block_size(512)
-                    .unwrap()
-                    .build(NonZeroU64::new(blocks as u64).unwrap())
+                let (_, root) = Scheme::default()
+                    .with_algorithm(algorithm)
+                    .with_hash_type(hash_type)
+                    .with_salt(&[9; 17])
                     .unwrap()
                     .format(
                         Cursor::new(&data).scale(block_size).unwrap(),
@@ -79,7 +74,9 @@ fn every_enabled_algorithm_formats_and_authenticates() {
                     .unwrap();
                 assert_eq!(root.len(), digest_size);
                 let hashes = Hashes::open(storage).unwrap();
-                let mut device = Verity::open(Cursor::new(&data), hashes, &root).unwrap();
+                let mut device = Options::default()
+                    .open(Cursor::new(&data), hashes, &root)
+                    .unwrap();
                 let mut actual = Vec::new();
                 device.read_to_end(&mut actual).unwrap();
                 assert_eq!(actual, data);
@@ -97,9 +94,10 @@ fn unavailable_algorithms_allow_inspection_and_composition_but_not_hashing() {
         let mut bytes = vec![0; 8192];
         bytes[..512].copy_from_slice(&common::header(name));
         let hashes = Hashes::open(Cursor::new(bytes)).unwrap();
-        let mut device =
-            Verity::open(Cursor::new(vec![0; 1536]), hashes, &vec![0; digest_size]).unwrap();
-        assert_eq!(device.hashes().parameters().algorithm(), algorithm);
+        let mut device = Options::default()
+            .open(Cursor::new(vec![0; 1536]), hashes, &vec![0; digest_size])
+            .unwrap();
+        assert_eq!(device.hashes().scheme().algorithm, algorithm);
         let mut output = [0xaa; 1];
         assert_eq!(
             device.read(&mut output).unwrap_err().kind(),
@@ -110,14 +108,8 @@ fn unavailable_algorithms_allow_inspection_and_composition_but_not_hashing() {
 
         let block_size = NonZeroU32::new(512).unwrap();
         let mut bytes = Cursor::new(Vec::new());
-        let error = Parameters::builder()
-            .algorithm(algorithm)
-            .data_block_size(512)
-            .unwrap()
-            .hash_block_size(512)
-            .unwrap()
-            .build(NonZeroU64::new(1).unwrap())
-            .unwrap()
+        let error = Scheme::default()
+            .with_algorithm(algorithm)
             .format(
                 Cursor::new(vec![0; 512]).scale(block_size).unwrap(),
                 (&mut bytes).scale(block_size).unwrap(),
@@ -140,14 +132,8 @@ fn failed_authentication_cannot_reuse_a_previous_blocks_cache_tag() {
     let block_size = NonZeroU32::new(512).unwrap();
     let data = [vec![0x11; 512], vec![0x22; 512]].concat();
     let mut storage = Cursor::new(Vec::new()).scale(block_size).unwrap();
-    let (_, root) = Parameters::builder()
-        .algorithm(algorithm)
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(2).unwrap())
-        .unwrap()
+    let (_, root) = Scheme::default()
+        .with_algorithm(algorithm)
         .format(
             Cursor::new(&data).scale(block_size).unwrap(),
             &mut storage,
@@ -156,8 +142,9 @@ fn failed_authentication_cannot_reuse_a_previous_blocks_cache_tag() {
         .unwrap();
     let mut corrupt = data;
     corrupt[512] ^= 1;
-    let mut device =
-        Verity::open(Cursor::new(corrupt), Hashes::open(storage).unwrap(), &root).unwrap();
+    let mut device = Options::default()
+        .open(Cursor::new(corrupt), Hashes::open(storage).unwrap(), &root)
+        .unwrap();
     let mut output = [0; 16];
     device.read_exact(&mut output).unwrap();
     assert_eq!(output, [0x11; 16]);

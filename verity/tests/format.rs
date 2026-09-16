@@ -3,7 +3,7 @@
 #![cfg(feature = "sha2")]
 
 use devmap_verity::{
-    Parameters,
+    Scheme, Shape,
     traits::std::{Format as _, Geometry, SyncData},
 };
 use std::{
@@ -28,6 +28,10 @@ struct Output {
     failure: Option<Failure>,
     #[cfg(feature = "tokio")]
     paused: bool,
+    #[cfg(feature = "tokio")]
+    stall_sync: bool,
+    #[cfg(feature = "tokio")]
+    persisting: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Output {
@@ -63,129 +67,115 @@ impl Seek for Output {
 
 impl Geometry for Output {
     fn block_size(&self) -> io::Result<NonZeroU32> {
-        Ok(NonZeroU32::MIN)
+        Ok(NonZeroU32::new(4096).unwrap())
     }
     fn count(&mut self) -> io::Result<u64> {
-        Ok(self.bytes.get_ref().len() as u64)
+        Ok(self.bytes.get_ref().len() as u64 / 4096)
     }
 }
 
 impl SyncData for Output {
     fn sync_data(&mut self) -> io::Result<()> {
         self.check(Failure::Sync)?;
+        assert!(self.flushes > 0);
         self.syncs += 1;
         Ok(())
     }
 }
 
-#[test]
-fn formatting_returns_metadata_without_reading_and_persists_only_on_request() {
-    let parameters = Parameters::builder().build(NonZeroU64::MIN).unwrap();
-    let (mut hashes, root) = parameters
-        .clone()
-        .format(Cursor::new(vec![7; 4096]), Output::default(), [3; 16])
-        .unwrap();
-    assert_eq!(hashes.parameters(), &parameters);
-    assert_eq!(hashes.uuid(), [3; 16]);
-    assert_eq!(root.len(), 32);
-    hashes.sync_data().unwrap();
-    let output = hashes.into_inner();
-    assert!(output.flushes > 0);
-    assert_eq!(output.syncs, 1);
-
-    let reopened =
-        <devmap_verity::Hashes<_> as devmap_verity::traits::std::OpenHashes<_>>::open(output.bytes)
-            .unwrap();
-    assert_eq!(reopened.parameters(), &parameters);
-    assert_eq!(reopened.uuid(), [3; 16]);
+fn input(bytes: Vec<u8>) -> devmap_core::Scaled<Cursor<Vec<u8>>> {
+    devmap_core::traits::std::Scale::scale_to(Cursor::new(bytes), NonZeroU32::new(4096).unwrap())
+        .unwrap()
 }
 
 #[test]
-fn format_errors_never_return_a_completed_handle() {
-    for failure in [Failure::Write, Failure::Seek, Failure::Flush] {
-        let parameters = Parameters::builder().build(NonZeroU64::MIN).unwrap();
+fn formatting_returns_metadata_without_reading_and_persists_before_returning() {
+    let scheme = Scheme::default();
+    let (hashes, root) = scheme
+        .format(input(vec![7; 4096]), Output::default(), [3; 16])
+        .unwrap();
+    assert_eq!(hashes.scheme(), scheme);
+    assert_eq!(hashes.shape(), Shape::new(NonZeroU64::MIN));
+    assert_eq!(hashes.uuid(), [3; 16]);
+    assert_eq!(root.len(), 32);
+    let output = hashes.into_inner();
+    assert!(output.flushes > 0);
+    assert_eq!(output.syncs, 1);
+    let reopened =
+        <devmap_verity::Hashes<_> as devmap_verity::traits::std::OpenHashes<_>>::open(output.bytes)
+            .unwrap();
+    assert_eq!(reopened.scheme(), scheme);
+    assert_eq!(reopened.shape(), Shape::new(NonZeroU64::MIN));
+}
+
+#[test]
+fn format_errors_including_persistence_never_return_a_completed_handle() {
+    for failure in [Failure::Write, Failure::Seek, Failure::Flush, Failure::Sync] {
         let mut output = Output {
             failure: Some(failure),
             ..Output::default()
         };
-        let error = parameters
-            .format(Cursor::new(vec![0; 4096]), &mut output, [0; 16])
+        let error = Scheme::default()
+            .format(input(vec![0; 4096]), &mut output, [0; 16])
             .err()
             .unwrap();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(output.syncs, 0);
+        if failure == Failure::Sync {
+            assert!(output.flushes > 0);
+        }
     }
 }
 
 #[test]
 fn formatting_reports_insufficient_fixed_output_capacity() {
-    let parameters = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .hash_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(2).unwrap())
-        .unwrap();
-    let mut bytes = [0; 512];
-    let error = parameters
-        .format(
-            Cursor::new(vec![0; 1024]),
-            Cursor::new(bytes.as_mut_slice()),
-            [0; 16],
-        )
+    let mut bytes = [0; 4096];
+    let output = devmap_core::traits::std::Scale::scale_to(
+        Cursor::new(bytes.as_mut_slice()),
+        NonZeroU32::new(4096).unwrap(),
+    )
+    .unwrap();
+    let error = Scheme::default()
+        .format(input(vec![0; 8192]), output, [0; 16])
         .err()
         .unwrap();
     assert_eq!(error.kind(), io::ErrorKind::WriteZero);
 }
 
 #[test]
-fn header_limits_are_checked_before_any_output() {
-    for builder in [
-        Parameters::builder().salt(&[0; 257]),
-        Parameters::builder().data_block_size(1 << 20).unwrap(),
-        Parameters::builder().hash_block_size(1 << 20).unwrap(),
-    ] {
-        let parameters = builder.build(NonZeroU64::MIN).unwrap();
+fn header_geometry_limits_are_checked_before_any_output() {
+    struct GeometryOnly {
+        block: NonZeroU32,
+        count: u64,
+    }
+    impl io::Read for GeometryOnly {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            panic!("invalid geometry must fail before reading")
+        }
+    }
+    impl Geometry for GeometryOnly {
+        fn block_size(&self) -> io::Result<NonZeroU32> {
+            Ok(self.block)
+        }
+        fn count(&mut self) -> io::Result<u64> {
+            Ok(self.count)
+        }
+    }
+    for (block, count) in [(1, 1), (513, 1), (1 << 20, 1), (512, u64::MAX), (512, 0)] {
         let mut output = Output::default();
-        let error = parameters
-            .format(Cursor::new(Vec::<u8>::new()), &mut output, [0; 16])
+        let data = GeometryOnly {
+            block: NonZeroU32::new(block).unwrap(),
+            count,
+        };
+        let error = Scheme::default()
+            .format(data, &mut output, [0; 16])
             .err()
             .unwrap();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(output.bytes.get_ref().as_slice(), []);
         assert_eq!(output.flushes, 0);
+        assert_eq!(output.syncs, 0);
     }
-    let parameters = Parameters::builder()
-        .data_block_size(512)
-        .unwrap()
-        .build(NonZeroU64::new(u64::MAX).unwrap())
-        .unwrap();
-    let mut output = Output::default();
-    let error = parameters
-        .format(Cursor::new(Vec::<u8>::new()), &mut output, [0; 16])
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-    assert_eq!(output.bytes.get_ref().as_slice(), []);
-}
-
-#[test]
-fn persistence_failures_are_reported_by_the_returned_handle() {
-    let parameters = Parameters::builder().build(NonZeroU64::MIN).unwrap();
-    let output = Output {
-        failure: Some(Failure::Sync),
-        ..Output::default()
-    };
-    let (mut hashes, _) = parameters
-        .format(Cursor::new(vec![0; 4096]), output, [0; 16])
-        .unwrap();
-    assert_eq!(
-        hashes.sync_data().unwrap_err().kind(),
-        io::ErrorKind::PermissionDenied
-    );
-    let output = hashes.into_inner();
-    assert!(output.flushes > 0);
-    assert_eq!(output.syncs, 0);
 }
 
 #[cfg(feature = "tokio")]
@@ -232,90 +222,86 @@ mod asynchronous {
 
     impl Geometry for Output {
         fn block_size(&self) -> io::Result<NonZeroU32> {
-            Ok(NonZeroU32::MIN)
+            Ok(NonZeroU32::new(4096).unwrap())
         }
         fn count(&mut self) -> Pin<Box<dyn Future<Output = io::Result<u64>> + Send + '_>> {
-            Box::pin(std::future::ready(Ok(self.bytes.get_ref().len() as u64)))
+            Box::pin(std::future::ready(Ok(
+                self.bytes.get_ref().len() as u64 / 4096
+            )))
         }
     }
 
     impl SyncData for Output {
         fn sync_data(&mut self) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
-            Box::pin(std::future::ready(super::SyncData::sync_data(self)))
+            Box::pin(async move {
+                if self.stall_sync {
+                    self.persisting
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    std::future::pending::<()>().await;
+                }
+                super::SyncData::sync_data(self)
+            })
         }
     }
 
     #[tokio::test]
-    async fn async_format_handles_short_pending_output_without_a_reread() {
-        let parameters = Parameters::builder()
-            .build(NonZeroU64::new(129).unwrap())
-            .unwrap();
+    async fn async_format_handles_short_pending_output_and_persists() {
         let bytes = vec![7; 129 * 4096];
-        let (mut hashes, root) = Format::format(
-            parameters.clone(),
-            Cursor::new(&bytes),
+        let (hashes, root) = Format::format(
+            Scheme::default(),
+            input(bytes.clone()),
             Output::default(),
             [9; 16],
         )
         .await
         .unwrap();
-        assert_eq!(hashes.parameters(), &parameters);
+        assert_eq!(hashes.shape(), Shape::new(NonZeroU64::new(129).unwrap()));
         assert_eq!(hashes.uuid(), [9; 16]);
-        SyncData::sync_data(&mut hashes).await.unwrap();
         let output = hashes.into_inner();
         assert!(output.flushes > 0);
         assert_eq!(output.syncs, 1);
         let (expected, expected_root) = devmap_verity::traits::std::Format::format(
-            parameters,
-            Cursor::new(&bytes),
-            Cursor::new(Vec::new()),
+            Scheme::default(),
+            input(bytes),
+            Output::default(),
             [9; 16],
         )
         .unwrap();
         assert_eq!(root, expected_root);
         assert_eq!(
             output.bytes.into_inner(),
-            expected.into_inner().into_inner()
+            expected.into_inner().bytes.into_inner()
         );
     }
 
     #[tokio::test]
-    async fn async_output_failures_return_no_completed_handle() {
-        for failure in [Failure::Write, Failure::Seek, Failure::Flush] {
-            let parameters = Parameters::builder().build(NonZeroU64::MIN).unwrap();
-            let output = Output {
+    async fn async_output_and_persistence_failures_return_no_handle() {
+        for failure in [Failure::Write, Failure::Seek, Failure::Flush, Failure::Sync] {
+            let mut output = Output {
                 failure: Some(failure),
                 ..Output::default()
             };
-            let error = Format::format(parameters, Cursor::new(vec![0; 4096]), output, [0; 16])
-                .await
-                .err()
-                .unwrap();
+            let error = Format::format(
+                Scheme::default(),
+                input(vec![0; 4096]),
+                &mut output,
+                [0; 16],
+            )
+            .await
+            .err()
+            .unwrap();
             assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(output.syncs, 0);
         }
-        let parameters = Parameters::builder().build(NonZeroU64::MIN).unwrap();
-        let output = Output {
-            failure: Some(Failure::Sync),
-            ..Output::default()
-        };
-        let (mut hashes, _) =
-            Format::format(parameters, Cursor::new(vec![0; 4096]), output, [0; 16])
-                .await
-                .unwrap();
-        assert_eq!(
-            SyncData::sync_data(&mut hashes).await.unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
     }
 
     #[tokio::test]
-    async fn cancelled_format_leaves_partial_output_that_can_be_reformatted() {
-        let parameters = Parameters::builder().build(NonZeroU64::MIN).unwrap();
+    async fn cancelled_format_can_be_restarted_without_claiming_persistence() {
         let mut output = Output::default();
         {
             let mut operation = Box::pin(Format::format(
-                parameters.clone(),
-                Cursor::new(vec![0; 4096]),
+                Scheme::default(),
+                input(vec![0; 4096]),
                 &mut output,
                 [0; 16],
             ));
@@ -333,10 +319,43 @@ mod asynchronous {
         }
         assert_ne!(output.bytes.get_ref().as_slice(), []);
         assert_eq!(output.flushes, 0);
-        let (hashes, _) = Format::format(parameters, Cursor::new(vec![7; 4096]), output, [1; 16])
+        assert_eq!(output.syncs, 0);
+        let (hashes, _) = Format::format(Scheme::default(), input(vec![7; 4096]), output, [1; 16])
             .await
             .unwrap();
         assert_eq!(hashes.uuid(), [1; 16]);
-        assert!(hashes.into_inner().flushes > 0);
+        assert_eq!(hashes.into_inner().syncs, 1);
+    }
+    #[tokio::test]
+    async fn cancellation_during_persistence_returns_no_completed_handle() {
+        let mut output = Output {
+            stall_sync: true,
+            ..Output::default()
+        };
+        let persisting = output.persisting.clone();
+        {
+            let mut operation = Box::pin(Format::format(
+                Scheme::default(),
+                input(vec![0; 4096]),
+                &mut output,
+                [0; 16],
+            ));
+            poll_fn(|cx| {
+                assert!(operation.as_mut().poll(cx).is_pending());
+                if persisting.load(std::sync::atomic::Ordering::Relaxed) {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            })
+            .await;
+        }
+        assert!(output.flushes > 0);
+        assert_eq!(output.syncs, 0);
+        output.stall_sync = false;
+        let (hashes, _) = Format::format(Scheme::default(), input(vec![0; 4096]), output, [0; 16])
+            .await
+            .unwrap();
+        assert_eq!(hashes.into_inner().syncs, 1);
     }
 }
