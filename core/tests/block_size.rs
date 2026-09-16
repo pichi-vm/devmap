@@ -7,17 +7,17 @@ use std::{io, num::NonZeroU32};
 fn sizes_validate_and_convert_in_bytes() {
     for size in [0u32, 1, 511, 513, 1 << 31, u32::MAX] {
         assert_eq!(
-            BlockSize::<512>::try_from(size).unwrap_err().kind(),
+            BlockSize::<9>::try_from(size).unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
         assert!(size.to_string().parse::<BlockSize>().is_err());
         if let Some(size) = NonZeroU32::new(size) {
-            assert!(BlockSize::<512>::try_from(size).is_err());
+            assert!(BlockSize::<9>::try_from(size).is_err());
         }
     }
     for exponent in 9..=30 {
         let size = 1u32 << exponent;
-        let value = BlockSize::<512>::try_from(size).unwrap();
+        let value = BlockSize::<9>::try_from(size).unwrap();
         assert_eq!(u32::from(value), size);
         assert_eq!(NonZeroU32::from(value).get(), size);
         assert_eq!(
@@ -58,7 +58,11 @@ fn check_minimum<const MIN: u32>() {
         1 << 30,
         1 << 31,
     ] {
-        let valid = bytes != 0 && bytes.is_power_of_two() && bytes >= MIN && bytes <= 1 << 30;
+        let valid = bytes.is_power_of_two()
+            && 1u32
+                .checked_shl(MIN)
+                .is_some_and(|minimum| bytes >= minimum)
+            && bytes <= 1 << 30;
         let parsed = BlockSize::<MIN>::try_from(bytes);
         assert_eq!(parsed.is_ok(), valid, "minimum {MIN}, size {bytes}");
         assert_eq!(bytes.to_string().parse::<BlockSize<MIN>>().is_ok(), valid);
@@ -74,16 +78,18 @@ fn check_minimum<const MIN: u32>() {
 }
 
 #[test]
-fn minimum_is_a_lower_bound_not_a_required_block_size() {
+fn minimum_is_a_base_two_exponent() {
     check_minimum::<0>();
     check_minimum::<1>();
+    check_minimum::<2>();
     check_minimum::<3>();
-    check_minimum::<512>();
-    check_minimum::<513>();
-    check_minimum::<4096>();
-    check_minimum::<8192>();
-    check_minimum::<{ 1 << 30 }>();
-    check_minimum::<{ (1 << 30) + 1 }>();
+    check_minimum::<9>();
+    check_minimum::<10>();
+    check_minimum::<12>();
+    check_minimum::<13>();
+    check_minimum::<30>();
+    check_minimum::<31>();
+    check_minimum::<32>();
     check_minimum::<{ u32::MAX }>();
 }
 
@@ -94,21 +100,20 @@ fn check_default<const MIN: u32>(expected: u32) {
 }
 
 #[test]
-fn defaults_satisfy_the_minimum_without_rounding_below_it() {
+fn defaults_satisfy_the_minimum_exponent() {
     check_default::<0>(4096);
     check_default::<1>(4096);
-    check_default::<512>(4096);
-    check_default::<4096>(4096);
-    check_default::<4097>(8192);
-    check_default::<8192>(8192);
-    check_default::<10000>(16384);
-    check_default::<{ 1 << 30 }>(1 << 30);
+    check_default::<9>(4096);
+    check_default::<12>(4096);
+    check_default::<13>(8192);
+    check_default::<14>(16384);
+    check_default::<30>(1 << 30);
 }
 
 #[test]
 fn byte_sized_blocks_convert_to_stream_geometry() {
     use devmap_core::traits::std::{Geometry as _, Scale as _};
-    let size = BlockSize::<1>::try_from(1u32).unwrap();
+    let size = BlockSize::<0>::try_from(1u32).unwrap();
     let mut stream = std::io::Cursor::new(vec![1, 2, 3])
         .scale_to(size.into())
         .unwrap();
