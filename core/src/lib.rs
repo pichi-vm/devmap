@@ -2,53 +2,36 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
-
-//! Shared storage adapters and device-mapper target descriptions.
-//!
-//! Use ordinary byte I/O on storage with explicit block geometry. This crate
-//! supplies the common interfaces; on-disk formats and kernel activation
-//! belong to the format crates and `devmap-linux`.
-//!
-//! # Storage
-//!
-//! Import [`traits::std`] to choose a logical block size or a bounded view,
-//! then read and write through the usual I/O traits:
-//!
-//! ```
-//! use devmap_core::{BlockSize, traits::std::{Scale as _, Slice as _}};
-//! use std::io::{Cursor, Read};
-//!
-//! # fn main() -> std::io::Result<()> {
-//! let mut region = Cursor::new(vec![7; 8192])
-//!     .scale_to(BlockSize::<9>::default().into())?
-//!     .slice(1..2)?;
-//! let mut block = [0; 4096];
-//! region.read_exact(&mut block)?;
-//! assert_eq!(block, [7; 4096]);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! # Device mapper
-//!
-//! Format crates implement [`Target`] to describe mappings that `devmap-linux`
-//! can load.
-//! [`parse`] supplies their shared field values and errors.
-//!
-//! # Cargo features
-//!
-//! No default features. `tokio` enables `traits::tokio` and asynchronous I/O
-//! on the same adapters.
+#![doc = include_str!("../README.md")]
 
 mod block_size;
-pub mod parse;
-mod region;
-mod scaled;
-mod storage;
-mod target;
-pub mod traits;
+mod detect;
+mod geometry;
 
 pub use block_size::BlockSize;
-pub use region::Region;
-pub use scaled::Scaled;
-pub use target::Target;
+pub use detect::Detect;
+pub use geometry::Geometry;
+
+/// Defines the permitted base-two exponents for a [`BlockSize`].
+///
+/// Implementations must choose a `DEFAULT` between `MIN` and `MAX` that can
+/// be represented as a nonzero `u32` byte count.
+pub trait Constraint {
+    /// The default base-two exponent.
+    const DEFAULT: u32;
+
+    /// The smallest permitted base-two exponent.
+    const MIN: u32 = 0;
+
+    /// The largest permitted base-two exponent.
+    const MAX: u32;
+}
+
+/// The complete range of block sizes representable in a `u32` byte count.
+#[derive(Debug, Clone, Copy)]
+pub enum General {}
+
+impl Constraint for General {
+    const MAX: u32 = u32::BITS - 1;
+    const DEFAULT: u32 = 12;
+}
