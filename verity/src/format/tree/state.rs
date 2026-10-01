@@ -31,7 +31,7 @@ impl State {
         let digest_size = hasher.output_size();
         let data_block_size = header.data.size.bytes().get();
         let hash_block_size = header.hash.bytes().get();
-        let maximum_size = u64::try_from(header.data_bytes()).map_err(|_| overflow())?;
+        let maximum_size = header.data_size()?;
         let hashes_per_block = header.hashes_per_block()?;
         let blocks: Vec<_> = header.level_blocks(hashes_per_block).collect();
         let mut offsets = vec![0; blocks.len()];
