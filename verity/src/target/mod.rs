@@ -1,61 +1,68 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{KeyDescription, Options, Scheme, Shape, layout::Layout};
-use devmap_core::{Target, parse::DevId};
-use std::io;
+//! Linux dm-verity target descriptions and activation policy.
 
+use crate::header::{Algorithm, Constraint, HashType, Salt};
+use devmap_core::{BlockSize, Geometry};
+use devmap_linux::{
+    DevId,
+    table::TableMode,
+    target::{EncodeError, Parse, Target, Version},
+};
+
+mod builder;
 mod codec;
 mod info;
+mod policy;
+pub use builder::Builder;
 pub use info::Info;
+pub use policy::{CorruptionPolicy, IoErrorPolicy};
 
 /// A validated Linux dm-verity table description.
 ///
-/// Construct through [`Options::target`]. The root must come from an
-/// independently trusted source. Activate in a read-only table.
+/// Construct through [`VerityTarget::builder`] or
+/// [`Header::builder`](crate::header::Header::builder). The root must come
+/// from an independently trusted source. Activate in a read-only table.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VerityTarget {
-    scheme: Scheme,
-    shape: Shape,
-    // The signature is owned separately; options() constructs its borrowed view.
-    options: Options<'static>,
+    hash_type: HashType,
+    data: DevId,
+    hash: DevId,
+    geometry: Geometry<Constraint>,
+    block: BlockSize<Constraint>,
+    hash_start: u64,
+    algorithm: Algorithm,
+    salt: Salt,
+    corruption_policy: CorruptionPolicy,
+    io_error_policy: IoErrorPolicy,
+    ignore_zero_blocks: bool,
+    check_at_most_once: bool,
+    try_verify_in_tasklet: bool,
     signature: Option<String>,
-    data_dev: DevId,
-    hash_dev: DevId,
-    root: Vec<u8>,
+    root: Box<[u8]>,
     data_sectors: u64,
 }
 
 impl VerityTarget {
-    /// Returns the accepted hashing choices.
-    pub const fn scheme(&self) -> Scheme {
-        self.scheme
-    }
-    /// Returns the accepted block geometry.
-    pub const fn shape(&self) -> Shape {
-        self.shape
-    }
-    /// Returns settings with any key description borrowed from this target.
-    pub fn options(&self) -> Options<'_> {
-        Options {
-            root_hash_sig_key_desc: self.signature.as_deref().map(KeyDescription::validated),
-            ..self.options
-        }
-    }
-    /// Returns the data device.
-    pub const fn data_dev(&self) -> DevId {
-        self.data_dev
-    }
-    /// Returns the hash device.
-    pub const fn hash_dev(&self) -> DevId {
-        self.hash_dev
-    }
-    /// Borrows the externally supplied root digest.
-    pub fn root_digest(&self) -> &[u8] {
-        &self.root
-    }
     /// Returns the full row length in 512-byte sectors.
     pub const fn data_sectors(&self) -> u64 {
         self.data_sectors
+    }
+
+    fn supports_version(&self, version: Version) -> bool {
+        version.major == 1
+            && (!matches!(
+                self.corruption_policy,
+                CorruptionPolicy::Ignore | CorruptionPolicy::Restart
+            ) || version >= Version::from([1, 2, 0]))
+            && (!self.ignore_zero_blocks || version >= Version::from([1, 3, 0]))
+            && (!self.check_at_most_once || version >= Version::from([1, 4, 0]))
+            && (self.signature.is_none() || version >= Version::from([1, 5, 0]))
+            && (self.corruption_policy != CorruptionPolicy::Panic
+                || version >= Version::from([1, 7, 0]))
+            && (!self.try_verify_in_tasklet || version >= Version::from([1, 9, 0]))
+            && (self.io_error_policy == IoErrorPolicy::Error
+                || version >= Version::from([1, 10, 0]))
     }
 }
 
@@ -63,62 +70,131 @@ impl Target for VerityTarget {
     const NAME: &'static str = "verity";
     type Table = Self;
     type Info = Info;
+
+    fn encode(&self, version: Version) -> Result<String, EncodeError> {
+        if !self.supports_version(version) {
+            return Err(EncodeError { version });
+        }
+        Ok(self.to_string())
+    }
 }
 
-impl Options<'_> {
-    /// Binds a scheme, shape, device IDs, and trusted root into a Linux target.
-    ///
-    /// Performs no I/O. The kernel checks device capacity and feature support
-    /// on load; it authenticates data on reads.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InvalidInput` for an overflowing layout, incorrect root
-    /// length, or incompatible options.
-    ///
-    /// ```
-    /// use std::num::NonZeroU64;
-    /// use devmap_core::parse::DevId;
-    /// use devmap_verity::{Options, Scheme, Shape};
-    ///
-    /// # fn mapping(root: &[u8]) -> std::io::Result<()> {
-    /// let target = Options::default().with_hash_start_block(0).target(
-    ///     Scheme::default(),
-    ///     Shape::new(NonZeroU64::new(128).unwrap()),
-    ///     DevId::new(7, 0).unwrap(),
-    ///     DevId::new(7, 1).unwrap(),
-    ///     root,
-    /// )?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn target(
-        self,
-        scheme: Scheme,
-        shape: Shape,
-        data_dev: DevId,
-        hash_dev: DevId,
-        root: &[u8],
-    ) -> io::Result<VerityTarget> {
-        let layout = Layout::new(&scheme, shape)?;
-        self.validate(&layout)?;
-        if root.len() != scheme.algorithm.digest_size() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "root digest length does not match the hash algorithm",
-            ));
+impl Parse<TableMode> for VerityTarget {
+    type Error = devmap_linux::ParseError;
+
+    fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
+        let target: Self = text.parse()?;
+        if !target.supports_version(version) {
+            return Err(devmap_linux::ParseError);
         }
-        Ok(VerityTarget {
-            scheme,
-            shape,
-            options: self.without_signature(),
-            signature: self
-                .root_hash_sig_key_desc
-                .map(|description| description.as_ref().to_owned()),
-            data_dev,
-            hash_dev,
-            root: root.into(),
-            data_sectors: (layout.data_size / 512) as u64,
-        })
+        Ok(target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZero;
+
+    use super::*;
+
+    #[test]
+    fn version_gates_optional_verity_parameters() {
+        let data = DevId::new(252, 1).unwrap();
+        let hash = DevId::new(252, 2).unwrap();
+        let base = VerityTarget::builder(data, hash, NonZero::new(1).unwrap(), vec![0; 32])
+            .unwrap()
+            .build();
+
+        let cases = [
+            (
+                VerityTarget {
+                    corruption_policy: CorruptionPolicy::Ignore,
+                    ..base.clone()
+                },
+                [1, 1, 0],
+                [1, 2, 0],
+            ),
+            (
+                VerityTarget {
+                    corruption_policy: CorruptionPolicy::Restart,
+                    ..base.clone()
+                },
+                [1, 1, 0],
+                [1, 2, 0],
+            ),
+            (
+                VerityTarget {
+                    ignore_zero_blocks: true,
+                    ..base.clone()
+                },
+                [1, 2, 0],
+                [1, 3, 0],
+            ),
+            (
+                VerityTarget {
+                    check_at_most_once: true,
+                    ..base.clone()
+                },
+                [1, 3, 0],
+                [1, 4, 0],
+            ),
+            (
+                VerityTarget {
+                    signature: Some("test-key".into()),
+                    ..base.clone()
+                },
+                [1, 4, 0],
+                [1, 5, 0],
+            ),
+            (
+                VerityTarget {
+                    corruption_policy: CorruptionPolicy::Panic,
+                    ..base.clone()
+                },
+                [1, 6, 0],
+                [1, 7, 0],
+            ),
+            (
+                VerityTarget {
+                    try_verify_in_tasklet: true,
+                    ..base.clone()
+                },
+                [1, 8, 0],
+                [1, 9, 0],
+            ),
+            (
+                VerityTarget {
+                    io_error_policy: IoErrorPolicy::Restart,
+                    ..base.clone()
+                },
+                [1, 9, 0],
+                [1, 10, 0],
+            ),
+            (
+                VerityTarget {
+                    io_error_policy: IoErrorPolicy::Panic,
+                    ..base.clone()
+                },
+                [1, 9, 0],
+                [1, 10, 0],
+            ),
+        ];
+
+        assert!(base.encode(Version::from([1, 0, 0])).is_ok());
+        assert!(base.encode(Version::from([2, 0, 0])).is_err());
+
+        for (target, before, minimum) in cases {
+            let before = Version::from(before);
+            let minimum = Version::from(minimum);
+            assert_eq!(target.encode(before), Err(EncodeError { version: before }));
+            assert!(target.encode(minimum).is_ok());
+
+            let text = target.to_string();
+            assert!(<VerityTarget as Parse<TableMode>>::parse(&text, before).is_err());
+            assert_eq!(
+                <VerityTarget as Parse<TableMode>>::parse(&text, minimum),
+                Ok(target)
+            );
+        }
     }
 }

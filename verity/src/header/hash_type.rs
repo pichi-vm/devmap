@@ -27,7 +27,7 @@ use digest::DynDigest;
 
 /// A dm-verity hash-tree compatibility profile.
 ///
-/// This setting is independent of the hash [`crate::Algorithm`]. Use
+/// This setting is independent of the hash [`crate::header::Algorithm`]. Use
 /// [`HashType::Normal`] unless compatibility with a format-0 Chrome OS image
 /// is required.
 #[non_exhaustive]
@@ -72,6 +72,23 @@ impl HashType {
         hasher.finalize_into_reset(output).map_err(|_| {
             io::Error::other("hash output buffer does not match the algorithm's digest size")
         })
+    }
+}
+
+impl HashType {
+    pub(crate) const fn from_le_bytes(bytes: [u8; 4]) -> Option<Self> {
+        match u32::from_le_bytes(bytes) {
+            0 => Some(Self::ChromeOs),
+            1 => Some(Self::Normal),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn to_le_bytes(self) -> [u8; 4] {
+        match self {
+            Self::ChromeOs => 0u32.to_le_bytes(),
+            Self::Normal => 1u32.to_le_bytes(),
+        }
     }
 }
 

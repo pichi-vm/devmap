@@ -1,41 +1,118 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{self, Read, Seek, SeekFrom, Write};
+//! Standard-library synchronous formatting.
 
-use devmap_core::traits::std::{Geometry, SyncData};
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+use std::io::{self, Read, Seek, Write};
 
-use crate::superblock::Unverified;
-use crate::traits::std::Format;
-use crate::tree::TreeWriter;
-use crate::{Hashes, Scheme, Shape, layout::Layout};
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+use crate::header::{Header, RECORD_SIZE};
 
-impl<D, H> Format<D, H> for Scheme
-where
-    D: Read + Geometry,
-    H: Write + Seek + Geometry + SyncData,
-{
-    fn format(self, mut data: D, hashes: H, uuid: [u8; 16]) -> io::Result<(Hashes<H>, Box<[u8]>)> {
-        let data_block_size = data.block_size()?;
-        let data_blocks = std::num::NonZeroU64::new(data.count()?)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "verity data is empty"))?;
-        let shape = Shape::new(data_blocks)
-            .with_data_block_size(data_block_size.try_into()?)
-            .with_hash_block_size(hashes.block_size()?.try_into()?);
-        let layout = Layout::new(&self, shape)?;
-        let encoded = Unverified::try_from((&layout, uuid))?;
-        let data_size = layout.data_size as u64;
-        let padding = u64::from(layout.hash_block_size().get()) - size_of::<Unverified>() as u64;
-        let mut tree = TreeWriter::new(hashes, layout)?;
-        tree.output_mut().seek(SeekFrom::Start(0))?;
-        tree.output_mut().write_all(encoded.as_ref())?;
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+use super::tree::TreeWriter;
+
+/// Streams protected data into a standard dm-verity hash volume.
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(
+        feature = "sha1",
+        feature = "sha2",
+        feature = "sha3",
+        feature = "ripemd",
+        feature = "whirlpool",
+        feature = "streebog",
+        feature = "sm3",
+        feature = "blake2"
+    )))
+)]
+pub trait Format: Sized {
+    /// Writes the header and hash tree, returning the root digest.
+    ///
+    /// The operation consumes exactly the number of data bytes declared by
+    /// the header, leaving any additional input unread. The header is written
+    /// at the hash stream's current position. The caller owns storage geometry
+    /// validation and persistence, and should sync durable storage after this
+    /// returns. Pass mutable references when the caller needs to retain either
+    /// stream afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Unsupported` when the selected algorithm's Cargo feature is
+    /// disabled, `InvalidInput` when the header cannot describe a valid
+    /// layout, `UnexpectedEof` when the input contains fewer bytes than the
+    /// declared shape, or an underlying transport error. Once writing begins,
+    /// failure can leave both streams advanced and the output partially
+    /// written; the operation does not roll back.
+    fn format<R, W>(self, data: R, hash: W) -> io::Result<Box<[u8]>>
+    where
+        R: Read,
+        W: Write + Seek;
+}
+
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+impl Format for Header {
+    fn format<R, W>(self, data: R, hash: W) -> io::Result<Box<[u8]>>
+    where
+        R: Read,
+        W: Write + Seek,
+    {
+        let encoded = self.encode();
+        let data_size = u64::from(self.data.size.bytes().get()) * self.data.count.get();
+        let padding = u64::from(self.hash.bytes().get()) - RECORD_SIZE as u64;
+        let mut tree = TreeWriter::new(hash, &self)?;
+        tree.output_mut().write_all(&encoded)?;
         io::copy(&mut io::repeat(0).take(padding), tree.output_mut())?;
-        let copied = io::copy(&mut data.by_ref().take(data_size), &mut tree)?;
+        let copied = io::copy(&mut data.take(data_size), &mut tree)?;
         if copied != data_size {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         tree.flush()?;
-        let (mut hashes, layout, root) = tree.finish()?;
-        hashes.sync_data()?;
-        Ok((Hashes::new(hashes, uuid, layout), root))
+        tree.finish()
     }
 }

@@ -6,6 +6,7 @@ use std::io;
 
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
+
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -17,29 +18,36 @@ use blake2::{Blake2b, Blake2s};
     feature = "blake2"
 ))]
 use digest::DynDigest;
+
 #[cfg(feature = "blake2")]
 use digest::consts::{U16, U20, U28, U32, U48, U64};
+
 #[cfg(feature = "ripemd")]
 use ripemd::Ripemd160;
+
 #[cfg(feature = "sha1")]
 use sha1::Sha1;
+
 #[cfg(feature = "sha2")]
 use sha2::{Sha224, Sha256, Sha384, Sha512};
+
 #[cfg(feature = "sha3")]
 use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512};
+
 #[cfg(feature = "sm3")]
 use sm3::Sm3;
+
 #[cfg(feature = "streebog")]
 use streebog::{Streebog256, Streebog512};
+
 #[cfg(feature = "whirlpool")]
 use whirlpool::Whirlpool;
 
 /// A dm-verity hash algorithm.
 ///
 /// Values remain representable without their hash-family features. Formatting
-/// or authenticated reading with an unavailable algorithm returns
-/// [`std::io::ErrorKind::Unsupported`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// with an unavailable algorithm returns [`std::io::ErrorKind::Unsupported`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Algorithm {
     /// SHA-1 (`sha1`), with a 20-byte digest.
@@ -48,6 +56,7 @@ pub enum Algorithm {
     /// SHA-224 (`sha224`), with a 28-byte digest.
     Sha224,
     /// SHA-256 (`sha256`), with a 32-byte digest.
+    #[default]
     Sha256,
     /// SHA-384 (`sha384`), with a 48-byte digest.
     Sha384,
