@@ -45,6 +45,7 @@ devmap-linux = { version = "0.1.0", path = "../linux" }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "rt"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 lodown = { git = "https://github.com/pichi-vm/lodown", rev = "2492c468cc7968c512aa4f3f58220ab36d6424b3" }
@@ -56,6 +57,10 @@ required-features = ["sha2"]
 [[test]]
 name = "activate"
 required-features = ["sha2"]
+
+[[test]]
+name = "async_format"
+required-features = ["tokio", "sha2"]
 
 [lints]
 workspace = true

@@ -70,6 +70,7 @@ jobs:
         run: |
           cargo test -p devmap-verity --no-default-features --features tokio --all-targets
           cargo test -p devmap-verity --no-default-features --features tokio --doc
+          cargo test -p devmap-verity --no-default-features --features tokio,sha2 --test async_format
           for feature in blake2 ripemd sha1 sha2 sha3 sm3 streebog whirlpool; do
             cargo test -p devmap-verity --no-default-features --features "$feature" --all-targets
           done
