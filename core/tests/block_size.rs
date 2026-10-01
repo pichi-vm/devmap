@@ -1,122 +1,89 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use devmap_core::BlockSize;
-use std::{io, num::NonZeroU32};
+use std::num::NonZero;
+
+use devmap_core::{BlockSize, Constraint, General};
+
+#[derive(Debug)]
+enum Restricted {}
+
+impl Constraint for Restricted {
+    const MIN: u32 = 9;
+    const MAX: u32 = 19;
+    const DEFAULT: u32 = 12;
+}
 
 #[test]
-fn sizes_validate_and_convert_in_bytes() {
-    for size in [0u32, 1, 511, 513, 1 << 31, u32::MAX] {
-        assert_eq!(
-            BlockSize::<9>::try_from(size).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-        assert!(size.to_string().parse::<BlockSize>().is_err());
-        if let Some(size) = NonZeroU32::new(size) {
-            assert!(BlockSize::<9>::try_from(size).is_err());
-        }
+fn constructs_from_bytes_and_exponents() {
+    for exponent in 0..u32::BITS {
+        let bytes = NonZero::new(1u32 << exponent).unwrap();
+        let from_bytes = BlockSize::<General>::from_bytes(bytes).unwrap();
+        let from_exponent = BlockSize::<General>::from_exponent(exponent).unwrap();
+
+        assert_eq!(from_bytes, from_exponent);
+        assert_eq!(from_bytes.bytes(), bytes);
+        assert_eq!(from_bytes.exponent(), exponent);
     }
-    for exponent in 9..=30 {
-        let size = 1u32 << exponent;
-        let value = BlockSize::<9>::try_from(size).unwrap();
-        assert_eq!(u32::from(value), size);
-        assert_eq!(NonZeroU32::from(value).get(), size);
-        assert_eq!(
-            BlockSize::try_from(NonZeroU32::new(size).unwrap()).unwrap(),
-            value
-        );
-        assert_eq!(value.to_string(), size.to_string());
-        assert_eq!(value.to_string().parse::<BlockSize>().unwrap(), value);
-    }
-    for invalid in ["", "-512", "4KiB", "4294967296"] {
-        assert!(invalid.parse::<BlockSize>().is_err());
+
+    assert!(BlockSize::<General>::from_exponent(u32::BITS).is_none());
+    for bytes in [3, 511, 513, u32::MAX] {
+        assert!(BlockSize::<General>::from_bytes(NonZero::new(bytes).unwrap()).is_none());
     }
 }
 
 #[test]
-fn block_sizes_are_copyable_and_default_to_4096_bytes() {
-    fn copy<T: Copy>() {}
+fn constraints_are_inclusive() {
+    assert!(BlockSize::<Restricted>::from_exponent(8).is_none());
+    assert_eq!(
+        BlockSize::<Restricted>::from_exponent(9)
+            .unwrap()
+            .bytes()
+            .get(),
+        512
+    );
+    assert_eq!(
+        BlockSize::<Restricted>::from_exponent(19)
+            .unwrap()
+            .bytes()
+            .get(),
+        512 * 1024
+    );
+    assert!(BlockSize::<Restricted>::from_exponent(20).is_none());
+}
+
+#[test]
+fn defaults_and_ordering_use_exponents() {
+    let size = BlockSize::<Restricted>::default();
+    assert_eq!(size.exponent(), Restricted::DEFAULT);
+    assert_eq!(size.bytes().get(), 4096);
+    assert!(BlockSize::<Restricted>::from_exponent(9).unwrap() < size);
+}
+
+#[test]
+fn converts_between_constraints() {
+    let accepted = BlockSize::<General>::from_exponent(12).unwrap();
+    let converted: BlockSize<Restricted> = accepted.convert().unwrap();
+    assert_eq!(converted.exponent(), 12);
+
+    let rejected = BlockSize::<General>::from_exponent(8).unwrap();
+    assert!(rejected.convert::<Restricted>().is_none());
+    assert_eq!(accepted.convert::<General>().unwrap(), accepted);
+}
+
+#[test]
+fn block_sizes_are_copyable() {
+    const fn copy<T: Copy>() {}
     copy::<BlockSize>();
-    let size: BlockSize = BlockSize::default();
-    assert_eq!(u32::from(size), 4096);
-    assert!(BlockSize::try_from(512u32).unwrap() < size);
+    copy::<BlockSize<Restricted>>();
 }
 
-fn check_minimum<const MIN: u32>() {
-    for bytes in [
-        0u32,
-        1,
-        2,
-        3,
-        4,
-        8,
-        511,
-        512,
-        513,
-        1024,
-        4096,
-        8192,
-        1 << 30,
-        1 << 31,
-    ] {
-        let valid = bytes.is_power_of_two()
-            && 1u32
-                .checked_shl(MIN)
-                .is_some_and(|minimum| bytes >= minimum)
-            && bytes <= 1 << 30;
-        let parsed = BlockSize::<MIN>::try_from(bytes);
-        assert_eq!(parsed.is_ok(), valid, "minimum {MIN}, size {bytes}");
-        assert_eq!(bytes.to_string().parse::<BlockSize<MIN>>().is_ok(), valid);
-        if let Some(bytes) = NonZeroU32::new(bytes) {
-            assert_eq!(BlockSize::<MIN>::try_from(bytes).is_ok(), valid);
-        }
-        if let Ok(size) = parsed {
-            assert_eq!(u32::from(size), bytes);
-            assert_eq!(NonZeroU32::from(size).get(), bytes);
-            assert_eq!(size.to_string().parse::<BlockSize<MIN>>().unwrap(), size);
-        }
+#[test]
+#[should_panic(expected = "invalid Constraint::DEFAULT")]
+fn invalid_constraint_default_panics() {
+    enum Invalid {}
+    impl Constraint for Invalid {
+        const MAX: u32 = 4;
+        const DEFAULT: u32 = 5;
     }
-}
-
-#[test]
-fn minimum_is_a_base_two_exponent() {
-    check_minimum::<0>();
-    check_minimum::<1>();
-    check_minimum::<2>();
-    check_minimum::<3>();
-    check_minimum::<9>();
-    check_minimum::<10>();
-    check_minimum::<12>();
-    check_minimum::<13>();
-    check_minimum::<30>();
-    check_minimum::<31>();
-    check_minimum::<32>();
-    check_minimum::<{ u32::MAX }>();
-}
-
-fn check_default<const MIN: u32>(expected: u32) {
-    let size = BlockSize::<MIN>::default();
-    assert_eq!(u32::from(size), expected);
-    assert_eq!(BlockSize::<MIN>::try_from(expected).unwrap(), size);
-}
-
-#[test]
-fn defaults_satisfy_the_minimum_exponent() {
-    check_default::<0>(4096);
-    check_default::<1>(4096);
-    check_default::<9>(4096);
-    check_default::<12>(4096);
-    check_default::<13>(8192);
-    check_default::<14>(16384);
-    check_default::<30>(1 << 30);
-}
-
-#[test]
-fn byte_sized_blocks_convert_to_stream_geometry() {
-    use devmap_core::traits::std::{Geometry as _, Scale as _};
-    let size = BlockSize::<0>::try_from(1u32).unwrap();
-    let mut stream = std::io::Cursor::new(vec![1, 2, 3])
-        .scale_to(size.into())
-        .unwrap();
-    assert_eq!(stream.block_size().unwrap().get(), 1);
-    assert_eq!(stream.count().unwrap(), 3);
+    let _ = BlockSize::<Invalid>::default();
 }
