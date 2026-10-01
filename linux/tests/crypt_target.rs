@@ -13,10 +13,13 @@ mod common;
 
 use common::Owned;
 
-use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
+use std::{
+    fs::OpenOptions,
+    io::{Read as _, Seek as _, SeekFrom, Write as _},
+};
 
-use devmap_crypt::dm::CryptTarget;
-use devmap_crypt::dm::Key;
+use devmap_linux::target::crypt::CryptTarget;
+use devmap_linux::target::crypt::Key;
 
 #[test]
 fn crypt_maps_a_device_and_round_trips_data() {
@@ -73,7 +76,11 @@ fn crypt_maps_a_device_and_round_trips_data() {
     assert_eq!(strip_key(&reported.to_string()), strip_key(&rendered));
 
     // Serve real I/O through the mapping to prove it is live.
-    let mut file = dev.open_rw().expect("open mapped dm-crypt device");
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dev.node_path())
+        .expect("open mapped dm-crypt device");
     let pattern: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
     file.write_all(&pattern).expect("write through dm-crypt");
     file.flush().expect("flush");

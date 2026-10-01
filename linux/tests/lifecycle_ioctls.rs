@@ -11,7 +11,29 @@
 mod common;
 
 use common::{LoopDevice, Owned, open_control};
-use devmap_zero::ZeroTarget;
+use devmap_linux::{
+    DevId,
+    device::Status,
+    target::{EncodeError, Target, Version, zero::ZeroTarget},
+};
+
+struct LinearTarget {
+    device: DevId,
+    offset: u64,
+}
+
+impl Target for LinearTarget {
+    const NAME: &'static str = "linear";
+    type Table = String;
+    type Info = String;
+
+    fn encode(&self, version: Version) -> Result<String, EncodeError> {
+        if version.major != 1 {
+            return Err(EncodeError { version });
+        }
+        Ok(format!("{} {}", self.device, self.offset))
+    }
+}
 
 #[test]
 fn deps_reports_the_devices_the_table_opens() {
@@ -25,11 +47,13 @@ fn deps_reports_the_devices_the_table_opens() {
     let name = format!("devmap-test-deps-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add_raw(
+        .add(
             0,
             8 * 1024 * 1024 / 512,
-            "linear",
-            &format!("{} 0", backing_device.id()),
+            LinearTarget {
+                device: backing_device.id(),
+                offset: 0,
+            },
         )
         .expect("add linear")
         .load()
@@ -65,7 +89,7 @@ fn deps_is_empty_for_a_target_that_opens_no_devices() {
 }
 
 #[test]
-fn clear_inactive_table_discards_the_staged_table() {
+fn clear_discards_the_staged_table() {
     let Some(control) = open_control() else {
         return;
     };
@@ -81,7 +105,7 @@ fn clear_inactive_table_discards_the_staged_table() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
     assert!(
-        dev.status().expect("status").has_active_table(),
+        dev.status().expect("status").flags & Status::ACTIVE_TABLE != 0,
         "the resumed table is active"
     );
 
@@ -92,26 +116,26 @@ fn clear_inactive_table_discards_the_staged_table() {
         .load()
         .expect("DM_TABLE_LOAD (staged)");
     assert!(
-        dev.status().expect("status").has_inactive_table(),
+        dev.status().expect("status").flags & Status::INACTIVE_TABLE != 0,
         "the staged table is inactive"
     );
 
-    dev.clear_inactive_table()
+    dev.clear()
         .expect("DM_TABLE_CLEAR must discard the staged table");
 
     let status = dev.status().expect("status");
     assert!(
-        !status.has_inactive_table(),
+        status.flags & Status::INACTIVE_TABLE == 0,
         "the staged table must be gone after a clear"
     );
     assert!(
-        status.has_active_table(),
+        status.flags & Status::ACTIVE_TABLE != 0,
         "clearing the inactive table must leave the active one alone"
     );
 }
 
 #[test]
-fn clear_inactive_table_is_a_no_op_with_nothing_staged() {
+fn clear_is_a_no_op_with_nothing_staged() {
     let Some(control) = open_control() else {
         return;
     };
@@ -126,9 +150,12 @@ fn clear_inactive_table_is_a_no_op_with_nothing_staged() {
     dev.resume().expect("resume");
 
     // Nothing is staged; clearing must succeed rather than error.
-    dev.clear_inactive_table()
+    dev.clear()
         .expect("clearing with nothing staged is not an error");
-    assert!(!dev.status().expect("status").has_inactive_table());
+    assert_eq!(
+        dev.status().expect("status").flags & Status::INACTIVE_TABLE,
+        0
+    );
 }
 
 #[test]
@@ -225,12 +252,12 @@ fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
 }
 
 #[test]
-fn list_versions_reports_the_targets_the_kernel_has_registered() {
+fn list_targets_reports_the_targets_the_kernel_has_registered() {
     let Some(control) = open_control() else {
         return;
     };
 
-    let versions = control.list_versions().expect("DM_LIST_VERSIONS");
+    let versions: Vec<_> = control.versions().expect("DM_LIST_VERSIONS").collect();
     assert!(
         !versions.is_empty(),
         "a kernel with device-mapper has at least one target registered"
@@ -238,18 +265,18 @@ fn list_versions_reports_the_targets_the_kernel_has_registered() {
     // dm-zero and dm-linear are built into any dm-capable kernel that can
     // run the rest of this suite.
     for expected in ["zero", "linear"] {
-        let found = versions.iter().find(|t| t.name == expected);
+        let found = versions.iter().find(|(name, _)| name == expected);
         let target = found.unwrap_or_else(|| panic!("{expected} must be registered: {versions:?}"));
         assert!(
-            target.version[0] >= 1,
+            target.1.major >= 1,
             "{expected} version looks unset: {:?}",
-            target.version
+            target.1
         );
     }
 }
 
 #[test]
-fn add_raw_loads_a_table_line_from_strings() {
+fn a_custom_target_loads_a_table_line() {
     let Some(control) = open_control() else {
         return;
     };
@@ -257,14 +284,19 @@ fn add_raw_loads_a_table_line_from_strings() {
     let backing = LoopDevice::create("addraw", 8 * 1024 * 1024);
     let backing_device = control.by_node(&backing.path).expect("by_node backing");
 
-    // Build the linear row as raw strings — the dmsetup-style path, no
-    // typed target involved.
     let params = format!("{} 0", backing_device.id());
     let name = format!("devmap-test-addraw-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     dev.builder()
-        .add_raw(0, 8 * 1024 * 1024 / 512, "linear", &params)
-        .expect("add_raw linear")
+        .add(
+            0,
+            8 * 1024 * 1024 / 512,
+            LinearTarget {
+                device: backing_device.id(),
+                offset: 0,
+            },
+        )
+        .expect("add linear")
         .load()
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("resume");
@@ -272,12 +304,11 @@ fn add_raw_loads_a_table_line_from_strings() {
     // The kernel accepts it and reads the same line back.
     let rows: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].type_name(), "linear");
-    assert_eq!(rows[0].params(), params);
+    assert_eq!(rows[0].parse::<LinearTarget>().unwrap(), params.clone());
 }
 
 #[test]
-fn wait_event_returns_at_once_when_the_counter_already_differs() {
+fn wait_returns_at_once_when_the_counter_already_differs() {
     let Some(control) = open_control() else {
         return;
     };
@@ -295,14 +326,11 @@ fn wait_event_returns_at_once_when_the_counter_already_differs() {
     // current counter, so a value that differs returns immediately. This
     // is the same path a caller hits when an event fired between reading
     // the status and waiting on it, and it keeps the test from hanging.
-    let event_nr = dev.status().expect("status").event_nr();
-    let status = dev
-        .wait_event(event_nr.wrapping_add(1))
-        .expect("DM_DEV_WAIT");
+    let event_nr = dev.status().expect("status").event_nr;
+    let status = dev.wait(event_nr.wrapping_add(1)).expect("DM_DEV_WAIT");
     assert_eq!(
-        status.event_nr(),
-        event_nr,
+        status.event_nr, event_nr,
         "wait returns the device's real counter, not the value waited on"
     );
-    assert!(status.has_active_table());
+    assert_ne!(status.flags & Status::ACTIVE_TABLE, 0);
 }

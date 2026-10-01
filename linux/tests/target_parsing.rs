@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use devmap_core::parse::Error;
+use devmap_linux::ParseError as Error;
 
 fn row<T: FromStr<Err = Error> + Display + Debug + PartialEq>(
     text: &str,
@@ -40,32 +40,30 @@ fn reject<T: FromStr<Err = Error>>(cases: &[&str]) {
 
 #[test]
 fn table_parsers_preserve_required_optional_and_trailing_fields() {
-    row::<devmap_crypt::dm::CryptTarget>(
+    row::<devmap_linux::target::crypt::CryptTarget>(
         "aes-xts-plain64 :64:logon:example:volume 0 7:0 0 1 allow_discards",
         &[5],
     );
-    row::<devmap_snapshot::dm::SnapshotTarget>("7:0 7:1 PO 32", &[]);
+    row::<devmap_linux::target::snapshot::SnapshotTarget>("7:0 7:1 PO 32", &[]);
 }
 
 #[test]
 fn status_parsers_preserve_required_optional_and_trailing_fields() {
-    row::<devmap_snapshot::dm::Info>("12/64 8", &[]);
-    row::<devmap_verity::Info>("V -", &[]);
+    row::<devmap_linux::target::snapshot::Info>("12/64 8", &[]);
 }
 
 #[test]
 fn malformed_optional_fields_are_not_treated_as_absent() {
-    reject::<devmap_crypt::dm::CryptTarget>(&[
+    reject::<devmap_linux::target::crypt::CryptTarget>(&[
         "aes-xts-plain64 - 0 7:0 0 bad",
         "aes-xts-plain64 - 0 7:0 0 1",
         "aes-xts-plain64 - 0 7:0 0 1 unknown",
     ]);
-    reject::<devmap_verity::Info>(&["V bad"]);
 }
 
 #[test]
 fn counted_options_require_exactly_the_declared_fields() {
-    reject::<devmap_crypt::dm::CryptTarget>(&[
+    reject::<devmap_linux::target::crypt::CryptTarget>(&[
         "aes-xts-plain64 - 0 7:0 0 0 allow_discards",
         "aes-xts-plain64 - 0 7:0 0 2 allow_discards",
     ]);
@@ -74,16 +72,16 @@ fn counted_options_require_exactly_the_declared_fields() {
 #[test]
 fn special_statuses_remain_whole_row_alternatives() {
     for text in ["Invalid", "Overflow", "Unknown"] {
-        row::<devmap_snapshot::dm::Info>(text, &[]);
+        row::<devmap_linux::target::snapshot::Info>(text, &[]);
     }
-    let merge: devmap_snapshot::dm::Info = " Merge failed ".parse().unwrap();
-    assert_eq!(merge, devmap_snapshot::dm::Info::MergeFailed);
+    let merge: devmap_linux::target::snapshot::Info = " Merge failed ".parse().unwrap();
+    assert_eq!(merge, devmap_linux::target::snapshot::Info::MergeFailed);
     assert_eq!(merge.to_string(), "Merge failed");
-    reject::<devmap_snapshot::dm::Info>(&["Merge", "Merge failed extra"]);
+    reject::<devmap_linux::target::snapshot::Info>(&["Merge", "Merge failed extra"]);
 }
 
 #[test]
 fn usage_fields_do_not_gain_new_relationship_constraints() {
-    row::<devmap_snapshot::dm::Info>("0/0 0", &[]);
-    reject::<devmap_snapshot::dm::Info>(&["1/2/3 0"]);
+    row::<devmap_linux::target::snapshot::Info>("0/0 0", &[]);
+    reject::<devmap_linux::target::snapshot::Info>(&["1/2/3 0"]);
 }

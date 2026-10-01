@@ -5,9 +5,19 @@
 mod common;
 
 use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
-use devmap_snapshot::dm as snapshot;
-use devmap_snapshot::dm::SnapshotTarget;
+use devmap_linux::target::snapshot;
+use devmap_linux::target::snapshot::SnapshotTarget;
 use std::io::Write;
+use std::num::NonZero;
+
+fn snapshot_target(origin: devmap_linux::DevId, cow: devmap_linux::DevId) -> SnapshotTarget {
+    SnapshotTarget::new(
+        origin,
+        cow,
+        snapshot::Persistence::PersistentOverflow,
+        snapshot::ChunkSize::new(NonZero::new(8).unwrap()).unwrap(),
+    )
+}
 
 /// Exercises `snapshot::SnapshotMergeTarget`'s real handover procedure end to
 /// end: a `snapshot-origin` device, a `snapshot` device sharing its COW
@@ -66,11 +76,7 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            SnapshotTarget {
-                origin: origin_backing_device.id(),
-                cow: cow_device.id(),
-                chunk_size_sectors: 8,
-            },
+            snapshot_target(origin_backing_device.id(), cow_device.id()),
         )
         .expect("add snapshot")
         .load()
@@ -95,11 +101,11 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
         .add(
             0,
             origin_len_sectors,
-            snapshot::SnapshotMergeTarget(SnapshotTarget {
-                origin: origin_backing_device.id(),
-                cow: cow_device.id(),
-                chunk_size_sectors: 8,
-            }),
+            snapshot::SnapshotMergeTarget::try_from(snapshot_target(
+                origin_backing_device.id(),
+                cow_device.id(),
+            ))
+            .unwrap(),
         )
         .expect("add snapshot-merge")
         .load()
@@ -113,16 +119,18 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let status = origin.status().expect("DM_DEV_STATUS");
-        assert_eq!(status.target_count(), 1);
+        assert_eq!(status.target_count, 1);
         let reported: Vec<_> = origin.info().expect("DM_TABLE_STATUS").collect();
         // The merge is done once nothing but metadata is left allocated.
-        if let Some(snapshot::Info::Usage {
-            allocated_sectors,
-            metadata_sectors,
-            ..
-        }) = reported[0].parse::<snapshot::SnapshotMergeTarget>()
-            && allocated_sectors == metadata_sectors
-        {
+        let complete = matches!(
+            reported[0].parse::<snapshot::SnapshotMergeTarget>(),
+            Ok(snapshot::Info::Usage {
+                allocated_sectors,
+                metadata_sectors,
+                ..
+            }) if allocated_sectors == metadata_sectors
+        );
+        if complete {
             break;
         }
         assert!(

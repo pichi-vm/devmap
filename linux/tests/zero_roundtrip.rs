@@ -15,11 +15,14 @@
 
 mod common;
 
-use std::io::Read as _;
+use std::{
+    fs::{File, OpenOptions},
+    io::Read as _,
+};
 
 use common::{Owned, open_control};
-use devmap_core::parse::{DevId, Empty};
-use devmap_zero::ZeroTarget;
+use devmap_linux::target::zero::ZeroTarget;
+use devmap_linux::{DevId, device::Status, target::Empty};
 
 #[test]
 fn create_load_resume_read_zeros_remove() {
@@ -37,8 +40,7 @@ fn create_load_resume_read_zeros_remove() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let mut file = dev
-        .open()
+    let mut file = File::open(dev.node_path())
         .unwrap_or_else(|e| panic!("open {} ({}): {e}", dev.node_path().display(), dev.id()));
 
     let mut buf = [0xFFu8; 4096];
@@ -48,13 +50,10 @@ fn create_load_resume_read_zeros_remove() {
         "dm-zero must read back as all zeros"
     );
 
-    // dm-zero has no `.status` callback at all, so the kernel emits an
-    // empty params field for it — which is exactly what `Empty` accepts
-    // and nothing else.
+    // dm-zero has no `.status` callback, so its info row parses as Empty.
     let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
     assert_eq!(info.len(), 1);
-    assert_eq!(info[0].params(), "");
-    assert_eq!(info[0].parse::<ZeroTarget>(), Some(Empty));
+    assert_eq!(info[0].parse::<ZeroTarget>().unwrap(), Empty);
 
     // The test harness's `Owned` guard drops here and removes the mapping;
     // the library itself never removes anything implicitly.
@@ -78,21 +77,21 @@ fn suspend_resume_round_trips() {
 
     let status = dev.status().expect("DM_DEV_STATUS");
     assert!(
-        !status.is_suspended(),
+        status.flags & Status::SUSPENDED == 0,
         "device should not be suspended after resume()"
     );
 
     dev.suspend().expect("DM_DEV_SUSPEND (suspend)");
     let status = dev.status().expect("DM_DEV_STATUS");
     assert!(
-        status.is_suspended(),
+        status.flags & Status::SUSPENDED != 0,
         "device should be suspended after suspend()"
     );
 
     dev.resume().expect("DM_DEV_SUSPEND (resume again)");
     let status = dev.status().expect("DM_DEV_STATUS");
     assert!(
-        !status.is_suspended(),
+        status.flags & Status::SUSPENDED == 0,
         "device should not be suspended after resuming again"
     );
 }
@@ -114,8 +113,8 @@ fn status_reports_sane_values_for_a_fresh_device() {
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let status = dev.status().expect("DM_DEV_STATUS");
-    assert_eq!(status.target_count(), 1);
-    assert!(status.open_count() >= 0);
+    assert_eq!(status.target_count, 1);
+    assert!(status.open_count >= 0);
 }
 
 #[test]
@@ -139,8 +138,7 @@ fn table_status_reports_back_the_loaded_target() {
     let row = &reported[0];
     assert_eq!(row.start(), 0);
     assert_eq!(row.length(), 8192);
-    assert_eq!(row.type_name(), "zero");
-    assert_eq!(row.parse::<ZeroTarget>(), Some(ZeroTarget));
+    assert_eq!(row.parse::<ZeroTarget>().unwrap(), ZeroTarget);
 }
 
 #[test]
@@ -159,7 +157,7 @@ fn list_reports_the_created_device() {
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
     let found = control
-        .list()
+        .devices()
         .expect("DM_LIST_DEVICES")
         .find(|(listed_name, _)| *listed_name == name)
         .unwrap_or_else(|| panic!("device {name} not found in DM_LIST_DEVICES output"));
@@ -189,7 +187,7 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
         by_device
             .status()
             .expect("DM_DEV_STATUS via by_device")
-            .target_count(),
+            .target_count,
         1
     );
 
@@ -214,7 +212,7 @@ fn by_name_finds_device_and_reports_status() {
 
     let (device, status) = control.by_name(&name).expect("DM_DEV_STATUS by_name");
     assert_eq!(device.id(), dev.id());
-    assert_eq!(status.target_count(), 1);
+    assert_eq!(status.target_count, 1);
 }
 
 #[test]
@@ -243,7 +241,7 @@ fn dropping_a_handle_leaves_the_device_alone() {
         .expect("dropping a handle must not remove the device");
 
     // Removal is explicit, and it reports its own success.
-    survivor.remove().expect("DM_DEV_REMOVE");
+    survivor.remove(false).expect("DM_DEV_REMOVE");
     assert!(
         control.by_name(&name).is_err(),
         "the device is gone once it is actually removed"
@@ -251,17 +249,63 @@ fn dropping_a_handle_leaves_the_device_alone() {
 }
 
 #[test]
+fn guard_drop_removes_but_disarm_preserves() {
+    let Some(control) = open_control() else {
+        return;
+    };
+
+    let dropped = format!("devmap-test-guard-drop-{}", std::process::id());
+    drop(control.create(&dropped).expect("DM_DEV_CREATE").guard());
+    assert!(control.by_name(&dropped).is_err());
+
+    let disarmed = format!("devmap-test-guard-disarm-{}", std::process::id());
+    let device = control
+        .create(&disarmed)
+        .expect("DM_DEV_CREATE")
+        .guard()
+        .disarm();
+    control
+        .by_name(&disarmed)
+        .expect("disarmed device remains persistent");
+    device.remove(false).expect("DM_DEV_REMOVE");
+}
+
+#[test]
+fn guard_defer_rolls_back_when_opening_fails() {
+    let Some(control) = open_control() else {
+        return;
+    };
+
+    let name = format!("devmap-test-guard-rollback-{}", std::process::id());
+    let guard = control.create(&name).expect("DM_DEV_CREATE").guard();
+    guard
+        .builder()
+        .add(0, 8192, ZeroTarget)
+        .expect("add zero")
+        .load()
+        .expect("DM_TABLE_LOAD");
+    guard.resume().expect("DM_DEV_SUSPEND (resume)");
+
+    let error = guard
+        .defer(&OpenOptions::new())
+        .expect_err("options without access mode must fail");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        control.by_name(&name).is_err(),
+        "failed defer must roll back the mapping"
+    );
+}
+
+#[test]
 fn deferred_removal_reclaims_a_device_that_is_still_open() {
-    // The kernel's autoremoval, and the reason a Drop guard isn't needed:
-    // `remove_deferred` succeeds against an open device and the kernel
-    // tears it down when the last holder closes it. An immediate `remove`
-    // in the same position returns EBUSY.
+    // `Guard::defer` opens the device before requesting deferred removal, so
+    // the returned file owns the remainder of the mapping's lifetime.
     let Some(control) = open_control() else {
         return;
     };
 
     let name = format!("devmap-test-deferred-{}", std::process::id());
-    let dev = control.create(&name).expect("DM_DEV_CREATE");
+    let dev = control.create(&name).expect("DM_DEV_CREATE").guard();
     dev.builder()
         .add(0, 8192, ZeroTarget)
         .expect("add zero")
@@ -269,29 +313,25 @@ fn deferred_removal_reclaims_a_device_that_is_still_open() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let holder = match dev.open() {
+    // Held open, an immediate removal would be refused rather than silently
+    // deferred. The guard has not changed kernel removal policy yet.
+    let file = File::open(dev.node_path()).expect("open active device");
+    let err = dev
+        .clone()
+        .remove(false)
+        .expect_err("an open device cannot be removed immediately");
+    assert_eq!(err.kind(), std::io::ErrorKind::ResourceBusy);
+    drop(file);
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    let holder = match dev.defer(&options) {
         Ok(file) => file,
         Err(e) => {
-            eprintln!(
-                "skip: {} not available yet ({e})",
-                dev.node_path().display()
-            );
-            dev.remove_deferred().ok();
-            return;
+            panic!("defer active device: {e}");
         }
     };
 
-    // Held open, so an immediate removal must be refused rather than
-    // silently deferred.
-    let err = dev
-        .clone()
-        .remove()
-        .expect_err("an open device cannot be removed immediately");
-    assert_eq!(err.kind(), std::io::ErrorKind::ResourceBusy);
-
-    // Deferred removal is accepted, and the device survives until the
-    // holder lets go.
-    dev.remove_deferred().expect("DM_DEV_REMOVE (deferred)");
     control
         .by_name(&name)
         .expect("still present while a holder has it open");

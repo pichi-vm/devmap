@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! The trait-based dm target model.
+//! Build device-mapper tables and read their target rows.
 //!
-//! [`Target`] names a kernel target type and the two types its status can
-//! be read as — [`Target::Table`] and [`Target::Info`], one per kernel
-//! status grammar. Each concrete target (in the target crates) is a struct
-//! implementing it, with [`std::fmt::Display`] as the param encoder
-//! (required only where used, never as a supertrait).
-//!
-//! [`TableBuilder`] streams targets into a single `DM_TABLE_LOAD` buffer.
-//! [`Row`] is one row of a `DM_TABLE_STATUS` response, tagged by [`mode`]
-//! ([`mode::Spec`] for the table, [`mode::Info`] for runtime status); its
-//! parameters are available through mode-checked [`Row::parse`] or as raw
-//! text through [`Row::params`].
+//! [`TableBuilder`] loads targets implementing [`Target`]. The kernel later
+//! reports each target as a [`Row`]: [`TableMode`] rows contain construction
+//! parameters, while [`InfoMode`] rows contain runtime status. Use
+//! [`Row::parse`] with a target type to interpret either response.
 
-use std::fmt::{self, Write as _};
+use std::collections::HashMap;
+use std::fmt;
 use std::fs::File;
 use std::io;
 use std::marker::PhantomData;
@@ -25,135 +19,117 @@ use std::sync::Arc;
 
 use zerocopy::{FromBytes, IntoBytes};
 
+use crate::control::target_version;
 use crate::device::check_version;
 use crate::header::DmHeader;
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TABLE_LOAD, DM_TARGET_SPEC_SIZE, dm_target_spec_raw};
 
-use devmap_core::Target;
-use devmap_core::parse::DevId;
+use crate::DevId;
+use crate::target::{Parse, Target, Version};
 
-/// Mode markers distinguishing the two `DM_TABLE_STATUS` payloads.
-pub mod mode {
-    /// `STATUSTYPE_TABLE`: the mapping's parameters, read as
-    /// [`Target::Table`](devmap_core::Target::Table).
-    #[derive(Debug)]
-    pub enum Spec {}
-    /// `STATUSTYPE_INFO`: per-target runtime status.
-    #[derive(Debug)]
-    pub enum Info {}
+/// `STATUSTYPE_TABLE`: the mapping's construction parameters.
+#[derive(Debug)]
+pub enum TableMode {}
 
-    mod sealed {
-        pub trait Sealed {}
-        impl Sealed for super::Spec {}
-        impl Sealed for super::Info {}
-    }
+/// `STATUSTYPE_INFO`: per-target runtime status.
+#[derive(Debug)]
+pub enum InfoMode {}
 
-    /// Sealed marker implemented only by [`Spec`] and [`Info`].
-    pub trait Mode: sealed::Sealed {}
-    impl Mode for Spec {}
-    impl Mode for Info {}
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::TableMode {}
+    impl Sealed for super::InfoMode {}
 }
 
-/// One `<start> <length> <target>` row of a `DM_TABLE_STATUS` response,
-/// tagged by its [`mode`]. Read it with the mode-checked [`Row::parse`],
-/// which returns the row's table type ([`mode::Spec`]) or its runtime
-/// status ([`mode::Info`]); [`Row::params`] is the untyped fallback for
-/// targets for which the caller has no typed decoder.
+/// Sealed marker distinguishing the two `DM_TABLE_STATUS` payloads.
+pub trait Mode: sealed::Sealed {}
+impl Mode for TableMode {}
+impl Mode for InfoMode {}
+
+/// A target's sector range and kernel response, returned by
+/// [`Device::table`](crate::device::Device::table) or
+/// [`Device::info`](crate::device::Device::info).
 ///
-/// The mode tag is load-bearing: the kernel answers the two status
-/// requests in two different grammars, so a [`mode::Info`] row exposes
-/// only `parse::<T>() -> Option<T::Info>` and never the table type. This
-/// will not compile:
-///
-/// ```compile_fail
-/// # use devmap_linux::Row;
-/// use devmap_linux::mode;
-/// use devmap_crypt::dm::CryptTarget;
-/// fn wrong(row: Row<mode::Info>) {
-///     // `parse::<CryptTarget>()` on an Info row yields `Option<CryptTarget::Info>`,
-///     // and annotating it `Option<CryptTarget>` demands the table type that
-///     // the Info mode never provides — a type error.
-///     let _table: Option<CryptTarget> = row.parse::<CryptTarget>();
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Row<M: mode::Mode> {
+/// Call [`parse`](Row::parse) with the expected [`Target`] type. A table row
+/// yields `T::Table`; an info row yields `T::Info`. A different target name
+/// produces `InvalidInput`; an undecodable response produces `InvalidData`.
+/// The kernel target version is supplied to the target's parser automatically.
+/// Raw response parameters are not exposed; `Debug` redacts them.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Row<M: Mode> {
     start: u64,
     length: u64,
     type_name: String,
     params: String,
+    version: Version,
     _mode: PhantomData<M>,
 }
 
-impl<M: mode::Mode> Row<M> {
-    /// The row's starting sector.
+impl<M: Mode> fmt::Debug for Row<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Row")
+            .field("start", &self.start)
+            .field("length", &self.length)
+            .field("type_name", &self.type_name)
+            .field("version", &self.version)
+            .field("params", &"<redacted>")
+            .finish()
+    }
+}
+
+impl<M: Mode> Row<M> {
+    /// First sector covered by this row.
     pub fn start(&self) -> u64 {
         self.start
     }
-    /// The row's length in sectors.
+    /// Number of sectors covered by this row.
     pub fn length(&self) -> u64 {
         self.length
     }
-    /// The kernel target type name for this row.
-    pub fn type_name(&self) -> &str {
-        &self.type_name
+
+    fn check_target<T: Target>(&self) -> io::Result<()> {
+        if self.type_name == T::NAME {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("expected target {}, found {}", T::NAME, self.type_name),
+            ))
+        }
     }
-    /// The raw params string, exactly as the kernel wrote it.
+}
+
+impl Row<TableMode> {
+    /// Read this table row as target `T`'s table type ([`Target::Table`]).
     ///
-    /// [`parse`](Row::parse) is the typed path and should be preferred:
-    /// it checks the target type name and hands back a modelled value. This
-    /// is also the fallback for a target or parameter set without a typed
-    /// decoder, including targets from a newer kernel. Raw crypt table text
-    /// can contain key material and must not be logged.
-    pub fn params(&self) -> &str {
-        &self.params
+    /// Returns `InvalidInput` for a different target name or `InvalidData`
+    /// when the target cannot parse the reported parameters or version.
+    pub fn parse<T: Target>(&self) -> io::Result<T::Table> {
+        self.check_target::<T>()?;
+        <T::Table as Parse<TableMode>>::parse(&self.params, self.version)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 
-impl Row<mode::Spec> {
-    /// Read this table row as target `T`'s table type
-    /// ([`Target::Table`]), or `None` on a type-name or parse mismatch.
-    pub fn parse<T: Target>(&self) -> Option<T::Table> {
-        if self.type_name == T::NAME {
-            self.params.parse::<T::Table>().ok()
-        } else {
-            None
-        }
-    }
-}
-
-impl Row<mode::Info> {
-    /// Parse this status row as target `T`'s runtime status
-    /// ([`Target::Info`]), or `None` on a type-name or parse mismatch.
-    pub fn parse<T: Target>(&self) -> Option<T::Info> {
-        if self.type_name == T::NAME {
-            self.params.parse::<T::Info>().ok()
-        } else {
-            None
-        }
-    }
-}
-
-impl<M: mode::Mode> fmt::Display for Row<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.params.is_empty() {
-            write!(f, "{} {} {}", self.start, self.length, self.type_name)
-        } else {
-            write!(
-                f,
-                "{} {} {} {}",
-                self.start, self.length, self.type_name, self.params
-            )
-        }
+impl Row<InfoMode> {
+    /// Parse this status row as target `T`'s runtime status ([`Target::Info`]).
+    ///
+    /// Returns `InvalidInput` for a different target name or `InvalidData`
+    /// when the target cannot parse the reported status or version.
+    pub fn parse<T: Target>(&self) -> io::Result<T::Info> {
+        self.check_target::<T>()?;
+        <T::Info as Parse<InfoMode>>::parse(&self.params, self.version)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 
 /// A streaming builder for `DM_TABLE_LOAD`: each [`add`](TableBuilder::add)
 /// renders a target directly into one growing buffer. Terminate with
-/// [`load`](TableBuilder::load). Obtained from [`crate::Device::builder`].
+/// [`load`](TableBuilder::load). Obtained from [`crate::device::Device::builder`].
 #[derive(Debug)]
 pub struct TableBuilder {
     control: Arc<File>,
+    versions: HashMap<String, Version>,
     buf: Vec<u8>,
     count: u32,
     last_spec_off: Option<usize>,
@@ -165,6 +141,7 @@ impl TableBuilder {
         buf.extend_from_slice(DmHeader::by_dev(u64::from(dev)).as_bytes());
         Self {
             control,
+            versions: HashMap::new(),
             buf,
             count: 0,
             last_spec_off: None,
@@ -192,45 +169,34 @@ impl TableBuilder {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` if `T::NAME` is invalid, or if the target
-    /// renders an interior NUL into its params (which would truncate the
-    /// table line).
+    /// `Unsupported` if the target cannot encode the installed version; `InvalidInput`
+    /// if `T::NAME` is invalid or the encoded params contain an interior NUL.
     // Table buffers never approach u32::MAX; the kernel's own fields are u32.
-    // `target` is taken by value (the builder owns each row's rendering) even
-    // though it's only read through `Display`.
+    // `target` is taken by value: the builder consumes its encoded row.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn add<T: Target + fmt::Display>(
-        self,
-        start: u64,
-        length: u64,
-        target: T,
-    ) -> io::Result<Self> {
-        let mut params = String::new();
-        write!(params, "{target}").expect("Display into String is infallible");
-        self.add_raw(start, length, T::NAME, &params)
+    pub fn add<T: Target>(mut self, start: u64, length: u64, target: T) -> io::Result<Self> {
+        Self::check_name(T::NAME)?;
+        let version = self.resolve_version(T::NAME, target_version)?;
+        let params = target.encode(version).map_err(|error| {
+            io::Error::new(io::ErrorKind::Unsupported, format!("{}: {error}", T::NAME))
+        })?;
+        self.push_row(start, length, T::NAME, &params)
     }
 
-    /// Append a table row from a raw target type name and params string,
-    /// for a target this crate doesn't model — or for loading a table line
-    /// whose type is only known at runtime (a `dmsetup`-style front end).
-    ///
-    /// Prefer [`add`](TableBuilder::add) with a typed [`Target`], which
-    /// renders the params for you; this is the untyped escape hatch.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` if `type_name` is empty, too long, or contains
-    /// whitespace or a NUL, or if `params` contains a NUL (either would
-    /// corrupt the table line the kernel parses).
-    // Table buffers never approach u32::MAX; the kernel's own fields are u32.
-    #[allow(clippy::cast_possible_truncation)]
-    pub fn add_raw(
-        mut self,
-        start: u64,
-        length: u64,
-        type_name: &str,
-        params: &str,
-    ) -> io::Result<Self> {
+    fn resolve_version(
+        &mut self,
+        name: &str,
+        query: impl FnOnce(&File, &str) -> io::Result<Version>,
+    ) -> io::Result<Version> {
+        if let Some(version) = self.versions.get(name) {
+            return Ok(*version);
+        }
+        let version = query(&self.control, name)?;
+        self.versions.insert(name.to_owned(), version);
+        Ok(version)
+    }
+
+    fn check_name(type_name: &str) -> io::Result<()> {
         let name = type_name.as_bytes();
         if name.is_empty()
             || name.len() >= DM_MAX_TYPE_NAME
@@ -241,6 +207,21 @@ impl TableBuilder {
                 format!("invalid dm target type name: {type_name:?}"),
             ));
         }
+        Ok(())
+    }
+
+    /// Append a validated target row to the ioctl buffer.
+    // Table buffers never approach u32::MAX; the kernel's own fields are u32.
+    #[allow(clippy::cast_possible_truncation)]
+    fn push_row(
+        mut self,
+        start: u64,
+        length: u64,
+        type_name: &str,
+        params: &str,
+    ) -> io::Result<Self> {
+        Self::check_name(type_name)?;
+        let name = type_name.as_bytes();
         if params.as_bytes().contains(&0) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -278,11 +259,7 @@ impl TableBuilder {
     }
 
     /// Issue `DM_TABLE_LOAD`, staging the accumulated table into the
-    /// device's inactive slot. Activate with [`crate::Device::resume`].
-    ///
-    /// # Errors
-    ///
-    /// The kernel's `io::Error` if it rejects the table.
+    /// device's inactive slot. Activate with [`crate::device::Device::resume`].
     // The `mut_from_prefix` expects never fire: the buffer always begins with
     // a `DmHeader` (written in `new`), so this is not a real panic path.
     #[allow(clippy::cast_possible_truncation, clippy::missing_panics_doc)]
@@ -303,13 +280,13 @@ impl TableBuilder {
     }
 }
 
-/// Parses a `DM_TABLE_STATUS` response into [`Row`]s. Not exported —
-/// `Device::table`/`Device::info` return `impl Iterator<Item = Row<_>>`.
+/// Parses a `DM_TABLE_STATUS` response into raw rows. The device resolves
+/// each target version before exposing public [`Row`]s.
 ///
 /// `dm_target_spec.next` here is the byte offset from the *first* spec's
 /// start to the next one (the read-direction convention, opposite the
 /// write side — see `<linux/dm-ioctl.h>`).
-pub(crate) struct TableStatusIter<M: mode::Mode> {
+pub(crate) struct TableStatusIter<M: Mode> {
     buf: Vec<u8>,
     first: usize,
     offset: usize,
@@ -317,7 +294,7 @@ pub(crate) struct TableStatusIter<M: mode::Mode> {
     _mode: PhantomData<M>,
 }
 
-impl<M: mode::Mode> TableStatusIter<M> {
+impl<M: Mode> TableStatusIter<M> {
     /// `data_start` is the kernel-reported offset of the first spec (the
     /// base for read-side `next`); callers pass it clamped to `buf.len()`.
     pub(crate) fn new(buf: Vec<u8>, data_start: usize, target_count: u32) -> Self {
@@ -331,8 +308,8 @@ impl<M: mode::Mode> TableStatusIter<M> {
     }
 }
 
-impl<M: mode::Mode> Iterator for TableStatusIter<M> {
-    type Item = Row<M>;
+impl<M: Mode> Iterator for TableStatusIter<M> {
+    type Item = RawRow<M>;
 
     // The fixed-width `try_into().unwrap()`s below operate on a slice bounded
     // to exactly `DM_TARGET_SPEC_SIZE`, so they cannot panic.
@@ -373,7 +350,7 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
             self.first.saturating_add(next as usize)
         };
 
-        Some(Row {
+        Some(RawRow {
             start: sector_start,
             length,
             type_name,
@@ -383,17 +360,207 @@ impl<M: mode::Mode> Iterator for TableStatusIter<M> {
     }
 }
 
+/// A parsed status row before the target version has been resolved.
+pub(crate) struct RawRow<M: Mode> {
+    start: u64,
+    length: u64,
+    type_name: String,
+    params: String,
+    _mode: PhantomData<M>,
+}
+
+impl<M: Mode> RawRow<M> {
+    pub(crate) fn type_name(&self) -> &str {
+        &self.type_name
+    }
+
+    pub(crate) fn with_version(self, version: Version) -> Row<M> {
+        Row {
+            start: self.start,
+            length: self.length,
+            type_name: self.type_name,
+            params: self.params,
+            version,
+            _mode: PhantomData,
+        }
+    }
+}
+
+/// Resolve each distinct target type once before exposing typed rows.
+pub(crate) fn version_rows<M: Mode>(
+    raw: impl IntoIterator<Item = RawRow<M>>,
+    mut query: impl FnMut(&str) -> io::Result<Version>,
+) -> io::Result<Vec<Row<M>>> {
+    let mut versions = HashMap::new();
+    let mut rows = Vec::new();
+
+    for row in raw {
+        let name = row.type_name();
+        let version = if let Some(version) = versions.get(name) {
+            *version
+        } else {
+            let version = query(name)?;
+            versions.insert(name.to_owned(), version);
+            version
+        };
+        rows.push(row.with_version(version));
+    }
+
+    Ok(rows)
+}
+
 #[cfg(test)]
 #[allow(clippy::cast_possible_truncation)] // test fixtures: sizes are tiny, never near u32::MAX
 mod tests {
     use super::*;
-    use devmap_core::parse::Error;
-    use devmap_crypt::dm::CryptTarget;
+    use crate::ParseError as Error;
+    use crate::target::crypt::CryptTarget;
 
     /// An `Arc<File>` for a `TableBuilder` that never issues a real ioctl:
     /// the rendering/validation paths run entirely before `load`.
     fn dummy_control() -> Arc<File> {
         Arc::new(File::open("/dev/null").expect("/dev/null always exists"))
+    }
+
+    fn builder(dev: DevId) -> TableBuilder {
+        let mut builder = TableBuilder::new(dummy_control(), dev);
+        let version = Version::from([1, 0, 0]);
+        for name in ["zero", "nul-target", "custom-target", "0123456789abcde"] {
+            builder.versions.insert(name.to_owned(), version);
+        }
+        builder
+    }
+
+    fn status_rows<M: Mode>(bytes: Vec<u8>, count: u32) -> Vec<Row<M>> {
+        TableStatusIter::<M>::new(bytes, DmHeader::SIZE, count)
+            .map(|row| row.with_version(Version::from([1, 0, 0])))
+            .collect()
+    }
+
+    #[test]
+    fn status_rows_resolve_each_target_name_once() {
+        let (bytes, count) = synthetic_table_status_response(&[
+            (b"zero", ""),
+            (b"linear", "252:1 0"),
+            (b"zero", ""),
+        ]);
+        let raw = TableStatusIter::<TableMode>::new(bytes, DmHeader::SIZE, count);
+        let mut names = Vec::new();
+        let rows = version_rows(raw, |name| {
+            names.push(name.to_owned());
+            Ok(Version::from([1, 2, 3]))
+        })
+        .unwrap();
+
+        assert_eq!(names, ["zero", "linear"]);
+        assert_eq!(rows.len(), 3);
+        assert!(
+            rows.iter()
+                .all(|row| row.version == Version::from([1, 2, 3]))
+        );
+    }
+
+    #[test]
+    fn status_rows_propagate_version_lookup_failure() {
+        let (bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
+        let raw = TableStatusIter::<InfoMode>::new(bytes, DmHeader::SIZE, count);
+        let result = version_rows(raw, |_| Err(io::Error::other("lookup failed")));
+        assert!(matches!(result, Err(error) if error.to_string() == "lookup failed"));
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Dual(u32);
+
+    impl Parse<TableMode> for Dual {
+        type Error = Error;
+
+        fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
+            if version.major != 1 {
+                return Err(Error);
+            }
+            Ok(Self(text.strip_prefix("spec ").ok_or(Error)?.parse()?))
+        }
+    }
+
+    impl Parse<InfoMode> for Dual {
+        type Error = Error;
+
+        fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
+            if version.major != 1 {
+                return Err(Error);
+            }
+            Ok(Self(text.strip_prefix("info ").ok_or(Error)?.parse()?))
+        }
+    }
+
+    struct DualTarget;
+
+    impl Target for DualTarget {
+        const NAME: &'static str = "dual";
+        type Table = Dual;
+        type Info = Dual;
+
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok(String::new())
+        }
+    }
+
+    #[test]
+    fn row_parse_dispatches_by_mode_and_version() {
+        let (bytes, count) = synthetic_table_status_response(&[(b"dual", "spec 7")]);
+        let raw = TableStatusIter::<TableMode>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .unwrap();
+        let row = raw.with_version(Version::from([1, 0, 0]));
+        assert_eq!(row.parse::<DualTarget>().unwrap(), Dual(7));
+
+        let (bytes, count) = synthetic_table_status_response(&[(b"dual", "info 9")]);
+        let raw = TableStatusIter::<InfoMode>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .unwrap();
+        let row = raw.with_version(Version::from([1, 0, 0]));
+        assert_eq!(row.parse::<DualTarget>().unwrap(), Dual(9));
+
+        let (bytes, count) = synthetic_table_status_response(&[(b"dual", "spec 7")]);
+        let raw = TableStatusIter::<TableMode>::new(bytes, DmHeader::SIZE, count)
+            .next()
+            .unwrap();
+        assert_eq!(
+            raw.with_version(Version::from([2, 0, 0]))
+                .parse::<DualTarget>()
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn version_lookup_is_cached_by_target_name() {
+        let mut builder = TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap());
+        let expected = Version::from([1, 2, 3]);
+        assert_eq!(
+            builder
+                .resolve_version("zero", |_, _| Ok(expected))
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            builder
+                .resolve_version("zero", |_, _| panic!("second lookup must use cache"))
+                .unwrap(),
+            expected
+        );
+        assert_eq!(builder.versions.len(), 1);
+    }
+
+    #[test]
+    fn unsupported_target_version_is_rejected() {
+        let mut builder = builder(DevId::new(252, 1).unwrap());
+        builder
+            .versions
+            .insert("zero".to_owned(), Version::from([2, 0, 0]));
+        let result = builder.add(0, 8, crate::target::zero::ZeroTarget);
+        assert!(matches!(result, Err(error) if error.kind() == io::ErrorKind::Unsupported));
     }
 
     // --- Builder buffer layout -------------------------------------------
@@ -404,8 +571,8 @@ mod tests {
 
     #[test]
     fn buf_for_zero_target_has_correct_layout() {
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
-            .add(0, 8, devmap_zero::ZeroTarget)
+        let b = builder(DevId::new(252, 5).unwrap())
+            .add(0, 8, crate::target::zero::ZeroTarget)
             .expect("add zero");
         // header + (40 spec + 0 params + 1 NUL = 41 -> padded to 48).
         assert_eq!(b.buf.len(), DmHeader::SIZE + 48);
@@ -414,9 +581,9 @@ mod tests {
     #[test]
     fn read_only_sets_the_readonly_flag_on_the_header() {
         use zerocopy::FromBytes as _;
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
+        let b = builder(DevId::new(252, 5).unwrap())
             .read_only()
-            .add(0, 8, devmap_zero::ZeroTarget)
+            .add(0, 8, crate::target::zero::ZeroTarget)
             .expect("add zero");
         let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
         let header: &DmHeader = header;
@@ -430,8 +597,8 @@ mod tests {
     #[test]
     fn default_builder_does_not_set_readonly() {
         use zerocopy::FromBytes as _;
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 5).unwrap())
-            .add(0, 8, devmap_zero::ZeroTarget)
+        let b = builder(DevId::new(252, 5).unwrap())
+            .add(0, 8, crate::target::zero::ZeroTarget)
             .expect("add zero");
         let (header, _) = DmHeader::ref_from_prefix(&b.buf).expect("buf begins with a DmHeader");
         let header: &DmHeader = header;
@@ -440,8 +607,8 @@ mod tests {
 
     #[test]
     fn buf_for_linear_target_has_correct_layout_and_params() {
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .add_raw(0, 1024, "linear", "252:5 0")
+        let b = builder(DevId::new(252, 9).unwrap())
+            .push_row(0, 1024, "linear", "252:5 0")
             .expect("add linear");
         let params = "252:5 0";
         let aligned = (DM_TARGET_SPEC_SIZE + params.len() + 1).next_multiple_of(8);
@@ -459,52 +626,15 @@ mod tests {
     }
 
     #[test]
-    fn buf_for_verity_target_has_correct_layout_and_params() {
-        let t = devmap_verity::Options::default()
-            .target(
-                devmap_verity::Scheme::default()
-                    .with_salt(&[0x55; 32])
-                    .unwrap(),
-                devmap_verity::Shape::new(std::num::NonZeroU64::new(7).unwrap()),
-                DevId::new(253, 3).unwrap(),
-                DevId::new(253, 4).unwrap(),
-                &[0xCD; 32],
-            )
-            .unwrap();
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .read_only()
-            .add(0, t.data_sectors(), t)
-            .expect("add verity");
-        let cd_hex = "cd".repeat(32);
-        let salt_hex = "55".repeat(32);
-        let params = format!("1 253:3 253:4 4096 4096 7 1 sha256 {cd_hex} {salt_hex}");
-        let aligned = (DM_TARGET_SPEC_SIZE + params.len() + 1).next_multiple_of(8);
-        assert_eq!(b.buf.len(), DmHeader::SIZE + aligned);
-
-        let length = u64::from_ne_bytes(
-            b.buf[DmHeader::SIZE + 8..DmHeader::SIZE + 16]
-                .try_into()
-                .unwrap(),
-        );
-        assert_eq!(length, 56);
-        let param_start = DmHeader::SIZE + DM_TARGET_SPEC_SIZE;
-        assert_eq!(
-            &b.buf[param_start..param_start + params.len()],
-            params.as_bytes()
-        );
-        assert_eq!(b.buf[param_start + params.len()], 0);
-    }
-
-    #[test]
     fn buf_for_three_target_table_chains_specs_with_offsets_relative_to_current() {
         // Write-side `next` is relative to *each spec's own* start (unlike
         // the read side). Three lines, not two: with only two, the first
         // spec's `next` can't distinguish "relative to current" from
         // "relative to first".
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 9).unwrap())
-            .add(0, 8, devmap_zero::ZeroTarget)
-            .and_then(|b| b.add_raw(8, 1024, "linear", "252:5 5"))
-            .and_then(|b| b.add_raw(1032, 8, "error", ""))
+        let b = builder(DevId::new(252, 9).unwrap())
+            .add(0, 8, crate::target::zero::ZeroTarget)
+            .and_then(|b| b.push_row(8, 1024, "linear", "252:5 5"))
+            .and_then(|b| b.push_row(1032, 8, "error", ""))
             .expect("build three-target table");
         let bytes = &b.buf;
 
@@ -582,56 +712,35 @@ mod tests {
     fn spec_row_parses_matching_target_and_rejects_others() {
         let params = "aes-xts-plain64 - 0 252:5 5";
         let (bytes, count) = synthetic_table_status_response(&[(b"crypt", params)]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.type_name(), "crypt");
+        let mut row = status_rows::<TableMode>(bytes, count).remove(0);
+        row.version = Version::from([1, 29, 0]);
         assert_eq!(row.start(), 0);
-        assert_eq!(row.parse::<CryptTarget>(), Some(params.parse().unwrap()));
-        assert_eq!(row.parse::<devmap_zero::ZeroTarget>(), None);
+        assert_eq!(row.parse::<CryptTarget>().unwrap(), params.parse().unwrap());
+        assert_eq!(
+            row.parse::<crate::target::zero::ZeroTarget>()
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
     #[test]
-    fn params_reaches_a_target_this_crate_does_not_model() {
-        // dm-cache has no typed definition in this workspace, so
-        // the raw string is the only way in.
-        let line = "252:1 252:2 252:3 512 1 writeback default 0";
-        let (bytes, count) = synthetic_table_status_response(&[(b"cache", line)]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.type_name(), "cache");
-        assert_eq!(row.params(), line);
-        // Available on info rows too, where the status grammar differs.
-        let (bytes, count) = synthetic_table_status_response(&[(b"cache", line)]);
-        let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.params(), line);
+    fn malformed_row_preserves_the_parser_error() {
+        let (bytes, count) = synthetic_table_status_response(&[(b"crypt", "invalid")]);
+        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        let error = row.parse::<CryptTarget>().unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.get_ref().unwrap().downcast_ref::<Error>().is_some());
     }
 
     #[test]
-    fn params_is_empty_for_a_target_that_renders_none() {
-        let (bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.params(), "");
-    }
-
-    #[test]
-    fn spec_row_display_reconstructs_the_full_line() {
-        let (bytes, count) = synthetic_table_status_response(&[(b"linear", "252:5 5")]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.to_string(), "0 0 linear 252:5 5");
-
-        let (empty, count) = synthetic_table_status_response(&[(b"zero", "")]);
-        let row = TableStatusIter::<mode::Spec>::new(empty, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.to_string(), "0 0 zero");
+    fn row_debug_redacts_parameters() {
+        let (bytes, count) = synthetic_table_status_response(&[(b"crypt", "secret-key")]);
+        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        let debug = format!("{row:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("secret-key"));
     }
 
     #[test]
@@ -644,17 +753,16 @@ mod tests {
             (b"linear", "252:5 5"),
             (b"error", ""),
         ]);
-        let rows: Vec<Row<mode::Spec>> =
-            TableStatusIter::new(bytes, DmHeader::SIZE, count).collect();
+        let rows = status_rows::<TableMode>(bytes, count);
         assert_eq!(rows.len(), 3);
         assert_eq!(
-            rows[0].parse::<devmap_zero::ZeroTarget>(),
-            Some(devmap_zero::ZeroTarget)
+            rows[0].parse::<crate::target::zero::ZeroTarget>().unwrap(),
+            crate::target::zero::ZeroTarget
         );
-        assert_eq!(rows[1].type_name(), "linear");
-        assert_eq!(rows[1].params(), "252:5 5");
-        assert_eq!(rows[2].type_name(), "error");
-        assert_eq!(rows[2].params(), "");
+        assert_eq!(rows[1].type_name, "linear");
+        assert_eq!(rows[1].params, "252:5 5");
+        assert_eq!(rows[2].type_name, "error");
+        assert_eq!(rows[2].params, "");
     }
 
     #[test]
@@ -662,9 +770,9 @@ mod tests {
         // target_count claims 3 but the buffer holds only 1 spec: the bounds
         // guard must terminate cleanly instead of reading past the end.
         let (bytes, _) = synthetic_table_status_response(&[(b"zero", "")]);
-        let rows: Vec<Row<mode::Spec>> = TableStatusIter::new(bytes, DmHeader::SIZE, 3).collect();
+        let rows = status_rows::<TableMode>(bytes, 3);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].type_name(), "zero");
+        assert_eq!(rows[0].type_name, "zero");
     }
 
     #[test]
@@ -672,31 +780,11 @@ mod tests {
         // A single real entry whose next==0, but remaining=2: the next==0
         // jump-to-end must win over the remaining counter.
         let (bytes, _) = synthetic_table_status_response(&[(b"zero", "")]);
-        let rows: Vec<Row<mode::Spec>> = TableStatusIter::new(bytes, DmHeader::SIZE, 2).collect();
+        let rows = status_rows::<TableMode>(bytes, 2);
         assert_eq!(rows.len(), 1);
     }
 
     // --- Mode/name safety ------------------------------------------------
-
-    #[test]
-    fn info_row_parse_of_non_matching_type_is_none() {
-        // An info row reports runtime status, never a target's ctor params;
-        // parsing it as a different target's Info must yield None on a
-        // type-name mismatch, before the params are even looked at.
-        let params = "C 42";
-        let (bytes, count) = synthetic_table_status_response(&[(b"verity", params)]);
-        let row = TableStatusIter::<mode::Info>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.type_name(), "verity");
-        let info = row
-            .parse::<devmap_verity::VerityTarget>()
-            .expect("verity info parses");
-        assert!(info.corrupted);
-        assert_eq!(info.fec_corrected, Some(42));
-        assert_eq!(info.to_string(), params);
-        assert_eq!(row.parse::<CryptTarget>(), None);
-    }
 
     #[test]
     fn table_status_iter_truncates_a_long_type_name_at_the_nul() {
@@ -705,11 +793,9 @@ mod tests {
         let (mut bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
         let type_off = DmHeader::SIZE + 24;
         bytes[type_off..type_off + DM_MAX_TYPE_NAME].copy_from_slice(b"abcdefghijklmnop");
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.type_name(), "abcdefghijklmnop");
-        assert_eq!(row.type_name().len(), DM_MAX_TYPE_NAME);
+        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        assert_eq!(row.type_name, "abcdefghijklmnop");
+        assert_eq!(row.type_name.len(), DM_MAX_TYPE_NAME);
     }
 
     // --- Builder NUL / type-name guards, and extensibility ---------------
@@ -729,13 +815,24 @@ mod tests {
         }
     }
 
-    /// A local out-of-tree target whose `Display` writes an interior NUL —
+    impl Parse<TableMode> for Unreadable {
+        type Error = Error;
+
+        fn parse(_: &str, _: Version) -> Result<Self, Self::Error> {
+            Err(Error)
+        }
+    }
+
+    /// A local out-of-tree target whose encoder writes an interior NUL —
     /// the builder must reject it rather than truncate the table line.
     struct NulTarget;
     impl Target for NulTarget {
         const NAME: &'static str = "nul-target";
         type Table = Unreadable;
         type Info = String;
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok("before\0after".to_owned())
+        }
     }
     impl fmt::Display for NulTarget {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -745,8 +842,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_an_interior_nul_in_params() {
-        let r =
-            TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap()).add(0, 8, NulTarget);
+        let r = builder(DevId::new(252, 1).unwrap()).add(0, 8, NulTarget);
         assert!(matches!(r, Err(e) if e.kind() == io::ErrorKind::InvalidInput));
     }
 
@@ -757,6 +853,9 @@ mod tests {
         const NAME: &'static str = "bad name";
         type Table = Unreadable;
         type Info = String;
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok(String::new())
+        }
     }
     impl fmt::Display for BadNameTarget {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -766,11 +865,7 @@ mod tests {
 
     #[test]
     fn builder_rejects_an_invalid_type_name() {
-        let r = TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap()).add(
-            0,
-            8,
-            BadNameTarget,
-        );
+        let r = builder(DevId::new(252, 1).unwrap()).add(0, 8, BadNameTarget);
         assert!(matches!(r, Err(e) if e.kind() == io::ErrorKind::InvalidInput));
     }
 
@@ -783,6 +878,9 @@ mod tests {
         const NAME: &'static str = "custom-target";
         type Table = Self;
         type Info = String;
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok(self.to_string())
+        }
     }
     impl fmt::Display for CustomTarget {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -801,11 +899,19 @@ mod tests {
         }
     }
 
+    impl Parse<TableMode> for CustomTarget {
+        type Error = Error;
+
+        fn parse(text: &str, _: Version) -> Result<Self, Self::Error> {
+            text.parse()
+        }
+    }
+
     #[test]
     fn an_out_of_tree_target_can_be_added_and_parsed() {
         // Extensibility proof: a user-defined Target renders into the builder
-        // and round-trips through a synthetic Spec row.
-        let b = TableBuilder::new(dummy_control(), DevId::new(252, 1).unwrap())
+        // and round-trips through a synthetic table row.
+        let b = builder(DevId::new(252, 1).unwrap())
             .add(0, 8, CustomTarget { value: 3 })
             .expect("add custom target");
         // Assert on the bytes bound for the kernel: the type name lands in
@@ -822,10 +928,8 @@ mod tests {
         assert_eq!(b.buf[param_start + params.len()], 0);
 
         let (bytes, count) = synthetic_table_status_response(&[(b"custom-target", "1 2 3")]);
-        let row = TableStatusIter::<mode::Spec>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .expect("one row");
-        assert_eq!(row.parse::<CustomTarget>().map(|t| t.value), Some(3));
+        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        assert_eq!(row.parse::<CustomTarget>().unwrap().value, 3);
     }
 
     struct EmptyName;
@@ -833,6 +937,9 @@ mod tests {
         const NAME: &'static str = "";
         type Table = Unreadable;
         type Info = String;
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok(String::new())
+        }
     }
     impl fmt::Display for EmptyName {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -845,6 +952,9 @@ mod tests {
         const NAME: &'static str = "0123456789abcdef";
         type Table = Unreadable;
         type Info = String;
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok(String::new())
+        }
     }
     impl fmt::Display for SixteenByteName {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -857,6 +967,9 @@ mod tests {
         const NAME: &'static str = "0123456789abcde";
         type Table = Unreadable;
         type Info = String;
+        fn encode(&self, _: Version) -> Result<String, crate::target::EncodeError> {
+            Ok(String::new())
+        }
     }
     impl fmt::Display for FifteenByteName {
         fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -868,18 +981,14 @@ mod tests {
     fn builder_rejects_empty_and_overlong_type_names_but_accepts_15_bytes() {
         let dev = DevId::new(252, 1).unwrap();
         assert!(matches!(
-            TableBuilder::new(dummy_control(), dev).add(0, 8, EmptyName),
+            builder(dev).add(0, 8, EmptyName),
             Err(e) if e.kind() == io::ErrorKind::InvalidInput
         ));
         assert!(matches!(
-            TableBuilder::new(dummy_control(), dev).add(0, 8, SixteenByteName),
+            builder(dev).add(0, 8, SixteenByteName),
             Err(e) if e.kind() == io::ErrorKind::InvalidInput
         ));
-        assert!(
-            TableBuilder::new(dummy_control(), dev)
-                .add(0, 8, FifteenByteName)
-                .is_ok()
-        );
+        assert!(builder(dev).add(0, 8, FifteenByteName).is_ok());
     }
 
     #[test]
@@ -887,7 +996,7 @@ mod tests {
         // A kernel-reported base offset near usize::MAX makes the per-spec
         // `checked_add` overflow; the iterator must stop, not panic.
         let buf = vec![0u8; DmHeader::SIZE];
-        let mut it = TableStatusIter::<mode::Spec>::new(buf, usize::MAX - 1, 1);
+        let mut it = TableStatusIter::<TableMode>::new(buf, usize::MAX - 1, 1);
         assert!(it.next().is_none());
     }
 }

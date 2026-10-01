@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use zerocopy::IntoBytes;
 
-use devmap_core::parse::DevId;
+use crate::DevId;
+use crate::target::Version;
 
 use crate::device::{Device, Status, check_version, decode_dev_t};
 use crate::header::DmHeader;
@@ -18,12 +19,12 @@ use crate::uapi::{DM_BUFFER_FULL_FLAG, DM_DEV_CREATE, DM_DEV_STATUS, DM_LIST_DEV
 
 /// Issue a `WriteRead` dm ioctl over a growing byte buffer, retrying with
 /// a doubled buffer while the kernel reports `DM_BUFFER_FULL_FLAG`. Used
-/// by `Control::list`, `Device::table`/`Device::info`, and `Device::message` —
-/// every ioctl with variable-length output.
+/// by `Control::devices`, `Device::table`/`Device::info`, and the rename
+/// operations — every ioctl with variable-length output.
 ///
 /// `payload` is written immediately after the header on every attempt
-/// (including retries) — used by `Device::message` to carry the
-/// `dm_target_msg` sector+string; the other two callers pass `&[]`.
+/// (including retries) — used by rename operations to carry the new name
+/// or uuid; callers without a payload pass `&[]`.
 ///
 /// `ioctl` is a closure rather than an `Ioctl<WriteRead, _>` value passed
 /// directly: `Ioctl`'s direction markers (`Read`/`Write`/`WriteRead`)
@@ -55,7 +56,7 @@ pub(crate) fn ioctl_with_growing_buffer(
         buf[DmHeader::SIZE..DmHeader::SIZE + payload.len()].copy_from_slice(payload);
 
         let (header_mut, _) = zerocopy::FromBytes::mut_from_prefix(&mut buf)
-            .expect("buf is at least DmHeader::SIZE bytes");
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "short dm ioctl buffer"))?;
         let header_mut: &mut DmHeader = header_mut;
         ioctl(control, header_mut)?;
 
@@ -69,24 +70,17 @@ pub(crate) fn ioctl_with_growing_buffer(
     }
 }
 
-/// The device-mapper control fd (`/dev/mapper/control`). A factory for
-/// [`Device`]s — `create`/`by_device`/`by_node`/`by_name`/`by_uuid`/`list`
-/// are the only things `Control` itself does; everything else (loading a
-/// table, suspending, removing, querying status) is a `Device` method.
+/// Handle to `/dev/mapper/control` for creating and finding [`Device`]s,
+/// discovering target types, and watching device-mapper events. Operations
+/// on an individual device live on [`Device`]. Clones share the same fd.
 #[derive(Clone, Debug)]
 pub struct Control(Arc<File>);
 
 impl Control {
     /// Open `/dev/mapper/control`.
     ///
-    /// # Errors
-    ///
-    /// The underlying `io::Error` if the control node can't be opened
-    /// (typically `PermissionDenied` because the process lacks
-    /// `CAP_SYS_ADMIN`, or `NotFound` if device-mapper isn't loaded).
+    /// Opening the control node usually requires `CAP_SYS_ADMIN`.
     pub fn open() -> io::Result<Self> {
-        // Propagate the raw io::Error so its errno (and kind) survive; the
-        // likely-cause hint lives in the `# Errors` docs, not the message.
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -96,17 +90,14 @@ impl Control {
 
     /// `DM_DEV_CREATE`.
     ///
+    /// The device outlives the returned handle, and this process: it is
+    /// live kernel state until something removes it. Use [`Device::guard`]
+    /// for scoped cleanup, or [`Device::remove`] to remove it explicitly
+    /// (passing `true` for kernel-managed deferred removal).
+    ///
     /// # Errors
     ///
-    /// The kernel's `io::Error` if the create fails: `AlreadyExists`
-    /// (`EEXIST`) or `ResourceBusy` (`EBUSY`) if `name` is already taken,
-    /// `InvalidInput` if `name` has a NUL byte or is too long, or
-    /// `Unsupported` if the kernel dm-ioctl version differs.
-    ///
-    /// The device outlives the returned handle, and this process: it is
-    /// live kernel state until something removes it. Tear it down with
-    /// [`Device::remove`], or hand that job to the kernel with
-    /// [`Device::remove_deferred`].
+    /// `InvalidInput` if `name` contains a NUL byte or is too long.
     pub fn create(&self, name: &str) -> io::Result<Device> {
         let mut header = DmHeader::by_name(name)?;
         DM_DEV_CREATE.ioctl(&*self.0, &mut header)?;
@@ -114,25 +105,23 @@ impl Control {
         Ok(Device::new(decode_dev_t(header.dev()), Arc::clone(&self.0)))
     }
 
-    /// No syscall — wraps an already-known [`DevId`] (build one with
-    /// [`DevId::new`]). Does no liveness check:
-    /// a real operation on the result fails with the kernel's `ENXIO` if it
-    /// doesn't correspond to an actual dm device.
+    /// Wraps an already-known [`DevId`] without a syscall or liveness check.
+    /// An operation on the returned handle may fail if the device is absent.
     pub fn by_device(&self, id: DevId) -> Device {
         Device::new(id, Arc::clone(&self.0))
     }
 
-    /// Resolves a block-device path with [`DevId::from_path`] and wraps its ID.
+    /// Resolves a block-device path from its metadata and wraps its ID.
     ///
     /// Does not check that the block device is a live device-mapper mapping;
     /// subsequent operations ask the kernel to resolve it.
     ///
     /// # Errors
     ///
-    /// Returns a filesystem error, `InvalidInput` for a non-block device, or
-    /// `InvalidData` for an unsupported device number.
+    /// `InvalidInput` for a non-block device, or `InvalidData` for an
+    /// unsupported device number.
     pub fn by_node(&self, path: impl AsRef<Path>) -> io::Result<Device> {
-        Ok(self.by_device(DevId::from_path(path)?))
+        Ok(self.by_device(std::fs::metadata(path)?.try_into()?))
     }
     #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
     fn status_lookup(&self, header: DmHeader) -> io::Result<(Device, Status)> {
@@ -157,37 +146,21 @@ impl Control {
     /// `DM_DEV_ARM_POLL` — arm this control fd so that `poll()`/`epoll()`
     /// reports it readable once the device-mapper subsystem next changes.
     ///
-    /// This is the non-blocking counterpart to [`Device::wait_event`], and
-    /// it differs from it in three ways worth knowing before wiring it into
-    /// a reactor:
+    /// Readiness means some device-mapper event occurred; it does not identify
+    /// the device. The armed state belongs to this fd and is shared by
+    /// [`Control`] clones. Readiness persists until the fd is re-armed;
+    /// re-arming also discards any pending readiness.
     ///
-    /// - **It is global, not per-device.** The kernel arms against one
-    ///   subsystem-wide counter, bumped by `DM_DEV_CREATE`, `DM_DEV_REMOVE`,
-    ///   `DM_DEV_RENAME`, `DM_REMOVE_ALL`, a table swap, and any target
-    ///   raising a device event. Readiness means "something in dm changed",
-    ///   so after waking, compare [`Status::event_nr`] on the devices you
-    ///   care about to find out what.
-    /// - **The armed state belongs to this fd**, not to a device. A
-    ///   [`Control`] clone shares it, since clones share the underlying
-    ///   file.
-    /// - **It is level-triggered until re-armed.** Once an event has fired,
-    ///   `poll()` keeps reporting readiness; call this again to re-arm and
-    ///   clear it. Arming also discards any readiness outstanding at the
-    ///   time of the call, so arm *before* the work whose completion you
-    ///   intend to wait for, or you may consume its wakeup.
+    /// Register the fd with a reactor using [`AsFd`](std::os::fd::AsFd):
     ///
-    /// Register the fd with a reactor via the [`AsFd`]/[`AsRawFd`] impls.
-    ///
-    /// # Errors
-    ///
-    /// The kernel's `io::Error` if it rejects the ioctl — notably
-    /// `Unsupported` on a kernel predating `DM_DEV_ARM_POLL` (dm-ioctl
-    /// 4.37, Linux 4.15).
-    ///
-    /// [`Device::wait_event`]: crate::Device::wait_event
-    /// [`Status::event_nr`]: crate::Status::event_nr
-    /// [`AsFd`]: std::os::fd::AsFd
-    /// [`AsRawFd`]: std::os::fd::AsRawFd
+    /// ```no_run
+    /// use std::os::fd::AsFd as _;
+    /// # fn watch(control: &devmap_linux::Control) -> std::io::Result<()> {
+    /// control.arm_poll()?;
+    /// let fd = control.as_fd(); // Register with poll/epoll before waiting.
+    /// # let _ = fd;
+    /// # Ok(()) }
+    /// ```
     pub fn arm_poll(&self) -> io::Result<()> {
         let mut header = DmHeader::any();
         crate::uapi::DM_DEV_ARM_POLL.ioctl(&*self.0, &mut header)?;
@@ -236,8 +209,7 @@ impl Control {
             &payload,
             4096,
         )?;
-        let (parsed, _): (&DmHeader, _) = zerocopy::FromBytes::ref_from_prefix(&buf)
-            .expect("buf is at least DmHeader::SIZE bytes");
+        let parsed = DmHeader::response(&buf)?;
         Ok(Device::new(decode_dev_t(parsed.dev()), Arc::clone(&self.0)))
     }
 
@@ -250,17 +222,7 @@ impl Control {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` if `new_name` has a NUL byte or is too long;
-    /// otherwise the kernel's `io::Error` — `NotFound` (`ENXIO`) if no
-    /// device has `current_name`, `AlreadyExists` (`EBUSY`) if `new_name`
-    /// is taken, or `InvalidInput` (`EINVAL`) if the kernel rejects the
-    /// name (it forbids `/`, `.`, and `..`).
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: panics only if the kernel returned fewer than
-    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
-    /// indicate a kernel bug.
+    /// `InvalidInput` if either name contains a NUL byte or is too long.
     pub fn rename(&self, current_name: &str, new_name: &str) -> io::Result<Device> {
         self.rename_inner(current_name, new_name, false)
     }
@@ -268,42 +230,23 @@ impl Control {
     /// `DM_DEV_RENAME` with `DM_UUID_FLAG` — attach a uuid to the device
     /// currently called `name`.
     ///
-    /// A device created by [`Control::create`] has no uuid;  this is the
+    /// A device created by [`Control::create`] has no uuid; this is the
     /// only way to give it one, and the kernel permits it exactly once —
     /// a device that already has a uuid cannot have it changed.
     ///
     /// # Errors
     ///
-    /// As [`Control::rename`], plus the kernel's `InvalidInput`
-    /// (`EINVAL`) if the device already has a uuid.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: panics only if the kernel returned fewer than
-    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
-    /// indicate a kernel bug.
+    /// `InvalidInput` if `name` or `uuid` contains a NUL byte or is too long.
     pub fn set_uuid(&self, name: &str, uuid: &str) -> io::Result<Device> {
         self.rename_inner(name, uuid, true)
     }
 
-    /// `DM_LIST_VERSIONS` — every target type this kernel has registered,
-    /// with its version.
+    /// `DM_LIST_VERSIONS` — target types currently registered with this kernel.
     ///
-    /// Lets a caller check a target is available before building a table
-    /// for it, rather than discovering it via `EINVAL` from
-    /// `DM_TABLE_LOAD`. Targets are registered on module load, so a target
-    /// whose module is not yet loaded will not appear.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: panics only if the kernel returned fewer than
-    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
-    /// indicate a kernel bug.
-    ///
-    /// # Errors
-    ///
-    /// The kernel's `io::Error` if it rejects the query.
-    pub fn list_versions(&self) -> io::Result<Vec<TargetVersion>> {
+    /// This is an enumeration, not an exhaustive availability check: a
+    /// target module that has not yet been loaded will not appear. Table
+    /// construction queries each target by name, allowing module loading.
+    pub fn versions(&self) -> io::Result<impl Iterator<Item = (String, Version)>> {
         let buf = ioctl_with_growing_buffer(
             &self.0,
             |fd, h| crate::uapi::DM_LIST_VERSIONS.ioctl(fd, h),
@@ -311,18 +254,12 @@ impl Control {
             &[],
             4096,
         )?;
-        Ok(parse_versions(&buf))
+        TargetIter::new(buf)
     }
 
     /// `DM_LIST_DEVICES` — every registered dm device, each paired with a
     /// ready-to-use handle.
-    ///
-    /// # Panics
-    ///
-    /// Never in practice: panics only if the kernel returned fewer than
-    /// `DmHeader::SIZE` bytes for a `WriteRead` ioctl, which would itself
-    /// indicate a kernel bug.
-    pub fn list(&self) -> io::Result<impl Iterator<Item = (String, Device)>> {
+    pub fn devices(&self) -> io::Result<impl Iterator<Item = (String, Device)>> {
         let buf = ioctl_with_growing_buffer(
             &self.0,
             |fd, h| DM_LIST_DEVICES.ioctl(fd, h),
@@ -330,8 +267,7 @@ impl Control {
             &[],
             4096,
         )?;
-        let (header, _): (&DmHeader, _) = zerocopy::FromBytes::ref_from_prefix(&buf)
-            .expect("buf is at least DmHeader::SIZE bytes");
+        let header = DmHeader::response(&buf)?;
         let start = header.data_start() as usize;
         let end = header.data_size() as usize;
         Ok(ListDevicesIter {
@@ -359,65 +295,85 @@ impl std::os::fd::AsRawFd for Control {
     }
 }
 
-/// One registered dm target type and its version, from
-/// [`Control::list_versions`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TargetVersion {
-    /// The kernel `target_type` name, e.g. `"linear"` — matches
-    /// [`devmap_core::Target::NAME`].
-    pub name: String,
-    /// The target's `[major, minor, patch]` version.
-    pub version: [u32; 3],
+/// Query one target by name. Unlike enumeration, the kernel's named lookup
+/// may request the target module before returning its version.
+pub(crate) fn target_version(control: &File, name: &str) -> io::Result<Version> {
+    let buf = ioctl_with_growing_buffer(
+        control,
+        |fd, h| crate::uapi::DM_GET_TARGET_VERSION.ioctl(fd, h),
+        DmHeader::by_name(name)?,
+        &[],
+        512,
+    )?;
+    TargetIter::new(buf)?
+        .next()
+        .filter(|(reported, _)| reported == name)
+        .map(|(_, version)| version)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing target version"))
 }
 
-/// Parses `DM_LIST_VERSIONS`' response into [`TargetVersion`]s.
-///
-/// The payload is a chain of `struct dm_target_versions`: a `u32` `next`
-/// (byte offset from *this* record's start to the following one, 0 on the
-/// last), a `u32[3]` version, then a NUL-terminated name. Split out from
-/// [`Control::list_versions`] so it is unit-testable against a synthetic
-/// buffer, and every read is bounded by the actual buffer.
-fn parse_versions(buf: &[u8]) -> Vec<TargetVersion> {
-    let (header, _): (&DmHeader, _) =
-        zerocopy::FromBytes::ref_from_prefix(buf).expect("buf is at least DmHeader::SIZE bytes");
-    let end = (header.data_size() as usize).min(buf.len());
-    let mut offset = (header.data_start() as usize).min(buf.len());
+/// Owns the ioctl buffer so iteration doesn't require a separate collection.
+struct TargetIter {
+    buf: Vec<u8>,
+    offset: usize,
+    end: usize,
+}
 
-    let mut out = Vec::new();
-    loop {
-        // `next` plus the three version words must both be present.
-        let Some(name_start) = offset.checked_add(16) else {
-            return out;
-        };
-        if offset >= end || name_start > buf.len() {
-            return out;
+impl TargetIter {
+    fn new(buf: Vec<u8>) -> io::Result<Self> {
+        let header = DmHeader::response(&buf)?;
+        Ok(Self {
+            offset: (header.data_start() as usize).min(buf.len()),
+            end: (header.data_size() as usize).min(buf.len()),
+            buf,
+        })
+    }
+}
+
+impl Iterator for TargetIter {
+    type Item = (String, Version);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.offset;
+        let name_start = start.checked_add(16)?;
+        if start >= self.end || name_start > self.end {
+            self.offset = self.end;
+            return None;
         }
-        let record = &buf[offset..];
+        let record = &self.buf[start..self.end];
         let next = u32::from_ne_bytes(record[0..4].try_into().unwrap());
-        let version = [
+        let version = Version::from([
             u32::from_ne_bytes(record[4..8].try_into().unwrap()),
             u32::from_ne_bytes(record[8..12].try_into().unwrap()),
             u32::from_ne_bytes(record[12..16].try_into().unwrap()),
-        ];
-        let name_bytes = &buf[name_start..end.max(name_start)];
-        let nul = name_bytes
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(name_bytes.len());
-        out.push(TargetVersion {
-            name: String::from_utf8_lossy(&name_bytes[..nul]).into_owned(),
-            version,
-        });
+        ]);
+        let record_end = if next == 0 {
+            self.end
+        } else {
+            start.checked_add(next as usize)?.min(self.end)
+        };
+        if record_end <= name_start {
+            self.offset = self.end;
+            return None;
+        }
+        let name_bytes = &self.buf[name_start..record_end];
+        let nul = name_bytes.iter().position(|&b| b == 0)?;
+        let name = String::from_utf8_lossy(&name_bytes[..nul]).into_owned();
 
         if next == 0 {
-            return out;
+            self.offset = self.end;
+        } else {
+            self.offset = start.checked_add(next as usize).unwrap_or(self.end);
+            if self.offset <= start || self.offset > self.end {
+                self.offset = self.end;
+            }
         }
-        offset = offset.saturating_add(next as usize);
+        Some((name, version))
     }
 }
 
 /// Parses `DM_LIST_DEVICES`'s response into `(name, Device)` pairs. Not
-/// exported — `Control::list()` returns `impl Iterator<...>`.
+/// exported — `Control::devices()` returns `impl Iterator<...>`.
 ///
 /// `dm_name_list.next` is the byte offset from *this* record's start to
 /// the next one (unlike `dm_target_spec.next` on `DM_TABLE_STATUS`, which
@@ -542,45 +498,52 @@ mod tests {
     }
 
     #[test]
-    fn parse_versions_reads_a_single_record() {
+    fn target_iter_reads_a_single_record() {
         let buf = synthetic_versions_response(&[("linear", [1, 4, 0])]);
         assert_eq!(
-            parse_versions(&buf),
-            [TargetVersion {
-                name: "linear".to_string(),
-                version: [1, 4, 0],
-            }]
+            TargetIter::new(buf).unwrap().collect::<Vec<_>>(),
+            [("linear".to_string(), Version::from([1, 4, 0]))]
         );
     }
 
     #[test]
-    fn parse_versions_follows_next_relative_to_current_record() {
+    fn target_iter_follows_next_relative_to_current_record() {
         let buf = synthetic_versions_response(&[
             ("linear", [1, 4, 0]),
             ("striped", [1, 6, 0]),
             ("thin-pool", [1, 23, 0]),
         ]);
-        let got: Vec<(String, [u32; 3])> = parse_versions(&buf)
-            .into_iter()
-            .map(|t| (t.name, t.version))
-            .collect();
+        let got: Vec<(String, Version)> = TargetIter::new(buf).unwrap().collect();
         assert_eq!(
             got,
             [
-                ("linear".to_string(), [1, 4, 0]),
-                ("striped".to_string(), [1, 6, 0]),
-                ("thin-pool".to_string(), [1, 23, 0]),
+                ("linear".to_string(), Version::from([1, 4, 0])),
+                ("striped".to_string(), Version::from([1, 6, 0])),
+                ("thin-pool".to_string(), Version::from([1, 23, 0])),
             ]
         );
     }
 
     #[test]
-    fn parse_versions_yields_nothing_for_an_empty_list() {
-        assert_eq!(parse_versions(&synthetic_versions_response(&[])), []);
+    fn target_iter_yields_nothing_for_an_empty_list() {
+        assert_eq!(
+            TargetIter::new(synthetic_versions_response(&[]))
+                .unwrap()
+                .count(),
+            0
+        );
     }
 
     #[test]
-    fn parse_versions_stops_on_a_truncated_final_record() {
+    fn target_iter_rejects_a_short_header() {
+        assert_eq!(
+            TargetIter::new(Vec::new()).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn target_iter_stops_on_a_truncated_final_record() {
         // `data_size` claims a record the buffer doesn't actually hold: the
         // 16-byte-header guard must stop rather than slice out of bounds.
         let mut buf = vec![0u8; DmHeader::SIZE + 8];
@@ -589,7 +552,15 @@ mod tests {
             buf[16..20].copy_from_slice(&(DmHeader::SIZE as u32).to_ne_bytes());
             buf[12..16].copy_from_slice(&((DmHeader::SIZE + 100) as u32).to_ne_bytes());
         }
-        assert_eq!(parse_versions(&buf), []);
+        assert_eq!(TargetIter::new(buf).unwrap().count(), 0);
+    }
+
+    #[test]
+    #[ignore = "requires access to /dev/mapper/control"]
+    fn named_target_lookup_reports_zero_version() {
+        let control = Control::open().expect("open device-mapper control");
+        let version = target_version(&control.0, "zero").expect("DM_GET_TARGET_VERSION for zero");
+        assert_eq!(version.major, 1);
     }
 
     #[test]

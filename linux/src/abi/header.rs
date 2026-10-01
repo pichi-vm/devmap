@@ -61,6 +61,14 @@ const _: () = {
 impl DmHeader {
     pub(crate) const SIZE: usize = core::mem::size_of::<DmHeader>();
 
+    /// Decode the fixed header of a kernel response without assuming the
+    /// response buffer is long enough.
+    pub(crate) fn response(buf: &[u8]) -> io::Result<&Self> {
+        Self::ref_from_prefix(buf)
+            .map(|(header, _)| header)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "short dm ioctl response"))
+    }
+
     /// A header with no identification set at all — used for ioctls like
     /// `DM_LIST_DEVICES` that ignore name/uuid/dev and always operate on
     /// every device.
