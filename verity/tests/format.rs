@@ -5,7 +5,8 @@
 use std::{
     fmt::Write as _,
     fs::{self, File},
-    io::Write as _,
+    io::{Cursor, ErrorKind, Write as _},
+    num::NonZero,
     process::Command,
 };
 
@@ -14,6 +15,27 @@ use devmap_verity::{
     Format as _,
     header::{Algorithm, Constraint, HashType, Header, Salt},
 };
+
+#[test]
+fn oversized_data_extent_is_rejected_before_writing() {
+    let header = Header {
+        uuid: [0; 16],
+        hash_type: HashType::Normal,
+        algorithm: Algorithm::Sha256,
+        salt: Salt::default(),
+        data: Geometry {
+            size: BlockSize::default(),
+            count: NonZero::new(u64::MAX).unwrap(),
+        },
+        hash: BlockSize::default(),
+    };
+    let mut output = Cursor::new(Vec::new());
+
+    let error = header.format(std::io::empty(), &mut output).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(output.into_inner(), []);
+}
 
 #[test]
 fn matches_veritysetup_byte_for_byte() {

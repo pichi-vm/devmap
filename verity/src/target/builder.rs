@@ -113,8 +113,7 @@ impl Builder {
         hash_start: u64,
         root: Box<[u8]>,
     ) -> io::Result<Self> {
-        let data_sectors = u64::try_from(header.data_bytes() / 512)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "verity layout overflows"))?;
+        let data_sectors = header.data_size()? / 512;
         let hashes_per_block = header.hashes_per_block()?;
         let tree_blocks =
             header

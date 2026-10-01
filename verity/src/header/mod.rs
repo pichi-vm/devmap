@@ -96,8 +96,12 @@ pub struct Header {
 }
 
 impl Header {
-    pub(crate) const fn data_bytes(&self) -> u128 {
-        self.data.count.get() as u128 * self.data.size.bytes().get() as u128
+    pub(crate) fn data_size(&self) -> io::Result<u64> {
+        u64::from(self.data.size.bytes().get())
+            .checked_mul(self.data.count.get())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "verity data extent overflows")
+            })
     }
 
     pub(crate) fn hashes_per_block(&self) -> io::Result<usize> {

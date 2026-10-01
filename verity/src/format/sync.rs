@@ -103,7 +103,7 @@ impl Format for Header {
         W: Write + Seek,
     {
         let encoded = self.encode();
-        let data_size = u64::from(self.data.size.bytes().get()) * self.data.count.get();
+        let data_size = self.data_size()?;
         let padding = u64::from(self.hash.bytes().get()) - RECORD_SIZE as u64;
         let mut tree = TreeWriter::new(hash, &self)?;
         tree.output_mut().write_all(&encoded)?;
