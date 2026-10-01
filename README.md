@@ -1,39 +1,26 @@
 # devmap
 
-Reusable Rust libraries for storage formats and Linux device-mapper.
-The workspace contains seven libraries; it does not ship an application.
+Small Rust libraries for the device-mapper facilities shared by pichi
+components. The workspace contains three libraries and no applications:
 
-- [`devmap-core`](core/): shared storage capabilities, adapters, and
-  device-mapper interfaces.
-- [`devmap-linux`](linux/): device handles, table submission, ioctls, and status.
-- [`devmap-crypt`](crypt/): kernel crypt target parameters and status.
-- [`devmap-luks`](luks/): LUKS headers, key handling, formatting, and crypt-target
-  construction.
-- [`devmap-snapshot`](snapshot/): snapshot metadata, userspace I/O, and targets.
-- [`devmap-verity`](verity/): verity metadata, userspace verification, and targets.
-- [`devmap-zero`](zero/): a finite zero-filled source and the kernel zero target.
+- [`devmap-core`](core/) contains shared block-size and storage-geometry types.
+- [`devmap-linux`](linux/) controls Linux device-mapper, owns the `Target`
+  contract and target grammar values, and provides targets that have no shared
+  on-disk format: crypt, snapshot, snapshot-origin, snapshot-merge, and zero.
+- [`devmap-verity`](verity/) owns the standard verity header, streaming hash
+  formatter, and verity target.
 
-Target definitions live in their owning crates, not in the Linux backend.
-Applications depend on `devmap-linux` and the target crates they use; both
-share the interfaces in `devmap-core`. Application policy, such as
-sparse-file traversal, stays with the caller. See [MIGRATION.md](MIGRATION.md)
-for the target owners and composition workflow, and [STYLE.md](STYLE.md) for
-repository conventions.
+Verity header inspection works on every platform. Its target API is available
+on Linux. No hash family is enabled by default; hash features enable formatting. Synchronous code
+imports `devmap_verity::Format`; Tokio code imports
+`devmap_verity::AsyncFormat`.
 
-`devmap-linux` accepts raw table parameters and messages for any kernel-supported
-target. Dedicated format APIs for other targets are outside the current scope.
+```sh
+cargo test --workspace --all-features --all-targets
+```
 
-Verity header inspection and target construction work with
-`default-features = false`, without any hashing libraries. Optional features
-are named for the dependencies they enable; no separate activation feature is
-required. See each crate's README for its feature list and API documentation.
-
-Build with `cargo build --workspace --release`.
-Run portable checks with `cargo test --workspace --all-features --all-targets`.
-Run `bash scripts/check-dependencies.sh` to check crate boundaries.
-
-`bash scripts/test-kernel.sh` requires Linux device-mapper access and sudo/root.
-It exercises the kernel using disposable loop devices and does not
-unload shared modules. Reference-tool checks require cryptsetup/veritysetup.
+The GitHub Actions workspace workflow also runs feature-isolation, packaging,
+documentation, and real-kernel tests. Kernel tests need device-mapper access
+and root privileges; the workflow provisions disposable loop devices for them.
 
 Licensed under Apache-2.0.
