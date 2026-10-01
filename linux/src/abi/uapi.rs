@@ -5,7 +5,7 @@
 //! unsafe block here is an iocuddle const constructor.
 //!
 //! The raw `dm_target_spec_raw` struct is `pub(crate)` so the table builder
-//! in [`super::table`] can use it, and [`super::header::DmHeader`] is the
+//! in [`crate::table`] can use it, and [`super::header::DmHeader`] is the
 //! safe `#[repr(C)]` mirror of `struct dm_ioctl` — neither crosses the crate
 //! boundary. All field layouts and command numbers below mirror
 //! `<linux/dm-ioctl.h>`.
@@ -59,17 +59,6 @@ pub(crate) const DM_READONLY_FLAG: u32 = 1 << 0;
 /// `DM_SUSPEND_FLAG` — set to suspend, clear to resume.
 pub(crate) const DM_SUSPEND_FLAG: u32 = 1 << 1;
 
-/// `DM_ACTIVE_PRESENT_FLAG` — an active table is present (response-only).
-pub(crate) const DM_ACTIVE_PRESENT_FLAG: u32 = 1 << 5;
-
-/// `DM_INACTIVE_PRESENT_FLAG` — an inactive (staged) table is present
-/// (response-only).
-pub(crate) const DM_INACTIVE_PRESENT_FLAG: u32 = 1 << 6;
-
-/// `DM_UEVENT_GENERATED_FLAG` — a uevent was generated for the last
-/// operation (response-only).
-pub(crate) const DM_UEVENT_GENERATED_FLAG: u32 = 1 << 13;
-
 /// `DM_DEFERRED_REMOVE` — on `DM_DEV_REMOVE`, schedule removal for when the
 /// device is no longer in use instead of failing with `EBUSY`.
 pub(crate) const DM_DEFERRED_REMOVE: u32 = 1 << 17;
@@ -82,10 +71,6 @@ pub(crate) const DM_STATUS_TABLE_FLAG: u32 = 1 << 4;
 /// Set in the response when the caller's buffer was too small for
 /// `DM_LIST_DEVICES`/`DM_TABLE_STATUS`'s variable-length output.
 pub(crate) const DM_BUFFER_FULL_FLAG: u32 = 1 << 8;
-
-/// Set in the response when `DM_TARGET_MSG` wrote a reply string into the
-/// data area (not every message produces one).
-pub(crate) const DM_DATA_OUT_FLAG: u32 = 1 << 16;
 
 /// Request flag for `DM_DEV_RENAME`: the string in the data area is a new
 /// uuid rather than a new name.
@@ -113,8 +98,6 @@ pub(crate) const DM_LIST_DEVICES: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(2) };
 pub(crate) const DM_TABLE_STATUS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(12) };
-pub(crate) const DM_TARGET_MSG: Ioctl<WriteRead, &super::header::DmHeader> =
-    unsafe { DM_IOCTL_GROUP.write_read(14) };
 pub(crate) const DM_DEV_WAIT: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(8) };
 pub(crate) const DM_TABLE_CLEAR: Ioctl<WriteRead, &super::header::DmHeader> =
@@ -125,5 +108,7 @@ pub(crate) const DM_DEV_RENAME: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(5) };
 pub(crate) const DM_LIST_VERSIONS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(13) };
+pub(crate) const DM_GET_TARGET_VERSION: Ioctl<WriteRead, &super::header::DmHeader> =
+    unsafe { DM_IOCTL_GROUP.write_read(17) };
 pub(crate) const DM_DEV_ARM_POLL: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(16) };

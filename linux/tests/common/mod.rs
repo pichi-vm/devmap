@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use devmap_linux::{Control, Device};
+use devmap_linux::{Control, device::Device};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -34,12 +34,9 @@ pub(crate) fn open_control() -> Option<Control> {
 
 /// A dm device that this test owns, torn down when the test's scope ends.
 ///
-/// The library deliberately has no `Drop`-based removal: a dm device is
-/// kernel state that outlives the process, so deciding when it dies belongs
-/// to the caller. A test *is* that caller, and what it wants is
-/// scope-bounded cleanup that still happens when an assertion panics — so
-/// the guard lives here, in the harness, rather than in the API every real
-/// user has to work around.
+/// This harness guard uses deferred removal on drop, unlike the library's
+/// [`devmap_linux::device::Guard`], which attempts immediate removal. That
+/// lets tests release devices still held open by udev or other processes.
 ///
 /// Removal is deferred: a device a test still has open (or that udev is
 /// mid-scan on) is reclaimed by the kernel once released, instead of
@@ -56,7 +53,7 @@ impl Owned {
 
     /// Remove it now, surfacing the kernel's error, and disarm the guard.
     pub(crate) fn remove(mut self) -> io::Result<()> {
-        self.0.take().expect("armed").remove()
+        self.0.take().expect("armed").remove(false)
     }
 
     /// Give up ownership: the device outlives this scope.
@@ -75,7 +72,7 @@ impl std::ops::Deref for Owned {
 impl Drop for Owned {
     fn drop(&mut self) {
         if let Some(device) = self.0.take() {
-            let _ = device.remove_deferred();
+            let _ = device.remove(true);
         }
     }
 }

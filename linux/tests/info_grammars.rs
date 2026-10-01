@@ -14,9 +14,11 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use devmap_core::parse::Empty;
-use devmap_snapshot::dm as snapshot;
-use devmap_verity as verity;
+use devmap_linux::{
+    table::InfoMode,
+    target::Parse,
+    target::{Empty, Version, snapshot},
+};
 
 /// Parse `line`, assert it renders back byte for byte, and hand back the
 /// parsed value for field assertions. The round trip is what proves the
@@ -43,21 +45,12 @@ fn targets_with_no_runtime_status_accept_only_an_empty_line() {
 }
 
 #[test]
-fn verity_reports_corruption_and_fec() {
-    let info: verity::Info = round_trip("V -");
-    assert!(!info.corrupted);
-    assert_eq!(info.fec_corrected, None);
-
-    let info: verity::Info = round_trip("C 42");
-    assert!(info.corrupted);
-    assert_eq!(info.fec_corrected, Some(42));
-
-    assert!("X -".parse::<verity::Info>().is_err());
-}
-
-#[test]
 fn snapshot_reports_usage_or_a_state_keyword() {
     let info: snapshot::Info = round_trip("20480/524288 2048");
+    assert_eq!(
+        <snapshot::Info as Parse<InfoMode>>::parse("20480/524288 2048", Version::from([1, 16, 0])),
+        Ok(info)
+    );
     assert_eq!(
         info,
         snapshot::Info::Usage {
