@@ -17,8 +17,16 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
             return Poll::Ready(Ok(()));
         }
         if !self.initializing {
+            match Pin::new(&mut self.output).poll_complete(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(Failure::Fatal(error))),
+                Poll::Ready(Ok(_)) => {}
+            }
             if let Err(error) = Pin::new(&mut self.output).start_seek(SeekFrom::Current(0)) {
-                return Poll::Ready(Err(Failure::Fatal(error)));
+                return Poll::Ready(Err(Failure::Fatal(io::Error::new(
+                    error.kind(),
+                    format!("initializing hash-tree output: {error}"),
+                ))));
             }
             self.initializing = true;
         }
@@ -105,6 +113,17 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
     ) -> Poll<Result<Progress, Failure>> {
         match write {
             BlockWrite::Starting(block) => {
+                match Pin::new(&mut self.output).poll_complete(cx) {
+                    Poll::Pending => {
+                        draining.step = DrainStep::Writing(BlockWrite::Starting(block));
+                        self.phase = Phase::Draining(draining);
+                        return Poll::Pending;
+                    }
+                    Poll::Ready(Err(error)) => {
+                        return Poll::Ready(Err(Failure::Fatal(error)));
+                    }
+                    Poll::Ready(Ok(_)) => {}
+                }
                 let Some(range) = &self.output_range else {
                     return Poll::Ready(Err(Failure::Fatal(io::Error::other(
                         "hash tree output is not initialized",
@@ -117,7 +136,10 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
                     ))));
                 };
                 if let Err(error) = Pin::new(&mut self.output).start_seek(SeekFrom::Start(offset)) {
-                    return Poll::Ready(Err(Failure::Fatal(error)));
+                    return Poll::Ready(Err(Failure::Fatal(io::Error::new(
+                        error.kind(),
+                        format!("seeking to hash-tree block: {error}"),
+                    ))));
                 }
                 draining.step = DrainStep::Writing(BlockWrite::Seeking(block));
                 self.phase = Phase::Draining(draining);
@@ -190,8 +212,22 @@ impl<W: AsyncWrite + AsyncSeek + Unpin> TreeWriter<W> {
             ))));
         };
         if !started {
+            match Pin::new(&mut self.output).poll_complete(cx) {
+                Poll::Pending => {
+                    self.phase = Phase::SeekingEnd {
+                        digest,
+                        started: false,
+                    };
+                    return Poll::Pending;
+                }
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(Failure::Fatal(error))),
+                Poll::Ready(Ok(_)) => {}
+            }
             if let Err(error) = Pin::new(&mut self.output).start_seek(SeekFrom::Start(range.end)) {
-                return Poll::Ready(Err(Failure::Fatal(error)));
+                return Poll::Ready(Err(Failure::Fatal(io::Error::new(
+                    error.kind(),
+                    format!("seeking to end of hash tree: {error}"),
+                ))));
             }
             self.phase = Phase::SeekingEnd {
                 digest,

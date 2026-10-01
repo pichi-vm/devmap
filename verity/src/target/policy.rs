@@ -9,9 +9,9 @@ pub enum CorruptionPolicy {
     Error,
     /// Allow data to be returned despite a detected hash mismatch.
     Ignore,
-    /// Request a kernel restart; unsupported by userspace verification.
+    /// Request a kernel restart.
     Restart,
-    /// Request a kernel panic; unsupported by userspace verification.
+    /// Request a kernel panic.
     Panic,
 }
 

@@ -1,361 +1,91 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#![cfg(feature = "sha2")]
+//! Path 2: format a verity hash volume compatible with `veritysetup`.
 
-use devmap_verity::{
-    Scheme, Shape,
-    traits::std::{Format as _, Geometry, SyncData},
-};
 use std::{
-    io::{self, Cursor, Seek, Write},
-    num::{NonZeroU32, NonZeroU64},
+    fmt::Write as _,
+    fs::{self, File},
+    io::Write as _,
+    process::Command,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Failure {
-    Write,
-    Seek,
-    Flush,
-    Sync,
-}
-
-// Deliberately has no Read implementation: formatting must not reopen its output.
-#[derive(Default)]
-struct Output {
-    bytes: Cursor<Vec<u8>>,
-    flushes: usize,
-    syncs: usize,
-    failure: Option<Failure>,
-    #[cfg(feature = "tokio")]
-    paused: bool,
-    #[cfg(feature = "tokio")]
-    stall_sync: bool,
-    #[cfg(feature = "tokio")]
-    persisting: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl Output {
-    fn check(&self, operation: Failure) -> io::Result<()> {
-        if self.failure == Some(operation) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "injected output failure",
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl Write for Output {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.check(Failure::Write)?;
-        self.bytes.write(&bytes[..bytes.len().min(31)])
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.check(Failure::Flush)?;
-        self.flushes += 1;
-        Ok(())
-    }
-}
-
-impl Seek for Output {
-    fn seek(&mut self, position: io::SeekFrom) -> io::Result<u64> {
-        self.check(Failure::Seek)?;
-        self.bytes.seek(position)
-    }
-}
-
-impl Geometry for Output {
-    fn block_size(&self) -> io::Result<NonZeroU32> {
-        Ok(NonZeroU32::new(4096).unwrap())
-    }
-    fn count(&mut self) -> io::Result<u64> {
-        Ok(self.bytes.get_ref().len() as u64 / 4096)
-    }
-}
-
-impl SyncData for Output {
-    fn sync_data(&mut self) -> io::Result<()> {
-        self.check(Failure::Sync)?;
-        assert!(self.flushes > 0);
-        self.syncs += 1;
-        Ok(())
-    }
-}
-
-fn input(bytes: Vec<u8>) -> devmap_core::Scaled<Cursor<Vec<u8>>> {
-    devmap_core::traits::std::Scale::scale_to(Cursor::new(bytes), NonZeroU32::new(4096).unwrap())
-        .unwrap()
-}
+use devmap_core::{BlockSize, Detect as _, Geometry};
+use devmap_verity::{
+    Format as _,
+    header::{Algorithm, Constraint, HashType, Header, Salt},
+};
 
 #[test]
-fn formatting_returns_metadata_without_reading_and_persists_before_returning() {
-    let scheme = Scheme::default();
-    let (hashes, root) = scheme
-        .format(input(vec![7; 4096]), Output::default(), [3; 16])
-        .unwrap();
-    assert_eq!(hashes.scheme(), scheme);
-    assert_eq!(hashes.shape(), Shape::new(NonZeroU64::MIN));
-    assert_eq!(hashes.uuid(), [3; 16]);
-    assert_eq!(root.len(), 32);
-    let output = hashes.into_inner();
-    assert!(output.flushes > 0);
-    assert_eq!(output.syncs, 1);
-    let reopened =
-        <devmap_verity::Hashes<_> as devmap_verity::traits::std::OpenHashes<_>>::open(output.bytes)
-            .unwrap();
-    assert_eq!(reopened.scheme(), scheme);
-    assert_eq!(reopened.shape(), Shape::new(NonZeroU64::MIN));
-}
+fn matches_veritysetup_byte_for_byte() {
+    let directory = tempfile::tempdir().unwrap();
+    let data_path = directory.path().join("data.img");
+    let our_hash_path = directory.path().join("ours.img");
+    let reference_hash_path = directory.path().join("veritysetup.img");
 
-#[test]
-fn format_errors_including_persistence_never_return_a_completed_handle() {
-    for failure in [Failure::Write, Failure::Seek, Failure::Flush, Failure::Sync] {
-        let mut output = Output {
-            failure: Some(failure),
-            ..Output::default()
-        };
-        let error = Scheme::default()
-            .format(input(vec![0; 4096]), &mut output, [0; 16])
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-        assert_eq!(output.syncs, 0);
-        if failure == Failure::Sync {
-            assert!(output.flushes > 0);
-        }
-    }
-}
+    // Both formatters consume the same deterministic protected data.
+    let mut data = File::create(&data_path).unwrap();
+    data.write_all(&vec![0x5a; 8 * 4096]).unwrap();
+    drop(data);
 
-#[test]
-fn formatting_reports_insufficient_fixed_output_capacity() {
-    let mut bytes = [0; 4096];
-    let output = devmap_core::traits::std::Scale::scale_to(
-        Cursor::new(bytes.as_mut_slice()),
-        NonZeroU32::new(4096).unwrap(),
-    )
-    .unwrap();
-    let error = Scheme::default()
-        .format(input(vec![0; 8192]), output, [0; 16])
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), io::ErrorKind::WriteZero);
-}
+    // Detect the storage geometry and select the remaining on-disk policy.
+    let mut data = File::open(&data_path).unwrap();
+    let mut hash = File::create(&our_hash_path).unwrap();
+    let data_geometry = Geometry::<Constraint>::detect(&data).unwrap();
+    let hash_block_size = BlockSize::<Constraint>::detect(&hash).unwrap();
 
-#[test]
-fn header_geometry_limits_are_checked_before_any_output() {
-    struct GeometryOnly {
-        block: NonZeroU32,
-        count: u64,
-    }
-    impl io::Read for GeometryOnly {
-        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
-            panic!("invalid geometry must fail before reading")
-        }
-    }
-    impl Geometry for GeometryOnly {
-        fn block_size(&self) -> io::Result<NonZeroU32> {
-            Ok(self.block)
-        }
-        fn count(&mut self) -> io::Result<u64> {
-            Ok(self.count)
-        }
-    }
-    for (block, count) in [(1, 1), (513, 1), (1 << 20, 1), (512, u64::MAX), (512, 0)] {
-        let mut output = Output::default();
-        let data = GeometryOnly {
-            block: NonZeroU32::new(block).unwrap(),
-            count,
-        };
-        let error = Scheme::default()
-            .format(data, &mut output, [0; 16])
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
-        assert_eq!(output.bytes.get_ref().as_slice(), []);
-        assert_eq!(output.flushes, 0);
-        assert_eq!(output.syncs, 0);
-    }
-}
-
-#[cfg(feature = "tokio")]
-mod asynchronous {
-    use super::*;
-    use devmap_verity::traits::tokio::{Format, Geometry, SyncData};
-    use std::{
-        future::{Future, poll_fn},
-        pin::Pin,
-        task::{Context, Poll},
+    let header = Header {
+        uuid: [0x5a; 16],
+        hash_type: HashType::Normal,
+        algorithm: Algorithm::Sha256,
+        salt: Salt::new(&[1, 2, 3]).unwrap(),
+        data: data_geometry,
+        hash: hash_block_size,
     };
-    use tokio::io::{AsyncSeek, AsyncWrite};
 
-    impl AsyncWrite for Output {
-        fn poll_write(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            bytes: &[u8],
-        ) -> Poll<io::Result<usize>> {
-            self.paused = !self.paused;
-            if self.paused {
-                cx.waker().wake_by_ref();
-                return Poll::Pending;
-            }
-            Poll::Ready(Write::write(&mut *self, bytes))
-        }
-        fn poll_flush(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Write::flush(&mut *self))
-        }
-        fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            self.poll_flush(cx)
-        }
-    }
+    // Our formatter writes the header and tree and returns the trusted root.
+    let root = header.format(&mut data, &mut hash).unwrap();
+    hash.flush().unwrap();
+    drop(hash);
 
-    impl AsyncSeek for Output {
-        fn start_seek(mut self: Pin<&mut Self>, position: io::SeekFrom) -> io::Result<()> {
-            Seek::seek(&mut *self, position)?;
-            Ok(())
-        }
-        fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-            Poll::Ready(Ok(self.bytes.position()))
-        }
-    }
+    // Ask the external reference implementation to format the same volume
+    // with exactly the policy recorded in our header.
+    let output = Command::new("veritysetup")
+        .args([
+            "format",
+            "--format=1",
+            "--data-block-size=4096",
+            "--hash-block-size=4096",
+            "--hash=sha256",
+            "--salt=010203",
+            "--uuid=5a5a5a5a-5a5a-5a5a-5a5a-5a5a5a5a5a5a",
+        ])
+        .arg(&data_path)
+        .arg(&reference_hash_path)
+        .output()
+        .expect("veritysetup must be installed for the format compatibility test");
+    assert!(
+        output.status.success(),
+        "veritysetup format failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    impl Geometry for Output {
-        fn block_size(&self) -> io::Result<NonZeroU32> {
-            Ok(NonZeroU32::new(4096).unwrap())
-        }
-        fn count(&mut self) -> Pin<Box<dyn Future<Output = io::Result<u64>> + Send + '_>> {
-            Box::pin(std::future::ready(Ok(
-                self.bytes.get_ref().len() as u64 / 4096
-            )))
-        }
-    }
+    // Compatibility covers the complete image: header, padding, and tree.
+    let ours = fs::read(our_hash_path).unwrap();
+    let reference = fs::read(reference_hash_path).unwrap();
+    assert_eq!(ours, reference);
 
-    impl SyncData for Output {
-        fn sync_data(&mut self) -> Pin<Box<dyn Future<Output = io::Result<()>> + Send + '_>> {
-            Box::pin(async move {
-                if self.stall_sync {
-                    self.persisting
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                    std::future::pending::<()>().await;
-                }
-                super::SyncData::sync_data(self)
-            })
-        }
+    // The independently stored root must agree as well.
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let reference_root = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("Root hash:"))
+        .map(str::trim)
+        .expect("veritysetup output must report a root hash");
+
+    let mut encoded_root = String::with_capacity(root.len() * 2);
+    for byte in root {
+        write!(encoded_root, "{byte:02x}").unwrap();
     }
 
-    #[tokio::test]
-    async fn async_format_handles_short_pending_output_and_persists() {
-        let bytes = vec![7; 129 * 4096];
-        let (hashes, root) = Format::format(
-            Scheme::default(),
-            input(bytes.clone()),
-            Output::default(),
-            [9; 16],
-        )
-        .await
-        .unwrap();
-        assert_eq!(hashes.shape(), Shape::new(NonZeroU64::new(129).unwrap()));
-        assert_eq!(hashes.uuid(), [9; 16]);
-        let output = hashes.into_inner();
-        assert!(output.flushes > 0);
-        assert_eq!(output.syncs, 1);
-        let (expected, expected_root) = devmap_verity::traits::std::Format::format(
-            Scheme::default(),
-            input(bytes),
-            Output::default(),
-            [9; 16],
-        )
-        .unwrap();
-        assert_eq!(root, expected_root);
-        assert_eq!(
-            output.bytes.into_inner(),
-            expected.into_inner().bytes.into_inner()
-        );
-    }
-
-    #[tokio::test]
-    async fn async_output_and_persistence_failures_return_no_handle() {
-        for failure in [Failure::Write, Failure::Seek, Failure::Flush, Failure::Sync] {
-            let mut output = Output {
-                failure: Some(failure),
-                ..Output::default()
-            };
-            let error = Format::format(
-                Scheme::default(),
-                input(vec![0; 4096]),
-                &mut output,
-                [0; 16],
-            )
-            .await
-            .err()
-            .unwrap();
-            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-            assert_eq!(output.syncs, 0);
-        }
-    }
-
-    #[tokio::test]
-    async fn cancelled_format_can_be_restarted_without_claiming_persistence() {
-        let mut output = Output::default();
-        {
-            let mut operation = Box::pin(Format::format(
-                Scheme::default(),
-                input(vec![0; 4096]),
-                &mut output,
-                [0; 16],
-            ));
-            let mut polls = 0;
-            poll_fn(|cx| {
-                assert!(operation.as_mut().poll(cx).is_pending());
-                polls += 1;
-                if polls == 2 {
-                    Poll::Ready(())
-                } else {
-                    Poll::Pending
-                }
-            })
-            .await;
-        }
-        assert_ne!(output.bytes.get_ref().as_slice(), []);
-        assert_eq!(output.flushes, 0);
-        assert_eq!(output.syncs, 0);
-        let (hashes, _) = Format::format(Scheme::default(), input(vec![7; 4096]), output, [1; 16])
-            .await
-            .unwrap();
-        assert_eq!(hashes.uuid(), [1; 16]);
-        assert_eq!(hashes.into_inner().syncs, 1);
-    }
-    #[tokio::test]
-    async fn cancellation_during_persistence_returns_no_completed_handle() {
-        let mut output = Output {
-            stall_sync: true,
-            ..Output::default()
-        };
-        let persisting = output.persisting.clone();
-        {
-            let mut operation = Box::pin(Format::format(
-                Scheme::default(),
-                input(vec![0; 4096]),
-                &mut output,
-                [0; 16],
-            ));
-            poll_fn(|cx| {
-                assert!(operation.as_mut().poll(cx).is_pending());
-                if persisting.load(std::sync::atomic::Ordering::Relaxed) {
-                    Poll::Ready(())
-                } else {
-                    Poll::Pending
-                }
-            })
-            .await;
-        }
-        assert!(output.flushes > 0);
-        assert_eq!(output.syncs, 0);
-        output.stall_sync = false;
-        let (hashes, _) = Format::format(Scheme::default(), input(vec![0; 4096]), output, [0; 16])
-            .await
-            .unwrap();
-        assert_eq!(hashes.into_inner().syncs, 1);
-    }
+    assert_eq!(encoded_root, reference_root);
 }

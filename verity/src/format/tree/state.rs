@@ -5,10 +5,11 @@ use std::io;
 use digest::DynDigest;
 
 use super::{Drain, Failure, FlushMode};
-use crate::layout::Layout;
+use crate::header::{HashType, Header, Salt};
 
 pub(super) struct State {
-    pub(super) layout: Layout,
+    hash_type: HashType,
+    salt: Salt,
     hasher: Box<dyn DynDigest + Send + Sync>,
     digest: Box<[u8]>,
     maximum_size: u64,
@@ -23,30 +24,50 @@ pub(super) struct State {
 }
 
 impl State {
-    pub(super) fn new(layout: Layout, hasher: Box<dyn DynDigest + Send + Sync>) -> Self {
+    pub(super) fn new(
+        header: &Header,
+        hasher: Box<dyn DynDigest + Send + Sync>,
+    ) -> io::Result<Self> {
         let digest_size = hasher.output_size();
-        let data_block_size = layout.data_block_size().get();
-        let levels = layout
-            .level_offsets
-            .iter()
-            .copied()
-            .map(|offset| HashLevel::new(offset as u64, layout.hash_block_size().get() as usize))
+        let data_block_size = header.data.size.bytes().get();
+        let hash_block_size = header.hash.bytes().get();
+        let maximum_size = u64::try_from(header.data_bytes()).map_err(|_| overflow())?;
+        let hashes_per_block = header.hashes_per_block()?;
+        let blocks: Vec<_> = header.level_blocks(hashes_per_block).collect();
+        let mut offsets = vec![0; blocks.len()];
+        let mut offset = 0u64;
+        for index in (0..blocks.len()).rev() {
+            offsets[index] = offset;
+            offset = blocks[index]
+                .checked_mul(u64::from(hash_block_size))
+                .and_then(|size| offset.checked_add(size))
+                .ok_or_else(overflow)?;
+        }
+        let tree_size = offset;
+        let levels = offsets
+            .into_iter()
+            .map(|offset| HashLevel::new(offset, hash_block_size as usize))
             .collect();
+        let slot_size = match header.hash_type {
+            HashType::ChromeOs => digest_size,
+            HashType::Normal => digest_size.next_power_of_two(),
+        };
 
-        Self {
+        Ok(Self {
+            hash_type: header.hash_type,
+            salt: header.salt,
             hasher,
             digest: vec![0; digest_size].into_boxed_slice(),
-            maximum_size: layout.data_size as u64,
+            maximum_size,
             written: 0,
             data_block: vec![0; data_block_size as usize].into_boxed_slice(),
             data_used: 0,
             levels,
-            slot_size: layout.slot_size,
-            hashes_per_block: layout.hashes_per_block,
-            tree_size: layout.tree_size as u64,
+            slot_size,
+            hashes_per_block,
+            tree_size,
             root: None,
-            layout,
-        }
+        })
     }
 
     pub(super) fn accept(&mut self, input: &[u8]) -> Result<usize, Failure> {
@@ -137,9 +158,9 @@ impl State {
             return Err(io::Error::other("invalid pending hash-tree block"));
         }
 
-        self.layout.hash_type().digest(
+        self.hash_type.digest(
             self.hasher.as_mut(),
-            self.layout.salt(),
+            self.salt.as_ref(),
             &pending.bytes,
             &mut self.digest,
         )?;
@@ -173,9 +194,9 @@ impl State {
     }
 
     fn process_data_block(&mut self) -> io::Result<()> {
-        self.layout.hash_type().digest(
+        self.hash_type.digest(
             self.hasher.as_mut(),
-            self.layout.salt(),
+            self.salt.as_ref(),
             &self.data_block,
             &mut self.digest,
         )?;
@@ -190,9 +211,9 @@ impl State {
     }
 
     fn process_block(&mut self, block: &[u8]) -> io::Result<()> {
-        self.layout.hash_type().digest(
+        self.hash_type.digest(
             self.hasher.as_mut(),
-            self.layout.salt(),
+            self.salt.as_ref(),
             block,
             &mut self.digest,
         )?;
@@ -203,6 +224,10 @@ impl State {
         }
         Ok(())
     }
+}
+
+fn overflow() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "verity layout overflows")
 }
 
 enum HashLevel {
