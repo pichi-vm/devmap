@@ -140,7 +140,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.87.0
       - uses: Swatinem/rust-cache@v2
-      - name: Check library minimum Rust versions
-        run: cargo check --workspace --all-features --lib
+      - name: Compile all targets at the minimum Rust version
+        run: |
+          cargo test --workspace --all-features --all-targets --no-run
+          cargo test --workspace --all-features --doc
+          cargo test --workspace --no-default-features --doc
