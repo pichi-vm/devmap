@@ -5,7 +5,9 @@
 
 mod guard;
 mod status;
-pub use guard::Guard;
+#[cfg(feature = "tokio")]
+pub use guard::AsyncDefer;
+pub use guard::{Defer, Guard};
 pub use status::Status;
 
 use std::fmt;

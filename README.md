@@ -13,7 +13,8 @@ components. The workspace contains three libraries and no applications:
 Verity header inspection works on every platform. Its target API is available
 on Linux. No hash family is enabled by default; hash features enable formatting. Synchronous code
 imports `devmap_verity::Format`; Tokio code imports
-`devmap_verity::AsyncFormat`.
+`devmap_verity::AsyncFormat`. Device holders use `devmap_linux::Defer`, or
+`devmap_linux::AsyncDefer` with its `tokio` feature.
 
 ```sh
 cargo test --workspace --all-features --all-targets
