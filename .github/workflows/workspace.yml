@@ -67,6 +67,10 @@ jobs:
         run: |
           cargo test --workspace --all-features --doc
           cargo test --workspace --no-default-features --doc
+      - name: Test Linux Tokio feature independently
+        run: |
+          cargo test -p devmap-linux --no-default-features --features tokio --all-targets
+          cargo test -p devmap-linux --no-default-features --features tokio --doc
       - name: Test verity features independently
         run: |
           cargo test -p devmap-verity --no-default-features --features tokio --all-targets

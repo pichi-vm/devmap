@@ -6,7 +6,7 @@
 
 use std::{fs::OpenOptions, io::Read as _, num::NonZero};
 
-use devmap_linux::{Control, DevId};
+use devmap_linux::{Control, Defer as _, DevId};
 use devmap_verity::{header::Header, target::VerityTarget};
 
 mod fixture {

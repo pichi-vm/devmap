@@ -16,6 +16,9 @@ pub(crate) use abi::{header, uapi};
 
 pub use control::Control;
 pub use dev_id::DevId;
+#[cfg(feature = "tokio")]
+pub use device::AsyncDefer;
+pub use device::Defer;
 pub use parse_error::ParseError;
 
 /// The primary handles are cheap to clone and safe to share across

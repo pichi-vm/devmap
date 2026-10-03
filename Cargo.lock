@@ -72,6 +72,7 @@ dependencies = [
  "devmap-core",
  "iocuddle",
  "rustix",
+ "tokio",
  "zerocopy",
 ]
 

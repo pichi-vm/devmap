@@ -33,7 +33,7 @@ file is closed. It needs Linux device-mapper access, normally `CAP_SYS_ADMIN`.
 
 ```rust,no_run
 use std::{fs::OpenOptions, io::Read as _};
-use devmap_linux::{Control, target::zero::ZeroTarget};
+use devmap_linux::{Control, Defer as _, target::zero::ZeroTarget};
 
 # fn main() -> std::io::Result<()> {
 let control = Control::open()?;
@@ -57,6 +57,10 @@ crash. Calling `defer` opens the mapping and switches to kernel-managed
 deferred removal. The mapping remains until *all* open holders close, even if
 the creating process exits. A plain device handle has a different lifetime:
 dropping it leaves the kernel device in place.
+
+With the `tokio` feature enabled, import `AsyncDefer` instead and pass
+`tokio::fs::OpenOptions`. The open and removal transaction then runs without
+blocking a Tokio worker, and the returned holder is a `tokio::fs::File`.
 
 ## Inspect an existing mapping
 

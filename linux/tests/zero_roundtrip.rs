@@ -22,7 +22,7 @@ use std::{
 
 use common::{Owned, open_control};
 use devmap_linux::target::zero::ZeroTarget;
-use devmap_linux::{DevId, device::Status, target::Empty};
+use devmap_linux::{Defer as _, DevId, device::Status, target::Empty};
 
 #[test]
 fn create_load_resume_read_zeros_remove() {
@@ -345,6 +345,125 @@ fn deferred_removal_reclaims_a_device_that_is_still_open() {
         false
     });
     assert!(gone, "the kernel must reclaim the device once it is closed");
+}
+
+#[cfg(feature = "tokio")]
+mod async_defer {
+    use devmap_linux::AsyncDefer as _;
+    use tokio::io::AsyncReadExt as _;
+
+    use super::{ZeroTarget, open_control};
+
+    #[tokio::test]
+    async fn deferred_removal_returns_a_tokio_holder() {
+        let Some(control) = open_control() else {
+            return;
+        };
+
+        let name = format!("devmap-test-async-deferred-{}", std::process::id());
+        let dev = control.create(&name).expect("DM_DEV_CREATE").guard();
+        dev.builder()
+            .add(0, 8192, ZeroTarget)
+            .expect("add zero")
+            .load()
+            .expect("DM_TABLE_LOAD");
+        dev.resume().expect("DM_DEV_SUSPEND (resume)");
+
+        let mut options = tokio::fs::OpenOptions::new();
+        options.read(true);
+        let mut holder = dev
+            .defer(&options)
+            .await
+            .expect("asynchronously defer active device");
+
+        let mut sector = [1_u8; 512];
+        holder
+            .read_exact(&mut sector)
+            .await
+            .expect("read from dm-zero device");
+        assert_eq!(sector, [0; 512]);
+        control
+            .by_name(&name)
+            .expect("mapping remains while the Tokio holder is open");
+
+        drop(holder);
+        let gone = tokio::task::spawn_blocking(move || {
+            (0..50).any(|_| {
+                if control.by_name(&name).is_err() {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                false
+            })
+        })
+        .await
+        .expect("join removal poll");
+        assert!(gone, "the kernel must reclaim the device once it is closed");
+    }
+
+    #[tokio::test]
+    async fn failed_async_open_rolls_back_the_mapping() {
+        let Some(control) = open_control() else {
+            return;
+        };
+
+        let name = format!("devmap-test-async-rollback-{}", std::process::id());
+        let guard = control.create(&name).expect("DM_DEV_CREATE").guard();
+        guard
+            .builder()
+            .add(0, 8192, ZeroTarget)
+            .expect("add zero")
+            .load()
+            .expect("DM_TABLE_LOAD");
+        guard.resume().expect("DM_DEV_SUSPEND (resume)");
+
+        let error = guard
+            .defer(&tokio::fs::OpenOptions::new())
+            .await
+            .expect_err("options without an access mode must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(
+            control.by_name(&name).is_err(),
+            "failed async defer must roll back the mapping"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_async_defer_still_reclaims_the_mapping() {
+        let Some(control) = open_control() else {
+            return;
+        };
+
+        let name = format!("devmap-test-async-cancel-{}", std::process::id());
+        let guard = control.create(&name).expect("DM_DEV_CREATE").guard();
+        guard
+            .builder()
+            .add(0, 8192, ZeroTarget)
+            .expect("add zero")
+            .load()
+            .expect("DM_TABLE_LOAD");
+        guard.resume().expect("DM_DEV_SUSPEND (resume)");
+
+        let mut options = tokio::fs::OpenOptions::new();
+        options.read(true);
+        let operation = tokio::spawn(async move { guard.defer(&options).await });
+        tokio::task::yield_now().await;
+        operation.abort();
+        let _ = operation.await;
+
+        let gone = tokio::task::spawn_blocking(move || {
+            (0..50).any(|_| {
+                if control.by_name(&name).is_err() {
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                false
+            })
+        })
+        .await
+        .expect("join removal poll");
+        assert!(gone, "cancelled async defer must not leak the mapping");
+    }
 }
 
 #[test]

@@ -102,7 +102,7 @@ The process needs device-mapper access.
 # #[cfg(target_os = "linux")]
 # fn activate(data: &std::fs::File, hash: &std::fs::File, trusted_root: &[u8]) -> std::io::Result<std::fs::File> {
 use std::{fs::OpenOptions, io::Read as _};
-use devmap_linux::{Control, DevId};
+use devmap_linux::{Control, Defer as _, DevId};
 use devmap_verity::header::Header;
 
 let mut record = [0; 512];
