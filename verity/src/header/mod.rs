@@ -104,6 +104,14 @@ impl Header {
             })
     }
 
+    /// Returns the size of the padded header prefix in bytes.
+    ///
+    /// The prefix occupies one complete hash block: a 512-byte encoded header
+    /// followed by padding through the block boundary.
+    pub fn prefix_size(&self) -> u64 {
+        u64::from(self.hash.bytes().get())
+    }
+
     /// Returns the size of the complete hash tree in bytes.
     ///
     /// This excludes any on-disk header and any space before the tree. Those
@@ -130,6 +138,27 @@ impl Header {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "verity hash tree size overflows",
+                )
+            })
+    }
+
+    /// Returns the size of the padded header prefix and hash tree in bytes.
+    ///
+    /// This is the complete extent written by the synchronous and asynchronous
+    /// formatters. Headerless and custom-offset layouts should use
+    /// [`Self::tree_size`] and account for their selected tree offset instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] if the complete size cannot be
+    /// represented as a `u64` byte count.
+    pub fn total_size(&self) -> io::Result<u64> {
+        self.prefix_size()
+            .checked_add(self.tree_size()?)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "verity hash volume size overflows",
                 )
             })
     }

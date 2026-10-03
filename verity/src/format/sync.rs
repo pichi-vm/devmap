@@ -72,8 +72,9 @@ pub trait Format: Sized {
     /// returns. Pass mutable references when the caller needs to retain either
     /// stream afterward.
     ///
-    /// The output occupies one hash block for the header followed by
-    /// [`Header::tree_size`] bytes for the tree.
+    /// The output occupies [`Header::total_size`] bytes: one hash block for the
+    /// padded header prefix followed by [`Header::tree_size`] bytes for the
+    /// tree.
     ///
     /// # Errors
     ///
@@ -105,9 +106,10 @@ impl Format for Header {
         R: Read,
         W: Write + Seek,
     {
-        let encoded = self.encode();
         let data_size = self.data_size()?;
-        let padding = u64::from(self.hash.bytes().get()) - RECORD_SIZE as u64;
+        self.total_size()?;
+        let encoded = self.encode();
+        let padding = self.prefix_size() - RECORD_SIZE as u64;
         let mut tree = TreeWriter::new(hash, &self)?;
         tree.output_mut().write_all(&encoded)?;
         io::copy(&mut io::repeat(0).take(padding), tree.output_mut())?;

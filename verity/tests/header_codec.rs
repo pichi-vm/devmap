@@ -92,13 +92,17 @@ fn tree_size_excludes_the_header_and_tracks_every_level() {
         hash: BlockSize::default(),
     };
 
+    assert_eq!(header.prefix_size(), 4096);
     assert_eq!(header.tree_size().unwrap(), 0);
+    assert_eq!(header.total_size().unwrap(), 4096);
 
     header.data.count = NonZero::new(128).unwrap();
     assert_eq!(header.tree_size().unwrap(), 4096);
+    assert_eq!(header.total_size().unwrap(), 2 * 4096);
 
     header.data.count = NonZero::new(129).unwrap();
     assert_eq!(header.tree_size().unwrap(), 3 * 4096);
+    assert_eq!(header.total_size().unwrap(), 4 * 4096);
 }
 
 #[test]
@@ -109,6 +113,23 @@ fn overflowing_tree_size_is_rejected() {
     let error = header.tree_size().unwrap_err();
 
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(
+        header.total_size().unwrap_err().kind(),
+        ErrorKind::InvalidInput
+    );
+}
+
+#[test]
+fn total_size_checks_the_prefix_addition() {
+    let mut header = header(Algorithm::Sha512, HashType::Normal, &[]);
+    header.hash = BlockSize::from_exponent(9).unwrap();
+    header.data.count = NonZero::new(252_201_579_132_747_753).unwrap();
+
+    assert_eq!(header.tree_size().unwrap(), u64::MAX - 511);
+    assert_eq!(
+        header.total_size().unwrap_err().kind(),
+        ErrorKind::InvalidInput
+    );
 }
 
 #[test]
