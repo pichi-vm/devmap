@@ -72,6 +72,9 @@ pub trait Format: Sized {
     /// returns. Pass mutable references when the caller needs to retain either
     /// stream afterward.
     ///
+    /// The output occupies one hash block for the header followed by
+    /// [`Header::tree_size`] bytes for the tree.
+    ///
     /// # Errors
     ///
     /// Returns `Unsupported` when the selected algorithm's Cargo feature is
