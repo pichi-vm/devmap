@@ -11,6 +11,9 @@ readme = "README.md"
 keywords = ["linux", "device-mapper", "dm", "ioctl", "block-device"]
 categories = ["os::unix-apis", "api-bindings"]
 
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 devmap-core = { version = "0.1.0", path = "../core" }
 iocuddle = "0.3"

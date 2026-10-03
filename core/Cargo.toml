@@ -17,8 +17,5 @@ iocuddle = "0.3"
 [dev-dependencies]
 tempfile = "3"
 
-[package.metadata.docs.rs]
-rustdoc-args = ["--cfg", "docsrs"]
-
 [lints]
 workspace = true
