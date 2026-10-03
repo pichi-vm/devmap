@@ -79,6 +79,39 @@ fn hash_types_and_salt_boundaries_round_trip() {
 }
 
 #[test]
+fn tree_size_excludes_the_header_and_tracks_every_level() {
+    let mut header = Header {
+        uuid: [0; 16],
+        hash_type: HashType::Normal,
+        algorithm: Algorithm::Sha256,
+        salt: Salt::default(),
+        data: Geometry {
+            size: BlockSize::default(),
+            count: NonZero::new(1).unwrap(),
+        },
+        hash: BlockSize::default(),
+    };
+
+    assert_eq!(header.tree_size().unwrap(), 0);
+
+    header.data.count = NonZero::new(128).unwrap();
+    assert_eq!(header.tree_size().unwrap(), 4096);
+
+    header.data.count = NonZero::new(129).unwrap();
+    assert_eq!(header.tree_size().unwrap(), 3 * 4096);
+}
+
+#[test]
+fn overflowing_tree_size_is_rejected() {
+    let mut header = header(Algorithm::Sha256, HashType::Normal, &[]);
+    header.data.count = NonZero::new(u64::MAX).unwrap();
+
+    let error = header.tree_size().unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+}
+
+#[test]
 fn malformed_structural_fields_are_rejected() {
     let valid = header(Algorithm::Sha256, HashType::Normal, &[1, 2, 3]).encode();
     let mut cases = Vec::new();

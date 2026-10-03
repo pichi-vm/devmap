@@ -104,6 +104,36 @@ impl Header {
             })
     }
 
+    /// Returns the size of the complete hash tree in bytes.
+    ///
+    /// This excludes any on-disk header and any space before the tree. Those
+    /// are layout choices made by the formatter or target configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] if the tree size cannot be
+    /// represented as a `u64` byte count.
+    pub fn tree_size(&self) -> io::Result<u64> {
+        let hashes_per_block = self.hashes_per_block()?;
+        let blocks = self
+            .level_blocks(hashes_per_block)
+            .try_fold(0u64, u64::checked_add)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "verity hash tree size overflows",
+                )
+            })?;
+        blocks
+            .checked_mul(u64::from(self.hash.bytes().get()))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "verity hash tree size overflows",
+                )
+            })
+    }
+
     pub(crate) fn hashes_per_block(&self) -> io::Result<usize> {
         let capacity = self.hash.bytes().get() as usize / self.algorithm.digest_size();
         if capacity < 2 {

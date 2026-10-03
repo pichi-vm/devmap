@@ -33,6 +33,7 @@ impl State {
         let hash_block_size = header.hash.bytes().get();
         let maximum_size = header.data_size()?;
         let hashes_per_block = header.hashes_per_block()?;
+        let tree_size = header.tree_size()?;
         let blocks: Vec<_> = header.level_blocks(hashes_per_block).collect();
         let mut offsets = vec![0; blocks.len()];
         let mut offset = 0u64;
@@ -43,7 +44,7 @@ impl State {
                 .and_then(|size| offset.checked_add(size))
                 .ok_or_else(overflow)?;
         }
-        let tree_size = offset;
+        debug_assert_eq!(offset, tree_size);
         let levels = offsets
             .into_iter()
             .map(|offset| HashLevel::new(offset, hash_block_size as usize))
