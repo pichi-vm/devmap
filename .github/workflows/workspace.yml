@@ -85,6 +85,22 @@ jobs:
           package_dir=$(mktemp -d)
           cargo package --workspace --all-features --target-dir "$package_dir"
 
+  portable:
+    name: portable (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test portable crates
+        run: |
+          cargo test -p devmap-core --all-targets
+          cargo test -p devmap-verity --all-features --all-targets
+
   kernel:
     runs-on: ubuntu-24.04
     steps:

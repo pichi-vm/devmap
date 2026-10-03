@@ -3,17 +3,26 @@
 //! Path 2: format a verity hash volume compatible with `veritysetup`.
 
 use std::{
+    io::{Cursor, ErrorKind},
+    num::NonZero,
+};
+
+#[cfg(target_os = "linux")]
+use std::{
     fmt::Write as _,
     fs::{self, File},
-    io::{Cursor, ErrorKind, Write as _},
-    num::NonZero,
+    io::Write as _,
     process::Command,
 };
 
-use devmap_core::{BlockSize, Detect as _, Geometry};
+#[cfg(target_os = "linux")]
+use devmap_core::Detect as _;
+use devmap_core::{BlockSize, Geometry};
+#[cfg(target_os = "linux")]
+use devmap_verity::header::Constraint;
 use devmap_verity::{
     Format as _,
-    header::{Algorithm, Constraint, HashType, Header, Salt},
+    header::{Algorithm, HashType, Header, Salt},
 };
 
 #[test]
@@ -38,6 +47,7 @@ fn oversized_data_extent_is_rejected_before_writing() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn matches_veritysetup_byte_for_byte() {
     let directory = tempfile::tempdir().unwrap();
     let data_path = directory.path().join("data.img");
