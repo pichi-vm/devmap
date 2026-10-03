@@ -63,7 +63,7 @@ fn matches_veritysetup_byte_for_byte() {
         data: data_geometry,
         hash: hash_block_size,
     };
-    let tree_size = header.tree_size().unwrap();
+    let total_size = header.total_size().unwrap();
 
     // Our formatter writes the header and tree and returns the trusted root.
     let root = header.format(&mut data, &mut hash).unwrap();
@@ -96,10 +96,7 @@ fn matches_veritysetup_byte_for_byte() {
     let ours = fs::read(our_hash_path).unwrap();
     let reference = fs::read(reference_hash_path).unwrap();
     assert_eq!(ours, reference);
-    assert_eq!(
-        ours.len() as u64,
-        u64::from(header.hash.bytes().get()) + tree_size
-    );
+    assert_eq!(ours.len() as u64, total_size);
 
     // The independently stored root must agree as well.
     let stdout = String::from_utf8(output.stdout).unwrap();

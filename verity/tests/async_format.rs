@@ -153,7 +153,7 @@ async fn fragmented_pending_io_matches_synchronous_formatting() {
     let mut bytes: Vec<_> = (0_u8..251).cycle().take(DATA_SIZE).collect();
     bytes.extend_from_slice(b"input after the declared extent");
     let header = header(BLOCKS);
-    let formatted_size = u64::from(header.hash.bytes().get()) + header.tree_size().unwrap();
+    let total_size = header.total_size().unwrap();
 
     let mut sync_data = Cursor::new(bytes.clone());
     let mut sync_hash = Cursor::new(PREFIX.to_vec());
@@ -171,7 +171,7 @@ async fn fragmented_pending_io_matches_synchronous_formatting() {
     assert_eq!(async_hash.bytes(), sync_hash.get_ref());
     assert_eq!(async_data.position(), BLOCKS * 4096);
     assert_eq!(&async_hash.bytes()[..PREFIX.len()], PREFIX);
-    assert_eq!(async_hash.position(), PREFIX.len() as u64 + formatted_size);
+    assert_eq!(async_hash.position(), PREFIX.len() as u64 + total_size);
 }
 
 #[tokio::test]
