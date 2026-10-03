@@ -1,0 +1,31 @@
+name: security
+
+on:
+  push:
+    paths:
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - .github/workflows/security.yml
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - .github/workflows/security.yml
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rustsec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Check RustSec advisories
+        run: cargo audit
