@@ -28,7 +28,7 @@ pub struct Builder {
     try_verify_in_tasklet: bool,
     root_hash_sig_key_desc: Option<String>,
     data_sectors: u64,
-    tree_size: u128,
+    tree_sectors: u64,
 }
 
 impl VerityTarget {
@@ -114,21 +114,7 @@ impl Builder {
         root: Box<[u8]>,
     ) -> io::Result<Self> {
         let data_sectors = header.data_size()? / 512;
-        let hashes_per_block = header.hashes_per_block()?;
-        let tree_blocks =
-            header
-                .level_blocks(hashes_per_block)
-                .try_fold(0u128, |total, blocks| {
-                    total.checked_add(u128::from(blocks)).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidInput, "verity layout overflows")
-                    })
-                })?;
-        let tree_size = tree_blocks
-            .checked_mul(u128::from(header.hash.bytes().get()))
-            .filter(|size| size / 512 <= u128::from(u64::MAX))
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "verity layout overflows")
-            })?;
+        let tree_sectors = header.tree_size()? / 512;
         if root.len() != header.algorithm.digest_size() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -149,7 +135,7 @@ impl Builder {
             try_verify_in_tasklet: false,
             root_hash_sig_key_desc: None,
             data_sectors,
-            tree_size,
+            tree_sectors,
         }
         .hash_start(hash_start)
     }
@@ -161,11 +147,10 @@ impl Builder {
     /// Returns [`io::ErrorKind::InvalidInput`] if the resulting hash extent
     /// overflows.
     pub fn hash_start(mut self, value: u64) -> io::Result<Self> {
-        let size = u128::from(self.header.hash.bytes().get());
-        u128::from(value)
-            .checked_mul(size)
-            .and_then(|start| start.checked_add(self.tree_size))
-            .filter(|end| end / 512 <= u128::from(u64::MAX))
+        let block_sectors = u64::from(self.header.hash.bytes().get() / 512);
+        value
+            .checked_mul(block_sectors)
+            .and_then(|start| start.checked_add(self.tree_sectors))
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "verity hash extent overflows")
             })?;
@@ -256,5 +241,62 @@ impl Builder {
             root: self.root,
             data_sectors: self.data_sectors,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn devices() -> (DevId, DevId) {
+        (DevId::new(252, 1).unwrap(), DevId::new(252, 2).unwrap())
+    }
+
+    fn header(data_blocks: u64) -> Header {
+        Header {
+            uuid: [0; 16],
+            hash_type: HashType::default(),
+            algorithm: Algorithm::default(),
+            salt: Salt::default(),
+            data: Geometry {
+                size: BlockSize::default(),
+                count: NonZero::new(data_blocks).unwrap(),
+            },
+            hash: BlockSize::default(),
+        }
+    }
+
+    #[test]
+    fn default_and_custom_tree_offsets_are_preserved() {
+        let (data, hash) = devices();
+        let headerless = VerityTarget::builder(data, hash, NonZero::new(2).unwrap(), vec![0; 32])
+            .unwrap()
+            .build();
+        assert_eq!(headerless.hash_start, 0);
+
+        let header_backed = header(2).builder(data, hash, vec![0; 32]).unwrap().build();
+        assert_eq!(header_backed.hash_start, 1);
+
+        let custom = header(2)
+            .builder(data, hash, vec![0; 32])
+            .unwrap()
+            .hash_start(7)
+            .unwrap()
+            .build();
+        assert_eq!(custom.hash_start, 7);
+    }
+
+    #[test]
+    fn tree_offset_extent_uses_checked_sector_arithmetic() {
+        let (data, hash) = devices();
+        let builder =
+            VerityTarget::builder(data, hash, NonZero::new(2).unwrap(), vec![0; 32]).unwrap();
+
+        // Two data blocks produce one 4096-byte tree block: eight sectors.
+        let maximum = (u64::MAX - 8) / 8;
+        assert!(builder.clone().hash_start(maximum).is_ok());
+
+        let error = builder.hash_start(maximum + 1).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 }
