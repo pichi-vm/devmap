@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#![cfg_attr(target_os = "linux", allow(unsafe_code))]
-
 use crate::{BlockSize, Constraint, Geometry};
 #[cfg(target_os = "linux")]
 use iocuddle::{Group, Ioctl, Read};
@@ -16,6 +14,7 @@ const BLOCK: Group = Group::new(0x12);
 // `int` through its argument despite carrying no direction bits. The
 // classic request number and `u32` output match that stable Linux ABI.
 #[cfg(target_os = "linux")]
+#[expect(unsafe_code, reason = "declares the documented Linux ioctl ABI")]
 const BLKSSZGET: Ioctl<Read, &u32> = unsafe { Ioctl::classic(0x1268) };
 
 // SAFETY: BLKGETSIZE64 is `_IOR(0x12, 114, size_t)` in <linux/fs.h>, so
@@ -23,6 +22,7 @@ const BLKSSZGET: Ioctl<Read, &u32> = unsafe { Ioctl::classic(0x1268) };
 // nevertheless writes a `u64`; the returned reference guarantees eight
 // writable bytes on both 32- and 64-bit Linux.
 #[cfg(target_os = "linux")]
+#[expect(unsafe_code, reason = "declares the documented Linux ioctl ABI")]
 const BLKGETSIZE64: Ioctl<Read, &u64> = unsafe { BLOCK.read::<usize>(114).lie::<Read, &u64>() };
 
 /// Detects a value from an open file.

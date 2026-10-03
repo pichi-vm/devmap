@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Kernel UAPI mirrors + iocuddle ioctl-number declarations. This is the
-//! ONLY module in the crate that needs `#![allow(unsafe_code)]` — every
-//! unsafe block here is an iocuddle const constructor.
+//! Kernel UAPI mirrors + iocuddle ioctl-number declarations. Every unsafe
+//! block here is an iocuddle const constructor with an item-scoped lint
+//! expectation.
 //!
 //! The raw `dm_target_spec_raw` struct is `pub(crate)` so the table builder
 //! in [`crate::table`] can use it, and [`super::header::DmHeader`] is the
 //! safe `#[repr(C)]` mirror of `struct dm_ioctl` — neither crosses the crate
 //! boundary. All field layouts and command numbers below mirror
 //! `<linux/dm-ioctl.h>`.
-
-#![allow(unsafe_code)]
 
 use iocuddle::{Group, Ioctl, WriteRead};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
@@ -84,31 +82,45 @@ const DM_IOCTL_GROUP: Group = Group::new(0xfd);
 // `#[repr(C)]` mirror of `struct dm_ioctl` with private fields
 // and invariant-enforcing constructors, satisfying iocuddle's
 // "T provides safe wrappers around its raw contents" contract.
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_CREATE: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(3) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_REMOVE: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(4) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_SUSPEND: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(6) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_STATUS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(7) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_TABLE_LOAD: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(9) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_LIST_DEVICES: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(2) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_TABLE_STATUS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(12) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_WAIT: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(8) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_TABLE_CLEAR: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(10) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_TABLE_DEPS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(11) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_RENAME: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(5) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_LIST_VERSIONS: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(13) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_GET_TARGET_VERSION: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(17) };
+#[expect(unsafe_code, reason = "declares the documented device-mapper ABI")]
 pub(crate) const DM_DEV_ARM_POLL: Ioctl<WriteRead, &super::header::DmHeader> =
     unsafe { DM_IOCTL_GROUP.write_read(16) };
