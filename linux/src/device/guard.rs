@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    error::Error,
-    fmt,
     fs::{File, OpenOptions},
     io,
     ops::Deref,
@@ -21,33 +19,6 @@ use super::Device;
 #[derive(Debug)]
 pub struct Guard(Option<Device>);
 
-#[derive(Debug)]
-struct RollbackError {
-    operation: io::Error,
-    cleanup: io::Error,
-}
-
-#[cfg(feature = "tokio")]
-fn task_error(error: &tokio::task::JoinError) -> io::Error {
-    io::Error::other(format!("deferred-removal task failed: {error}"))
-}
-
-impl fmt::Display for RollbackError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}; immediate cleanup also failed: {}",
-            self.operation, self.cleanup
-        )
-    }
-}
-
-impl Error for RollbackError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.operation)
-    }
-}
-
 impl Device {
     /// Wraps this device in an opt-in immediate-cleanup guard.
     #[must_use]
@@ -63,26 +34,6 @@ impl Guard {
     pub fn disarm(mut self) -> Device {
         self.0.take().expect("guard is armed")
     }
-
-    fn complete_defer<T>(mut self, file: T) -> io::Result<T> {
-        let device = self.0.as_ref().expect("guard is armed");
-        if let Err(error) = device.remove_now(true) {
-            drop(file);
-            return Err(self.rollback(error));
-        }
-
-        self.0.take();
-        Ok(file)
-    }
-
-    fn rollback(&mut self, operation: io::Error) -> io::Error {
-        let kind = operation.kind();
-        let device = self.0.take().expect("guard is armed");
-        match device.remove(false) {
-            Ok(()) => operation,
-            Err(cleanup) => io::Error::new(kind, RollbackError { operation, cleanup }),
-        }
-    }
 }
 
 /// Opens a guarded device for synchronous I/O and schedules deferred removal.
@@ -95,21 +46,24 @@ pub trait Defer: Sized {
     ///
     /// # Errors
     ///
-    /// Returns an open or deferred-removal error. The guard attempts immediate
-    /// removal before returning any error; if rollback also fails, the returned
-    /// error reports both failures.
+    /// Returns an open or deferred-removal error. Dropping the still-armed
+    /// guard attempts immediate removal before returning either error; cleanup
+    /// is best-effort because destructors cannot report failures.
     fn defer(self, options: &OpenOptions) -> io::Result<File>;
 }
 
 impl Defer for Guard {
     fn defer(mut self, options: &OpenOptions) -> io::Result<File> {
         let device = self.0.as_ref().expect("guard is armed");
-        let file = match options.open(device.node_path()) {
-            Ok(file) => file,
-            Err(error) => return Err(self.rollback(error)),
-        };
+        let file = options.open(device.node_path())?;
 
-        self.complete_defer(file)
+        if let Err(error) = device.clone().remove(true) {
+            drop(file);
+            return Err(error);
+        }
+
+        self.0.take();
+        Ok(file)
     }
 }
 
@@ -122,14 +76,16 @@ pub trait AsyncDefer: Sized {
     ///
     /// The returned file keeps the device alive. Once its final holder closes,
     /// the kernel removes the device even if this process terminated without
-    /// unwinding. The removal ioctl and rollback run on Tokio's blocking pool.
-    /// Once this future is first polled, cancelling it does not cancel the
-    /// underlying open-and-remove transaction; the eventual holder is closed
-    /// and the mapping is reclaimed.
+    /// unwinding. Opening the holder is asynchronous; the short removal ioctl
+    /// and any rollback execute synchronously after the open completes.
+    /// Cancelling while the holder is being opened drops the still-armed guard
+    /// and attempts immediate removal.
     ///
     /// # Errors
     ///
-    /// Returns an open, deferred-removal, rollback, or blocking-task error.
+    /// Returns an open or deferred-removal error. Dropping the still-armed
+    /// guard attempts immediate removal before returning either error; cleanup
+    /// is best-effort because destructors cannot report failures.
     fn defer(
         self,
         options: &tokio::fs::OpenOptions,
@@ -144,23 +100,16 @@ impl AsyncDefer for Guard {
     ) -> impl Future<Output = io::Result<tokio::fs::File>> + Send {
         let options = options.clone();
         async move {
-            tokio::spawn(async move {
-                let device = self.0.as_ref().expect("guard is armed");
-                let file = match options.open(device.node_path()).await {
-                    Ok(file) => file,
-                    Err(error) => {
-                        return tokio::task::spawn_blocking(move || Err(self.rollback(error)))
-                            .await
-                            .map_err(|error| task_error(&error))?;
-                    }
-                };
+            let device = self.0.as_ref().expect("guard is armed");
+            let file = options.open(device.node_path()).await?;
 
-                tokio::task::spawn_blocking(move || self.complete_defer(file))
-                    .await
-                    .map_err(|error| task_error(&error))?
-            })
-            .await
-            .map_err(|error| task_error(&error))?
+            if let Err(error) = device.clone().remove(true) {
+                drop(file);
+                return Err(error);
+            }
+
+            self.0.take();
+            Ok(file)
         }
     }
 }

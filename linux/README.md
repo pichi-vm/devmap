@@ -59,8 +59,9 @@ the creating process exits. A plain device handle has a different lifetime:
 dropping it leaves the kernel device in place.
 
 With the `tokio` feature enabled, import `AsyncDefer` instead and pass
-`tokio::fs::OpenOptions`. The open and removal transaction then runs without
-blocking a Tokio worker, and the returned holder is a `tokio::fs::File`.
+`tokio::fs::OpenOptions`. Opening the holder is asynchronous; the short
+device-mapper removal ioctl then runs synchronously without another yield
+point. The returned holder is a `tokio::fs::File`.
 
 ## Inspect an existing mapping
 

@@ -138,15 +138,6 @@ impl Device {
         self.suspend_or_resume(false)
     }
 
-    pub(crate) fn remove_now(&self, deferred: bool) -> io::Result<()> {
-        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
-        if deferred {
-            header.set_deferred_remove();
-        }
-        DM_DEV_REMOVE.ioctl(&self.control, &mut header)?;
-        check_version(&header)
-    }
-
     /// `DM_DEV_REMOVE`. Remove the device immediately when `deferred` is
     /// `false`. When `true`, set `DM_DEFERRED_REMOVE`: remove it now if unused,
     /// or ask the kernel to remove it when the last holder closes it.
@@ -154,7 +145,12 @@ impl Device {
     ///
     /// Immediate removal fails when the device is still open.
     pub fn remove(self, deferred: bool) -> io::Result<()> {
-        self.remove_now(deferred)
+        let mut header = DmHeader::by_dev(u64::from(self.dev_t));
+        if deferred {
+            header.set_deferred_remove();
+        }
+        DM_DEV_REMOVE.ioctl(&self.control, &mut header)?;
+        check_version(&header)
     }
 
     /// `DM_DEV_STATUS` using this device's own `dev_t`.
