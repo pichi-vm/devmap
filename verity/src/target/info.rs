@@ -47,7 +47,7 @@ impl FromStr for Info {
     }
 }
 
-impl Parse<devmap_linux::table::Info> for Info {
+impl Parse<devmap_linux::row::Info> for Info {
     type Error = Error;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -81,41 +81,35 @@ mod tests {
     fn versioned_info_parser_matches_the_kernel_status_grammar() {
         for status in ["V", "C"] {
             assert_eq!(
-                <Info as Parse<devmap_linux::table::Info>>::parse(
-                    status,
-                    Version::from([1, 12, 0]),
-                ),
+                <Info as Parse<devmap_linux::row::Info>>::parse(status, Version::from([1, 12, 0]),),
                 Ok(Info {
                     corrupted: status == "C",
                     fec_corrected: None,
                 })
             );
             assert_eq!(
-                <Info as Parse<devmap_linux::table::Info>>::parse(
-                    status,
-                    Version::from([1, 13, 0]),
-                ),
+                <Info as Parse<devmap_linux::row::Info>>::parse(status, Version::from([1, 13, 0]),),
                 Err(Error)
             );
         }
 
         assert_eq!(
-            <Info as Parse<devmap_linux::table::Info>>::parse("C 3", Version::from([1, 13, 0])),
+            <Info as Parse<devmap_linux::row::Info>>::parse("C 3", Version::from([1, 13, 0])),
             Ok(Info {
                 corrupted: true,
                 fec_corrected: Some(3)
             })
         );
         assert_eq!(
-            <Info as Parse<devmap_linux::table::Info>>::parse("V -", Version::from([1, 13, 0])),
+            <Info as Parse<devmap_linux::row::Info>>::parse("V -", Version::from([1, 13, 0])),
             Ok(Info::default())
         );
         assert_eq!(
-            <Info as Parse<devmap_linux::table::Info>>::parse("C 3", Version::from([1, 12, 0])),
+            <Info as Parse<devmap_linux::row::Info>>::parse("C 3", Version::from([1, 12, 0])),
             Err(Error)
         );
         assert_eq!(
-            <Info as Parse<devmap_linux::table::Info>>::parse("V -", Version::from([2, 0, 0])),
+            <Info as Parse<devmap_linux::row::Info>>::parse("V -", Version::from([2, 0, 0])),
             Err(Error)
         );
     }

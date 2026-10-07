@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use super::{Empty, EncodeError, Target, Version};
 use crate::ParseError;
-use crate::table::Table;
+use crate::row::Table;
 use crate::target::Parse;
 
 /// The Linux device-mapper `zero` target.

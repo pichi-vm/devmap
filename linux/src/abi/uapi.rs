@@ -5,7 +5,8 @@
 //! expectation.
 //!
 //! The raw `dm_target_spec_raw` struct is `pub(crate)` so the table builder
-//! in [`crate::table`] can use it, and [`super::header::DmHeader`] is the
+//! in [`crate::device`] and [`crate::row`] can use it, and
+//! [`super::header::DmHeader`] is the
 //! safe `#[repr(C)]` mirror of `struct dm_ioctl` — neither crosses the crate
 //! boundary. All field layouts and command numbers below mirror
 //! `<linux/dm-ioctl.h>`.

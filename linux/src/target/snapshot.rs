@@ -8,7 +8,7 @@ use std::num::NonZero;
 use std::str::FromStr;
 
 use super::{Empty, EncodeError, Target, Version};
-use crate::table::Table;
+use crate::row::Table;
 use crate::target::Parse;
 use crate::{DevId, ParseError};
 
@@ -479,7 +479,7 @@ impl FromStr for Info {
     }
 }
 
-impl Parse<crate::table::Info> for Info {
+impl Parse<crate::row::Info> for Info {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -706,15 +706,15 @@ mod tests {
             Err(ParseError)
         );
         assert_eq!(
-            <Info as Parse<crate::table::Info>>::parse("Invalid", version),
+            <Info as Parse<crate::row::Info>>::parse("Invalid", version),
             Err(ParseError)
         );
         assert_eq!(
-            <Info as Parse<crate::table::Info>>::parse("Overflow", Version::from([1, 3, 0])),
+            <Info as Parse<crate::row::Info>>::parse("Overflow", Version::from([1, 3, 0])),
             Err(ParseError)
         );
         assert_eq!(
-            <Info as Parse<crate::table::Info>>::parse("Overflow", Version::from([1, 4, 0])),
+            <Info as Parse<crate::row::Info>>::parse("Overflow", Version::from([1, 4, 0])),
             Ok(Info::Overflow)
         );
     }

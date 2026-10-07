@@ -9,7 +9,7 @@ use std::str::FromStr;
 use devmap_core::{BlockSize, Constraint};
 
 use super::{Empty, EncodeError, Target, Version};
-use crate::table::Table;
+use crate::row::Table;
 use crate::target::Parse;
 use crate::{DevId, ParseError};
 use std::num::NonZero;

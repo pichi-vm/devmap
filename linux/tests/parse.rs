@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 use devmap_linux::{
     DevId,
-    table::{Info, Table},
+    row::{Info, Table},
     target::Parse,
     target::{Empty, Version},
 };
