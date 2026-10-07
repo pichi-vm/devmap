@@ -3,7 +3,7 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::table::{Info, Mode, Table};
+use crate::row::{Info, Mode, Table};
 
 use super::Version;
 
@@ -50,7 +50,7 @@ impl std::error::Error for EncodeError {}
 /// A loadable Linux device-mapper target.
 ///
 /// A device-mapper table contains rows, each covering a sector range.
-/// [`TableBuilder::add`](crate::table::TableBuilder::add) supplies that range, uses
+/// [`Builder::add`](crate::device::Builder::add) supplies that range, uses
 /// [`NAME`](Self::NAME) for the kernel target name, and calls [`encode`](Self::encode)
 /// with the installed target version. Creating the device and
 /// loading its table are separate operations.
@@ -58,9 +58,9 @@ impl std::error::Error for EncodeError {}
 /// The kernel can later report each row in two modes:
 ///
 /// - `STATUSTYPE_TABLE` reports the row's construction parameters. Parse
-///   those parameters as [`Table`](Self::Table) with [`Parse<crate::table::Table>`].
+///   those parameters as [`Table`](Self::Table) with [`Parse<crate::row::Table>`].
 /// - `STATUSTYPE_INFO` reports the target's current runtime state. Parse
-///   that state as [`Info`](Self::Info) with [`Parse<crate::table::Info>`].
+///   that state as [`Info`](Self::Info) with [`Parse<crate::row::Info>`].
 ///
 /// Table read-back is not necessarily a loadable target. The kernel may
 /// normalize, omit, or redact inputs. When read-back loses information,
@@ -87,7 +87,7 @@ pub trait Target: Sized {
     /// Parameters returned for this target in `STATUSTYPE_TABLE` mode.
     ///
     /// This type represents what the kernel reports, not necessarily the
-    /// value originally passed to [`TableBuilder::add`](crate::table::TableBuilder::add).
+    /// value originally passed to [`Builder::add`](crate::device::Builder::add).
     /// A lossy report should not be modeled as a loadable target merely
     /// because its text parses successfully.
     type Table: Parse<Table>;

@@ -2,7 +2,7 @@
 
 use super::Version;
 use crate::ParseError;
-use crate::table::Mode;
+use crate::row::Mode;
 use crate::target::Parse;
 use std::{fmt, str::FromStr};
 

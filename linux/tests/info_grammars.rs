@@ -15,7 +15,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use devmap_linux::{
-    table::Info,
+    row::Info,
     target::Parse,
     target::{Empty, Version, snapshot},
 };

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! [`Device`]: a plain, non-destructive handle identified by `dev_t`.
+//! [`Builder`]: a streaming `DM_TABLE_LOAD` request obtained from a device.
 //! [`Status`]: `DM_DEV_STATUS`'s fixed-size fields.
 
+mod builder;
 mod guard;
 mod status;
+pub use builder::Builder;
 #[cfg(feature = "tokio")]
 pub use guard::AsyncDefer;
 pub use guard::{Defer, Guard};
@@ -16,7 +19,7 @@ use std::io;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::table::{Info, Mode, Row, Table, TableBuilder};
+use crate::row::{Info, Mode, Row, Table};
 use crate::uapi::{
     DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT, DM_IOCTL_VERSION_MAJOR,
     DM_TABLE_CLEAR,
@@ -104,7 +107,7 @@ impl Device {
     }
 
     /// Begin building a table to `DM_TABLE_LOAD`. Add targets with
-    /// [`TableBuilder::add`] and finish with [`TableBuilder::load`]; the
+    /// [`Builder::add`] and finish with [`Builder::load`]; the
     /// staged table activates on the next [`Device::resume`].
     ///
     /// ```no_run
@@ -114,9 +117,9 @@ impl Device {
     /// dev.builder().add(0, 8192, ZeroTarget)?.load()?;
     /// # Ok(()) }
     /// ```
-    #[must_use = "a TableBuilder does nothing until `.load()` is called"]
-    pub fn builder(&self) -> TableBuilder {
-        TableBuilder::new(Arc::clone(&self.control), self.dev_t)
+    #[must_use = "a Builder does nothing until `.load()` is called"]
+    pub fn builder(&self) -> Builder {
+        Builder::new(Arc::clone(&self.control), self.dev_t)
     }
 
     fn suspend_or_resume(&self, suspend: bool) -> io::Result<()> {
@@ -244,8 +247,8 @@ impl Device {
         let parsed = DmHeader::response(&buf)?;
         let target_count = parsed.target_count();
         let data_start = (parsed.data_start() as usize).min(buf.len());
-        let raw = crate::table::TableStatusIter::<M>::new(buf, data_start, target_count);
-        let rows = crate::table::version_rows(raw, |name| {
+        let raw = crate::row::TableStatusIter::<M>::new(buf, data_start, target_count);
+        let rows = crate::row::version_rows(raw, |name| {
             crate::control::target_version(&self.control, name).map_err(|error| {
                 io::Error::new(
                     error.kind(),

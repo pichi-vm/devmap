@@ -6,7 +6,7 @@ use crate::header::{Algorithm, Constraint, HashType, Salt};
 use devmap_core::{BlockSize, Geometry};
 use devmap_linux::{
     DevId,
-    table::Table,
+    row::Table,
     target::{EncodeError, Parse, Target, Version},
 };
 
