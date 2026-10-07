@@ -15,7 +15,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use devmap_linux::{
-    table::InfoMode,
+    table::Info,
     target::Parse,
     target::{Empty, Version, snapshot},
 };
@@ -48,7 +48,7 @@ fn targets_with_no_runtime_status_accept_only_an_empty_line() {
 fn snapshot_reports_usage_or_a_state_keyword() {
     let info: snapshot::Info = round_trip("20480/524288 2048");
     assert_eq!(
-        <snapshot::Info as Parse<InfoMode>>::parse("20480/524288 2048", Version::from([1, 16, 0])),
+        <snapshot::Info as Parse<Info>>::parse("20480/524288 2048", Version::from([1, 16, 0])),
         Ok(info)
     );
     assert_eq!(

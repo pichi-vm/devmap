@@ -8,7 +8,7 @@ use std::num::NonZero;
 use std::str::FromStr;
 
 use super::{Empty, EncodeError, Target, Version};
-use crate::table::{InfoMode, TableMode};
+use crate::table::Table;
 use crate::target::Parse;
 use crate::{DevId, ParseError};
 
@@ -65,7 +65,7 @@ impl Target for SnapshotOriginTarget {
     }
 }
 
-impl Parse<TableMode> for SnapshotOriginTarget {
+impl Parse<Table> for SnapshotOriginTarget {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -259,7 +259,7 @@ impl Target for SnapshotTarget {
     }
 }
 
-impl Parse<TableMode> for SnapshotTarget {
+impl Parse<Table> for SnapshotTarget {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -370,7 +370,7 @@ impl Target for SnapshotMergeTarget {
     }
 }
 
-impl Parse<TableMode> for SnapshotMergeTarget {
+impl Parse<Table> for SnapshotMergeTarget {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -479,7 +479,7 @@ impl FromStr for Info {
     }
 }
 
-impl Parse<InfoMode> for Info {
+impl Parse<crate::table::Info> for Info {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -652,11 +652,11 @@ mod tests {
 
             let text = target.to_string();
             assert_eq!(
-                <SnapshotTarget as Parse<TableMode>>::parse(&text, before),
+                <SnapshotTarget as Parse<Table>>::parse(&text, before),
                 Err(ParseError)
             );
             assert_eq!(
-                <SnapshotTarget as Parse<TableMode>>::parse(&text, minimum),
+                <SnapshotTarget as Parse<Table>>::parse(&text, minimum),
                 Ok(target)
             );
         }
@@ -684,11 +684,11 @@ mod tests {
 
             let text = target.to_string();
             assert_eq!(
-                <SnapshotMergeTarget as Parse<TableMode>>::parse(&text, before),
+                <SnapshotMergeTarget as Parse<Table>>::parse(&text, before),
                 Err(ParseError)
             );
             assert_eq!(
-                <SnapshotMergeTarget as Parse<TableMode>>::parse(&text, minimum),
+                <SnapshotMergeTarget as Parse<Table>>::parse(&text, minimum),
                 Ok(target)
             );
         }
@@ -702,19 +702,19 @@ mod tests {
         let version = Version::from([2, 0, 0]);
         assert_eq!(origin.encode(version), Err(EncodeError { version }));
         assert_eq!(
-            <SnapshotOriginTarget as Parse<TableMode>>::parse(&origin.to_string(), version),
+            <SnapshotOriginTarget as Parse<Table>>::parse(&origin.to_string(), version),
             Err(ParseError)
         );
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("Invalid", version),
+            <Info as Parse<crate::table::Info>>::parse("Invalid", version),
             Err(ParseError)
         );
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("Overflow", Version::from([1, 3, 0])),
+            <Info as Parse<crate::table::Info>>::parse("Overflow", Version::from([1, 3, 0])),
             Err(ParseError)
         );
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("Overflow", Version::from([1, 4, 0])),
+            <Info as Parse<crate::table::Info>>::parse("Overflow", Version::from([1, 4, 0])),
             Ok(Info::Overflow)
         );
     }

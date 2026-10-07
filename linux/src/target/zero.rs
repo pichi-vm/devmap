@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use super::{Empty, EncodeError, Target, Version};
 use crate::ParseError;
-use crate::table::TableMode;
+use crate::table::Table;
 use crate::target::Parse;
 
 /// The Linux device-mapper `zero` target.
@@ -29,7 +29,7 @@ impl Target for ZeroTarget {
     }
 }
 
-impl Parse<TableMode> for ZeroTarget {
+impl Parse<Table> for ZeroTarget {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -85,7 +85,7 @@ mod tests {
         let version = Version::from([2, 0, 0]);
         assert_eq!(ZeroTarget.encode(version), Err(EncodeError { version }));
         assert_eq!(
-            <ZeroTarget as Parse<TableMode>>::parse("", version),
+            <ZeroTarget as Parse<Table>>::parse("", version),
             Err(ParseError)
         );
     }

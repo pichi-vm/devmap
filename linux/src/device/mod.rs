@@ -16,7 +16,7 @@ use std::io;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::table::{InfoMode, Mode, Row, TableBuilder, TableMode};
+use crate::table::{Info, Mode, Row, Table, TableBuilder};
 use crate::uapi::{
     DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT, DM_IOCTL_VERSION_MAJOR,
     DM_TABLE_CLEAR,
@@ -212,19 +212,19 @@ impl Device {
     }
 
     /// `DM_TABLE_STATUS` in table mode (`STATUSTYPE_TABLE`) — the active
-    /// table's construction params, one [`Row<TableMode>`] per target.
+    /// table's construction params, one [`Row<Table>`] per target.
     /// Reconstruct a target with [`Row::parse`]. Target versions are resolved
     /// before rows are returned.
-    pub fn table(&self) -> io::Result<impl Iterator<Item = Row<TableMode>>> {
+    pub fn table(&self) -> io::Result<impl Iterator<Item = Row<Table>>> {
         let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         header.set_status_table();
         self.table_status_iter(header)
     }
 
     /// `DM_TABLE_STATUS` in info mode (`STATUSTYPE_INFO`) — per-target
-    /// runtime status, one [`Row<InfoMode>`] per target. Decode with
+    /// runtime status, one [`Row<Info>`] per target. Decode with
     /// [`Row::parse`]. Target versions are resolved before rows are returned.
-    pub fn info(&self) -> io::Result<impl Iterator<Item = Row<InfoMode>>> {
+    pub fn info(&self) -> io::Result<impl Iterator<Item = Row<Info>>> {
         let header = DmHeader::by_dev(u64::from(self.dev_t));
         self.table_status_iter(header)
     }

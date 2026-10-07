@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use devmap_linux::ParseError as Error;
-use devmap_linux::{
-    table::InfoMode,
-    target::{Parse, Version},
-};
+use devmap_linux::target::{Parse, Version};
 use std::{fmt, str::FromStr};
 
 /// Runtime corruption status and number of FEC-corrected blocks.
@@ -50,7 +47,7 @@ impl FromStr for Info {
     }
 }
 
-impl Parse<InfoMode> for Info {
+impl Parse<devmap_linux::table::Info> for Info {
     type Error = Error;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -84,35 +81,41 @@ mod tests {
     fn versioned_info_parser_matches_the_kernel_status_grammar() {
         for status in ["V", "C"] {
             assert_eq!(
-                <Info as Parse<InfoMode>>::parse(status, Version::from([1, 12, 0])),
+                <Info as Parse<devmap_linux::table::Info>>::parse(
+                    status,
+                    Version::from([1, 12, 0]),
+                ),
                 Ok(Info {
                     corrupted: status == "C",
                     fec_corrected: None,
                 })
             );
             assert_eq!(
-                <Info as Parse<InfoMode>>::parse(status, Version::from([1, 13, 0])),
+                <Info as Parse<devmap_linux::table::Info>>::parse(
+                    status,
+                    Version::from([1, 13, 0]),
+                ),
                 Err(Error)
             );
         }
 
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("C 3", Version::from([1, 13, 0])),
+            <Info as Parse<devmap_linux::table::Info>>::parse("C 3", Version::from([1, 13, 0])),
             Ok(Info {
                 corrupted: true,
                 fec_corrected: Some(3)
             })
         );
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("V -", Version::from([1, 13, 0])),
+            <Info as Parse<devmap_linux::table::Info>>::parse("V -", Version::from([1, 13, 0])),
             Ok(Info::default())
         );
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("C 3", Version::from([1, 12, 0])),
+            <Info as Parse<devmap_linux::table::Info>>::parse("C 3", Version::from([1, 12, 0])),
             Err(Error)
         );
         assert_eq!(
-            <Info as Parse<InfoMode>>::parse("V -", Version::from([2, 0, 0])),
+            <Info as Parse<devmap_linux::table::Info>>::parse("V -", Version::from([2, 0, 0])),
             Err(Error)
         );
     }

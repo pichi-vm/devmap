@@ -3,8 +3,8 @@
 //! Build device-mapper tables and read their target rows.
 //!
 //! [`TableBuilder`] loads targets implementing [`Target`]. The kernel later
-//! reports each target as a [`Row`]: [`TableMode`] rows contain construction
-//! parameters, while [`InfoMode`] rows contain runtime status. Use
+//! reports each target as a [`Row`]: [`Table`] rows contain construction
+//! parameters, while [`Info`] rows contain runtime status. Use
 //! [`Row::parse`] with a target type to interpret either response.
 
 use std::collections::HashMap;
@@ -29,22 +29,22 @@ use crate::target::{Parse, Target, Version};
 
 /// `STATUSTYPE_TABLE`: the mapping's construction parameters.
 #[derive(Debug)]
-pub enum TableMode {}
+pub enum Table {}
 
 /// `STATUSTYPE_INFO`: per-target runtime status.
 #[derive(Debug)]
-pub enum InfoMode {}
+pub enum Info {}
 
 mod sealed {
     pub trait Sealed {}
-    impl Sealed for super::TableMode {}
-    impl Sealed for super::InfoMode {}
+    impl Sealed for super::Table {}
+    impl Sealed for super::Info {}
 }
 
 /// Sealed marker distinguishing the two `DM_TABLE_STATUS` payloads.
 pub trait Mode: sealed::Sealed {}
-impl Mode for TableMode {}
-impl Mode for InfoMode {}
+impl Mode for Table {}
+impl Mode for Info {}
 
 /// A target's sector range and kernel response, returned by
 /// [`Device::table`](crate::device::Device::table) or
@@ -99,26 +99,26 @@ impl<M: Mode> Row<M> {
     }
 }
 
-impl Row<TableMode> {
+impl Row<Table> {
     /// Read this table row as target `T`'s table type ([`Target::Table`]).
     ///
     /// Returns `InvalidInput` for a different target name or `InvalidData`
     /// when the target cannot parse the reported parameters or version.
     pub fn parse<T: Target>(&self) -> io::Result<T::Table> {
         self.check_target::<T>()?;
-        <T::Table as Parse<TableMode>>::parse(&self.params, self.version)
+        <T::Table as Parse<Table>>::parse(&self.params, self.version)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 
-impl Row<InfoMode> {
+impl Row<Info> {
     /// Parse this status row as target `T`'s runtime status ([`Target::Info`]).
     ///
     /// Returns `InvalidInput` for a different target name or `InvalidData`
     /// when the target cannot parse the reported status or version.
     pub fn parse<T: Target>(&self) -> io::Result<T::Info> {
         self.check_target::<T>()?;
-        <T::Info as Parse<InfoMode>>::parse(&self.params, self.version)
+        <T::Info as Parse<Info>>::parse(&self.params, self.version)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
@@ -444,7 +444,7 @@ mod tests {
             (b"linear", "252:1 0"),
             (b"zero", ""),
         ]);
-        let raw = TableStatusIter::<TableMode>::new(bytes, DmHeader::SIZE, count);
+        let raw = TableStatusIter::<Table>::new(bytes, DmHeader::SIZE, count);
         let mut names = Vec::new();
         let rows = version_rows(raw, |name| {
             names.push(name.to_owned());
@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn status_rows_propagate_version_lookup_failure() {
         let (bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
-        let raw = TableStatusIter::<InfoMode>::new(bytes, DmHeader::SIZE, count);
+        let raw = TableStatusIter::<Info>::new(bytes, DmHeader::SIZE, count);
         let result = version_rows(raw, |_| Err(io::Error::other("lookup failed")));
         assert!(matches!(result, Err(error) if error.to_string() == "lookup failed"));
     }
@@ -471,7 +471,7 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     struct Dual(u32);
 
-    impl Parse<TableMode> for Dual {
+    impl Parse<Table> for Dual {
         type Error = Error;
 
         fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -482,7 +482,7 @@ mod tests {
         }
     }
 
-    impl Parse<InfoMode> for Dual {
+    impl Parse<Info> for Dual {
         type Error = Error;
 
         fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -508,21 +508,21 @@ mod tests {
     #[test]
     fn row_parse_dispatches_by_mode_and_version() {
         let (bytes, count) = synthetic_table_status_response(&[(b"dual", "spec 7")]);
-        let raw = TableStatusIter::<TableMode>::new(bytes, DmHeader::SIZE, count)
+        let raw = TableStatusIter::<Table>::new(bytes, DmHeader::SIZE, count)
             .next()
             .unwrap();
         let row = raw.with_version(Version::from([1, 0, 0]));
         assert_eq!(row.parse::<DualTarget>().unwrap(), Dual(7));
 
         let (bytes, count) = synthetic_table_status_response(&[(b"dual", "info 9")]);
-        let raw = TableStatusIter::<InfoMode>::new(bytes, DmHeader::SIZE, count)
+        let raw = TableStatusIter::<Info>::new(bytes, DmHeader::SIZE, count)
             .next()
             .unwrap();
         let row = raw.with_version(Version::from([1, 0, 0]));
         assert_eq!(row.parse::<DualTarget>().unwrap(), Dual(9));
 
         let (bytes, count) = synthetic_table_status_response(&[(b"dual", "spec 7")]);
-        let raw = TableStatusIter::<TableMode>::new(bytes, DmHeader::SIZE, count)
+        let raw = TableStatusIter::<Table>::new(bytes, DmHeader::SIZE, count)
             .next()
             .unwrap();
         assert_eq!(
@@ -712,7 +712,7 @@ mod tests {
     fn spec_row_parses_matching_target_and_rejects_others() {
         let params = "aes-xts-plain64 - 0 252:5 5";
         let (bytes, count) = synthetic_table_status_response(&[(b"crypt", params)]);
-        let mut row = status_rows::<TableMode>(bytes, count).remove(0);
+        let mut row = status_rows::<Table>(bytes, count).remove(0);
         row.version = Version::from([1, 29, 0]);
         assert_eq!(row.start(), 0);
         assert_eq!(row.parse::<CryptTarget>().unwrap(), params.parse().unwrap());
@@ -727,7 +727,7 @@ mod tests {
     #[test]
     fn malformed_row_preserves_the_parser_error() {
         let (bytes, count) = synthetic_table_status_response(&[(b"crypt", "invalid")]);
-        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        let row = status_rows::<Table>(bytes, count).remove(0);
         let error = row.parse::<CryptTarget>().unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn row_debug_redacts_parameters() {
         let (bytes, count) = synthetic_table_status_response(&[(b"crypt", "secret-key")]);
-        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        let row = status_rows::<Table>(bytes, count).remove(0);
         let debug = format!("{row:?}");
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("secret-key"));
@@ -753,7 +753,7 @@ mod tests {
             (b"linear", "252:5 5"),
             (b"error", ""),
         ]);
-        let rows = status_rows::<TableMode>(bytes, count);
+        let rows = status_rows::<Table>(bytes, count);
         assert_eq!(rows.len(), 3);
         assert_eq!(
             rows[0].parse::<crate::target::zero::ZeroTarget>().unwrap(),
@@ -770,7 +770,7 @@ mod tests {
         // target_count claims 3 but the buffer holds only 1 spec: the bounds
         // guard must terminate cleanly instead of reading past the end.
         let (bytes, _) = synthetic_table_status_response(&[(b"zero", "")]);
-        let rows = status_rows::<TableMode>(bytes, 3);
+        let rows = status_rows::<Table>(bytes, 3);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].type_name, "zero");
     }
@@ -780,7 +780,7 @@ mod tests {
         // A single real entry whose next==0, but remaining=2: the next==0
         // jump-to-end must win over the remaining counter.
         let (bytes, _) = synthetic_table_status_response(&[(b"zero", "")]);
-        let rows = status_rows::<TableMode>(bytes, 2);
+        let rows = status_rows::<Table>(bytes, 2);
         assert_eq!(rows.len(), 1);
     }
 
@@ -793,7 +793,7 @@ mod tests {
         let (mut bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
         let type_off = DmHeader::SIZE + 24;
         bytes[type_off..type_off + DM_MAX_TYPE_NAME].copy_from_slice(b"abcdefghijklmnop");
-        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        let row = status_rows::<Table>(bytes, count).remove(0);
         assert_eq!(row.type_name, "abcdefghijklmnop");
         assert_eq!(row.type_name.len(), DM_MAX_TYPE_NAME);
     }
@@ -815,7 +815,7 @@ mod tests {
         }
     }
 
-    impl Parse<TableMode> for Unreadable {
+    impl Parse<Table> for Unreadable {
         type Error = Error;
 
         fn parse(_: &str, _: Version) -> Result<Self, Self::Error> {
@@ -899,7 +899,7 @@ mod tests {
         }
     }
 
-    impl Parse<TableMode> for CustomTarget {
+    impl Parse<Table> for CustomTarget {
         type Error = Error;
 
         fn parse(text: &str, _: Version) -> Result<Self, Self::Error> {
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(b.buf[param_start + params.len()], 0);
 
         let (bytes, count) = synthetic_table_status_response(&[(b"custom-target", "1 2 3")]);
-        let row = status_rows::<TableMode>(bytes, count).remove(0);
+        let row = status_rows::<Table>(bytes, count).remove(0);
         assert_eq!(row.parse::<CustomTarget>().unwrap().value, 3);
     }
 
@@ -996,7 +996,7 @@ mod tests {
         // A kernel-reported base offset near usize::MAX makes the per-spec
         // `checked_add` overflow; the iterator must stop, not panic.
         let buf = vec![0u8; DmHeader::SIZE];
-        let mut it = TableStatusIter::<TableMode>::new(buf, usize::MAX - 1, 1);
+        let mut it = TableStatusIter::<Table>::new(buf, usize::MAX - 1, 1);
         assert!(it.next().is_none());
     }
 }

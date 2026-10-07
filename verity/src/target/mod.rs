@@ -6,7 +6,7 @@ use crate::header::{Algorithm, Constraint, HashType, Salt};
 use devmap_core::{BlockSize, Geometry};
 use devmap_linux::{
     DevId,
-    table::TableMode,
+    table::Table,
     target::{EncodeError, Parse, Target, Version},
 };
 
@@ -79,7 +79,7 @@ impl Target for VerityTarget {
     }
 }
 
-impl Parse<TableMode> for VerityTarget {
+impl Parse<Table> for VerityTarget {
     type Error = devmap_linux::ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -190,9 +190,9 @@ mod tests {
             assert!(target.encode(minimum).is_ok());
 
             let text = target.to_string();
-            assert!(<VerityTarget as Parse<TableMode>>::parse(&text, before).is_err());
+            assert!(<VerityTarget as Parse<Table>>::parse(&text, before).is_err());
             assert_eq!(
-                <VerityTarget as Parse<TableMode>>::parse(&text, minimum),
+                <VerityTarget as Parse<Table>>::parse(&text, minimum),
                 Ok(target)
             );
         }

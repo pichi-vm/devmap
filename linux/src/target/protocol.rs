@@ -3,13 +3,13 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::table::{InfoMode, Mode, TableMode};
+use crate::table::{Info, Mode, Table};
 
 use super::Version;
 
 /// Parse a target's kernel response in one status mode and target version.
 ///
-/// A type can implement this differently for [`TableMode`] and [`InfoMode`]
+/// A type can implement this differently for [`Table`] and [`Info`]
 /// when it represents both grammars. An unversioned `FromStr` implementation
 /// may be used internally, but is not required.
 pub trait Parse<M: Mode>: Sized {
@@ -58,9 +58,9 @@ impl std::error::Error for EncodeError {}
 /// The kernel can later report each row in two modes:
 ///
 /// - `STATUSTYPE_TABLE` reports the row's construction parameters. Parse
-///   those parameters as [`Table`](Self::Table) with [`Parse<TableMode>`].
+///   those parameters as [`Table`](Self::Table) with [`Parse<crate::table::Table>`].
 /// - `STATUSTYPE_INFO` reports the target's current runtime state. Parse
-///   that state as [`Info`](Self::Info) with [`Parse<InfoMode>`].
+///   that state as [`Info`](Self::Info) with [`Parse<crate::table::Info>`].
 ///
 /// Table read-back is not necessarily a loadable target. The kernel may
 /// normalize, omit, or redact inputs. When read-back loses information,
@@ -90,10 +90,10 @@ pub trait Target: Sized {
     /// value originally passed to [`TableBuilder::add`](crate::table::TableBuilder::add).
     /// A lossy report should not be modeled as a loadable target merely
     /// because its text parses successfully.
-    type Table: Parse<TableMode>;
+    type Table: Parse<Table>;
 
     /// Runtime state returned for this target in `STATUSTYPE_INFO` mode.
     ///
     /// Use [`Empty`](crate::target::Empty) when the kernel reports no runtime fields.
-    type Info: Parse<InfoMode>;
+    type Info: Parse<Info>;
 }
