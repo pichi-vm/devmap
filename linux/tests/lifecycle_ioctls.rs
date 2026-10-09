@@ -302,7 +302,8 @@ fn a_custom_target_loads_a_table_line() {
     dev.resume().expect("resume");
 
     // The kernel accepts it and reads the same line back.
-    let rows: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
+    let table = dev.table().expect("DM_TABLE_STATUS");
+    let rows: Vec<_> = table.rows().collect::<std::io::Result<_>>().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].parse::<LinearTarget>().unwrap(), params.clone());
 }

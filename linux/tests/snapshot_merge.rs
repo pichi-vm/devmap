@@ -120,7 +120,8 @@ fn snapshot_merge_takes_over_from_snapshot_and_merges() {
     loop {
         let status = origin.status().expect("DM_DEV_STATUS");
         assert_eq!(status.target_count, 1);
-        let reported: Vec<_> = origin.info().expect("DM_TABLE_STATUS").collect();
+        let info = origin.info().expect("DM_TABLE_STATUS");
+        let reported: Vec<_> = info.rows().collect::<std::io::Result<_>>().unwrap();
         // The merge is done once nothing but metadata is left allocated.
         let complete = matches!(
             reported[0].parse::<snapshot::SnapshotMergeTarget>(),

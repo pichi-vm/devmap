@@ -51,7 +51,8 @@ fn crypt_maps_a_device_and_round_trips_data() {
 
     // The table read back must parse as `CryptTarget` and match what we rendered,
     // except that the kernel masks the key unless asked for it.
-    let rows: Vec<_> = dev.table().expect("read table").collect();
+    let table = dev.table().expect("read table");
+    let rows: Vec<_> = table.rows().collect::<std::io::Result<_>>().unwrap();
     assert_eq!(rows.len(), 1);
     let reported = rows[0]
         .parse::<CryptTarget>()
