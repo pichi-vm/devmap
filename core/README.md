@@ -1,8 +1,9 @@
 # devmap-core
 
-`devmap-core` provides block sizes and geometry shared by the other devmap
-crates. Use it when an on-disk format needs to describe an extent in blocks.
+`devmap-core` provides spans, block sizes, and geometry shared by the other
+devmap crates. Use it when an on-disk format needs to describe an extent.
 
+A span is a starting offset and length whose unit is established by its caller.
 A block size is a nonzero power of two in bytes. Geometry pairs that size with
 a nonzero number of blocks. For example, an 8 MiB extent with 4 KiB blocks has
 2,048 blocks.
