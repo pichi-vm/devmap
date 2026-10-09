@@ -19,23 +19,12 @@ use crate::target::{Parse, Target, Version};
 use crate::header::DmHeader;
 
 /// `STATUSTYPE_TABLE`: the mapping's construction parameters.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Table {}
 
 /// `STATUSTYPE_INFO`: per-target runtime status.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Info {}
-
-mod sealed {
-    pub trait Sealed {}
-    impl Sealed for super::Table {}
-    impl Sealed for super::Info {}
-}
-
-/// Sealed marker distinguishing the two `DM_TABLE_STATUS` payloads.
-pub trait Mode: sealed::Sealed {}
-impl Mode for Table {}
-impl Mode for Info {}
 
 /// A target's sector range and kernel response, returned by
 /// [`Device::table`](crate::device::Device::table) or
@@ -47,7 +36,7 @@ impl Mode for Info {}
 /// The kernel target version is supplied to the target's parser automatically.
 /// Raw response parameters are not exposed; `Debug` redacts them.
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct Row<M: Mode> {
+pub struct Row<M> {
     start: u64,
     length: u64,
     type_name: String,
@@ -56,7 +45,7 @@ pub struct Row<M: Mode> {
     _mode: PhantomData<M>,
 }
 
-impl<M: Mode> fmt::Debug for Row<M> {
+impl<M> fmt::Debug for Row<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Row")
             .field("start", &self.start)
@@ -68,7 +57,7 @@ impl<M: Mode> fmt::Debug for Row<M> {
     }
 }
 
-impl<M: Mode> Row<M> {
+impl<M> Row<M> {
     /// First sector covered by this row.
     pub fn start(&self) -> u64 {
         self.start
@@ -114,130 +103,64 @@ impl Row<Info> {
     }
 }
 
-/// Parses a `DM_TABLE_STATUS` response into raw rows. The device resolves
-/// each target version before exposing public [`Row`]s.
-///
-/// `dm_target_spec.next` here is the byte offset from the *first* spec's
-/// start to the next one (the read-direction convention, opposite the
-/// write side — see `<linux/dm-ioctl.h>`).
-pub(crate) struct TableStatusIter<M: Mode> {
-    buf: Vec<u8>,
-    first: usize,
-    offset: usize,
-    remaining: u32,
-    _mode: PhantomData<M>,
-}
-
-impl<M: Mode> TableStatusIter<M> {
-    /// `data_start` is the kernel-reported offset of the first spec (the
-    /// base for read-side `next`); callers pass it clamped to `buf.len()`.
-    pub(crate) fn new(buf: Vec<u8>, data_start: usize, target_count: u32) -> Self {
-        Self {
-            buf,
-            first: data_start,
-            offset: data_start,
-            remaining: target_count,
-            _mode: PhantomData,
-        }
-    }
-}
-
-impl<M: Mode> Iterator for TableStatusIter<M> {
-    type Item = RawRow<M>;
-
-    // The fixed-width `try_into().unwrap()`s below operate on a slice bounded
-    // to exactly `DM_TARGET_SPEC_SIZE`, so they cannot panic.
-    #[allow(clippy::missing_panics_doc)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        // `checked_add` guards against a kernel-controlled `next` overflowing
-        // `usize` on 32-bit targets; on overflow we simply stop.
-        let end = self.offset.checked_add(DM_TARGET_SPEC_SIZE)?;
-        if end > self.buf.len() {
-            return None;
-        }
-
-        let spec = &self.buf[self.offset..end];
-        let sector_start = u64::from_ne_bytes(spec[0..8].try_into().unwrap());
-        let length = u64::from_ne_bytes(spec[8..16].try_into().unwrap());
-        let next = u32::from_ne_bytes(spec[20..24].try_into().unwrap());
-        let type_field = &spec[24..24 + DM_MAX_TYPE_NAME];
-        let type_nul = type_field
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(type_field.len());
-        let type_name = String::from_utf8_lossy(&type_field[..type_nul]).into_owned();
-
-        let param_area = &self.buf[end..];
-        let param_nul = param_area
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(param_area.len());
-        let params = String::from_utf8_lossy(&param_area[..param_nul]).into_owned();
-
-        self.remaining -= 1;
-        self.offset = if next == 0 {
-            self.buf.len()
-        } else {
-            self.first.saturating_add(next as usize)
-        };
-
-        Some(RawRow {
-            start: sector_start,
-            length,
-            type_name,
-            params,
-            _mode: PhantomData,
-        })
-    }
-}
-
-/// A parsed status row before the target version has been resolved.
-pub(crate) struct RawRow<M: Mode> {
-    start: u64,
-    length: u64,
-    type_name: String,
-    params: String,
-    _mode: PhantomData<M>,
-}
-
-impl<M: Mode> RawRow<M> {
-    pub(crate) fn type_name(&self) -> &str {
-        &self.type_name
-    }
-
-    pub(crate) fn with_version(self, version: Version) -> Row<M> {
-        Row {
-            start: self.start,
-            length: self.length,
-            type_name: self.type_name,
-            params: self.params,
-            version,
-            _mode: PhantomData,
-        }
-    }
-}
-
-/// Resolve each distinct target type once before exposing typed rows.
-pub(crate) fn version_rows<M: Mode>(
-    raw: impl IntoIterator<Item = RawRow<M>>,
+/// Decode and version the rows in a `DM_TABLE_STATUS` response.
+pub(crate) fn decode<M>(
+    buf: &[u8],
+    data_start: usize,
+    target_count: u32,
     mut query: impl FnMut(&str) -> io::Result<Version>,
 ) -> io::Result<Vec<Row<M>>> {
     let mut versions = HashMap::new();
     let mut rows = Vec::new();
+    let mut offset = data_start;
 
-    for row in raw {
-        let name = row.type_name();
-        let version = if let Some(version) = versions.get(name) {
+    for _ in 0..target_count {
+        let Some(end) = offset.checked_add(DM_TARGET_SPEC_SIZE) else {
+            break;
+        };
+        if end > buf.len() {
+            break;
+        }
+
+        let spec = &buf[offset..end];
+        let start = u64::from_ne_bytes(spec[0..8].try_into().unwrap());
+        let length = u64::from_ne_bytes(spec[8..16].try_into().unwrap());
+        let next = u32::from_ne_bytes(spec[20..24].try_into().unwrap());
+        let type_field = &spec[24..24 + DM_MAX_TYPE_NAME];
+        let type_end = type_field
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(type_field.len());
+        let type_name = String::from_utf8_lossy(&type_field[..type_end]).into_owned();
+
+        let params = &buf[end..];
+        let params_end = params
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(params.len());
+        let params = String::from_utf8_lossy(&params[..params_end]).into_owned();
+
+        let version = if let Some(version) = versions.get(&type_name) {
             *version
         } else {
-            let version = query(name)?;
-            versions.insert(name.to_owned(), version);
+            let version = query(&type_name)?;
+            versions.insert(type_name.clone(), version);
             version
         };
-        rows.push(row.with_version(version));
+
+        rows.push(Row {
+            start,
+            length,
+            type_name,
+            params,
+            version,
+            _mode: PhantomData,
+        });
+
+        if next == 0 {
+            break;
+        }
+        offset = data_start.saturating_add(next as usize);
     }
 
     Ok(rows)
@@ -248,24 +171,23 @@ pub(crate) fn version_rows<M: Mode>(
 mod tests {
     use super::*;
     use crate::ParseError as Error;
-    use crate::target::crypt::CryptTarget;
 
-    fn status_rows<M: Mode>(bytes: Vec<u8>, count: u32) -> Vec<Row<M>> {
-        TableStatusIter::<M>::new(bytes, DmHeader::SIZE, count)
-            .map(|row| row.with_version(Version::from([1, 0, 0])))
-            .collect()
+    fn status_rows<M>(bytes: &[u8], count: u32) -> Vec<Row<M>> {
+        decode(bytes, DmHeader::SIZE, count, |_| {
+            Ok(Version::from([1, 0, 0]))
+        })
+        .unwrap()
     }
 
     #[test]
-    fn status_rows_resolve_each_target_name_once() {
+    fn version_resolution_is_cached_and_errors_propagate() {
         let (bytes, count) = synthetic_table_status_response(&[
             (b"zero", ""),
             (b"linear", "252:1 0"),
             (b"zero", ""),
         ]);
-        let raw = TableStatusIter::<Table>::new(bytes, DmHeader::SIZE, count);
         let mut names = Vec::new();
-        let rows = version_rows(raw, |name| {
+        let rows = decode::<Table>(&bytes, DmHeader::SIZE, count, |name| {
             names.push(name.to_owned());
             Ok(Version::from([1, 2, 3]))
         })
@@ -277,13 +199,11 @@ mod tests {
             rows.iter()
                 .all(|row| row.version == Version::from([1, 2, 3]))
         );
-    }
 
-    #[test]
-    fn status_rows_propagate_version_lookup_failure() {
         let (bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
-        let raw = TableStatusIter::<Info>::new(bytes, DmHeader::SIZE, count);
-        let result = version_rows(raw, |_| Err(io::Error::other("lookup failed")));
+        let result = decode::<Info>(&bytes, DmHeader::SIZE, count, |_| {
+            Err(io::Error::other("lookup failed"))
+        });
         assert!(matches!(result, Err(error) if error.to_string() == "lookup failed"));
     }
 
@@ -327,29 +247,31 @@ mod tests {
     #[test]
     fn row_parse_dispatches_by_mode_and_version() {
         let (bytes, count) = synthetic_table_status_response(&[(b"dual", "spec 7")]);
-        let raw = TableStatusIter::<Table>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .unwrap();
-        let row = raw.with_version(Version::from([1, 0, 0]));
+        let row = status_rows::<Table>(&bytes, count).remove(0);
         assert_eq!(row.parse::<DualTarget>().unwrap(), Dual(7));
 
         let (bytes, count) = synthetic_table_status_response(&[(b"dual", "info 9")]);
-        let raw = TableStatusIter::<Info>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .unwrap();
-        let row = raw.with_version(Version::from([1, 0, 0]));
+        let row = status_rows::<Info>(&bytes, count).remove(0);
         assert_eq!(row.parse::<DualTarget>().unwrap(), Dual(9));
 
         let (bytes, count) = synthetic_table_status_response(&[(b"dual", "spec 7")]);
-        let raw = TableStatusIter::<Table>::new(bytes, DmHeader::SIZE, count)
-            .next()
-            .unwrap();
+        let mut row = status_rows::<Table>(&bytes, count).remove(0);
+        row.version = Version::from([2, 0, 0]);
         assert_eq!(
-            raw.with_version(Version::from([2, 0, 0]))
-                .parse::<DualTarget>()
+            row.parse::<DualTarget>().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let (bytes, count) = synthetic_table_status_response(&[(b"dual", "invalid")]);
+        let row = status_rows::<Table>(&bytes, count).remove(0);
+        let error = row.parse::<DualTarget>().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.get_ref().unwrap().downcast_ref::<Error>().is_some());
+        assert_eq!(
+            row.parse::<crate::target::zero::ZeroTarget>()
                 .unwrap_err()
                 .kind(),
-            io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidInput
         );
     }
 
@@ -394,42 +316,16 @@ mod tests {
     }
 
     #[test]
-    fn spec_row_parses_matching_target_and_rejects_others() {
-        let params = "aes-xts-plain64 - 0 252:5 5";
-        let (bytes, count) = synthetic_table_status_response(&[(b"crypt", params)]);
-        let mut row = status_rows::<Table>(bytes, count).remove(0);
-        row.version = Version::from([1, 29, 0]);
-        assert_eq!(row.start(), 0);
-        assert_eq!(row.parse::<CryptTarget>().unwrap(), params.parse().unwrap());
-        assert_eq!(
-            row.parse::<crate::target::zero::ZeroTarget>()
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::InvalidInput
-        );
-    }
-
-    #[test]
-    fn malformed_row_preserves_the_parser_error() {
-        let (bytes, count) = synthetic_table_status_response(&[(b"crypt", "invalid")]);
-        let row = status_rows::<Table>(bytes, count).remove(0);
-        let error = row.parse::<CryptTarget>().unwrap_err();
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(error.get_ref().unwrap().downcast_ref::<Error>().is_some());
-    }
-
-    #[test]
     fn row_debug_redacts_parameters() {
         let (bytes, count) = synthetic_table_status_response(&[(b"crypt", "secret-key")]);
-        let row = status_rows::<Table>(bytes, count).remove(0);
+        let row = status_rows::<Table>(&bytes, count).remove(0);
         let debug = format!("{row:?}");
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("secret-key"));
     }
 
     #[test]
-    fn table_status_iter_follows_next_relative_to_first_spec() {
+    fn decode_follows_next_relative_to_first_spec() {
         // Three entries with different-length status strings, so a parser
         // that treated `next` as relative to the *current* spec would land
         // on garbage instead of the real next entry.
@@ -438,7 +334,7 @@ mod tests {
             (b"linear", "252:5 5"),
             (b"error", ""),
         ]);
-        let rows = status_rows::<Table>(bytes, count);
+        let rows = status_rows::<Table>(&bytes, count);
         assert_eq!(rows.len(), 3);
         assert_eq!(
             rows[0].parse::<crate::target::zero::ZeroTarget>().unwrap(),
@@ -451,44 +347,23 @@ mod tests {
     }
 
     #[test]
-    fn table_status_iter_stops_when_count_exceeds_available_specs() {
-        // target_count claims 3 but the buffer holds only 1 spec: the bounds
-        // guard must terminate cleanly instead of reading past the end.
+    fn malformed_response_boundaries_stop_safely() {
+        // A last-row `next` of zero wins over an excessive target count.
         let (bytes, _) = synthetic_table_status_response(&[(b"zero", "")]);
-        let rows = status_rows::<Table>(bytes, 3);
+        let rows = status_rows::<Table>(&bytes, 3);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].type_name, "zero");
-    }
 
-    #[test]
-    fn table_status_iter_next_zero_terminates_before_remaining_reaches_zero() {
-        // A single real entry whose next==0, but remaining=2: the next==0
-        // jump-to-end must win over the remaining counter.
-        let (bytes, _) = synthetic_table_status_response(&[(b"zero", "")]);
-        let rows = status_rows::<Table>(bytes, 2);
-        assert_eq!(rows.len(), 1);
-    }
-
-    // --- Mode/name safety ------------------------------------------------
-
-    #[test]
-    fn table_status_iter_truncates_a_long_type_name_at_the_nul() {
-        // A full-width (unterminated) type field must be read as exactly
-        // DM_MAX_TYPE_NAME bytes, never past the fixed field into params.
+        // An unterminated type field stays within its fixed-width field.
         let (mut bytes, count) = synthetic_table_status_response(&[(b"zero", "")]);
         let type_off = DmHeader::SIZE + 24;
         bytes[type_off..type_off + DM_MAX_TYPE_NAME].copy_from_slice(b"abcdefghijklmnop");
-        let row = status_rows::<Table>(bytes, count).remove(0);
+        let row = status_rows::<Table>(&bytes, count).remove(0);
         assert_eq!(row.type_name, "abcdefghijklmnop");
-        assert_eq!(row.type_name.len(), DM_MAX_TYPE_NAME);
-    }
 
-    #[test]
-    fn table_status_iter_terminates_on_offset_overflow() {
-        // A kernel-reported base offset near usize::MAX makes the per-spec
-        // `checked_add` overflow; the iterator must stop, not panic.
+        // An overflowing starting offset yields no rows rather than panicking.
         let buf = vec![0u8; DmHeader::SIZE];
-        let mut it = TableStatusIter::<Table>::new(buf, usize::MAX - 1, 1);
-        assert!(it.next().is_none());
+        let rows =
+            decode::<Table>(&buf, usize::MAX - 1, 1, |_| Ok(Version::from([1, 0, 0]))).unwrap();
+        assert_eq!(rows.len(), 0);
     }
 }

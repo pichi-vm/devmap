@@ -19,7 +19,7 @@ use std::io;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::row::{Info, Mode, Row, Table};
+use crate::row::{Info, Row, Table};
 use crate::uapi::{
     DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT, DM_IOCTL_VERSION_MAJOR,
     DM_TABLE_CLEAR,
@@ -233,10 +233,7 @@ impl Device {
     }
 
     #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
-    fn table_status_iter<M: Mode>(
-        &self,
-        header: DmHeader,
-    ) -> io::Result<std::vec::IntoIter<Row<M>>> {
+    fn table_status_iter<M>(&self, header: DmHeader) -> io::Result<std::vec::IntoIter<Row<M>>> {
         let buf = crate::control::ioctl_with_growing_buffer(
             &self.control,
             |fd, h| crate::uapi::DM_TABLE_STATUS.ioctl(fd, h),
@@ -247,8 +244,7 @@ impl Device {
         let parsed = DmHeader::response(&buf)?;
         let target_count = parsed.target_count();
         let data_start = (parsed.data_start() as usize).min(buf.len());
-        let raw = crate::row::TableStatusIter::<M>::new(buf, data_start, target_count);
-        let rows = crate::row::version_rows(raw, |name| {
+        let rows = crate::row::decode(&buf, data_start, target_count, |name| {
             crate::control::target_version(&self.control, name).map_err(|error| {
                 io::Error::new(
                     error.kind(),

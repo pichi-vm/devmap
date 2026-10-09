@@ -390,8 +390,7 @@ impl Iterator for ListDevicesIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         // `checked_add` guards a kernel-controlled `next` from overflowing
-        // `usize` on 32-bit targets (matches `TableStatusIter`); on overflow
-        // we stop.
+        // `usize` on 32-bit targets; on overflow we stop.
         let record_end = self.offset.checked_add(12)?;
         if self.offset >= self.end || record_end > self.buf.len() {
             return None;
@@ -424,8 +423,8 @@ mod tests {
     // Hand-builds a synthetic `DM_LIST_DEVICES`-shaped response buffer:
     // N `dm_name_list` entries, each `next` relative to *that entry's
     // own* start (the opposite convention from `DM_TABLE_STATUS`'s
-    // `dm_target_spec.next` — see `TableStatusIter`'s tests). Independent
-    // of any real ioctl call, exercising the parser against a
+    // `dm_target_spec.next` used by table rows). Independent of any real
+    // ioctl call, exercising the parser against a
     // kernel-shaped response rather than a round trip.
     // Test-only helper building tiny fixture buffers; lengths never approach u32::MAX.
     #[allow(clippy::cast_possible_truncation)]
