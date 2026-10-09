@@ -6,10 +6,12 @@
 mod block_size;
 mod detect;
 mod geometry;
+mod span;
 
 pub use block_size::BlockSize;
 pub use detect::Detect;
 pub use geometry::Geometry;
+pub use span::Span;
 
 /// Defines the permitted base-two exponents for a [`BlockSize`].
 ///

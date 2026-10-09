@@ -11,6 +11,8 @@ use std::fmt;
 use std::io;
 use std::marker::PhantomData;
 
+use devmap_core::Span;
+
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TARGET_SPEC_SIZE};
 
 use crate::target::{Parse, Target, Version};
@@ -37,8 +39,7 @@ pub enum Info {}
 /// Raw response parameters are not exposed; `Debug` redacts them.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Row<M> {
-    start: u64,
-    length: u64,
+    span: Span<u64>,
     type_name: String,
     params: String,
     version: Version,
@@ -48,8 +49,7 @@ pub struct Row<M> {
 impl<M> fmt::Debug for Row<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Row")
-            .field("start", &self.start)
-            .field("length", &self.length)
+            .field("span", &self.span)
             .field("type_name", &self.type_name)
             .field("version", &self.version)
             .field("params", &"<redacted>")
@@ -58,13 +58,9 @@ impl<M> fmt::Debug for Row<M> {
 }
 
 impl<M> Row<M> {
-    /// First sector covered by this row.
-    pub fn start(&self) -> u64 {
-        self.start
-    }
-    /// Number of sectors covered by this row.
-    pub fn length(&self) -> u64 {
-        self.length
+    /// Sector span covered by this row.
+    pub fn span(&self) -> Span<u64> {
+        self.span
     }
 
     fn check_target<T: Target>(&self) -> io::Result<()> {
@@ -149,8 +145,7 @@ pub(crate) fn decode<M>(
         };
 
         rows.push(Row {
-            start,
-            length,
+            span: Span::new(start, length),
             type_name,
             params,
             version,

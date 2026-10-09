@@ -21,6 +21,7 @@ use std::{
 };
 
 use common::{Owned, open_control};
+use devmap_core::Span;
 use devmap_linux::target::zero::ZeroTarget;
 use devmap_linux::{Defer as _, DevId, device::Status, target::Empty};
 
@@ -136,8 +137,7 @@ fn table_status_reports_back_the_loaded_target() {
     let reported: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
     assert_eq!(reported.len(), 1);
     let row = &reported[0];
-    assert_eq!(row.start(), 0);
-    assert_eq!(row.length(), 8192);
+    assert_eq!(row.span(), Span::new(0, 8192));
     assert_eq!(row.parse::<ZeroTarget>().unwrap(), ZeroTarget);
 }
 
