@@ -9,7 +9,6 @@ use std::str::FromStr;
 use devmap_core::{BlockSize, Constraint};
 
 use super::{Empty, EncodeError, Target, Version};
-use crate::row::Table;
 use crate::target::Parse;
 use crate::{DevId, ParseError};
 use std::num::NonZero;
@@ -323,7 +322,7 @@ impl Target for CryptTarget {
     }
 }
 
-impl Parse<Table> for CryptTarget {
+impl Parse for CryptTarget {
     type Error = ParseError;
 
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
@@ -734,13 +733,10 @@ mod tests {
 
             let text = target.to_string();
             assert_eq!(
-                <CryptTarget as Parse<Table>>::parse(&text, before),
+                <CryptTarget as Parse>::parse(&text, before),
                 Err(ParseError)
             );
-            assert_eq!(
-                <CryptTarget as Parse<Table>>::parse(&text, minimum),
-                Ok(target)
-            );
+            assert_eq!(<CryptTarget as Parse>::parse(&text, minimum), Ok(target));
         }
     }
 
@@ -769,13 +765,10 @@ mod tests {
 
             let text = target.to_string();
             assert_eq!(
-                <CryptTarget as Parse<Table>>::parse(&text, before),
+                <CryptTarget as Parse>::parse(&text, before),
                 Err(ParseError)
             );
-            assert_eq!(
-                <CryptTarget as Parse<Table>>::parse(&text, minimum),
-                Ok(target)
-            );
+            assert_eq!(<CryptTarget as Parse>::parse(&text, minimum), Ok(target));
         }
     }
 }

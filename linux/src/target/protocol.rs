@@ -3,16 +3,14 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::row::{Info, Table};
-
 use super::Version;
 
-/// Parse a target's kernel response in one status mode and target version.
+/// Parse a target's kernel response for a target version.
 ///
-/// A type can implement this differently for [`Table`] and [`Info`]
-/// when it represents both grammars. An unversioned `FromStr` implementation
-/// may be used internally, but is not required.
-pub trait Parse<M>: Sized {
+/// An unversioned `FromStr` implementation may be used internally, but is not
+/// required. Types with different table and runtime grammars should be modeled
+/// as distinct types.
+pub trait Parse: Sized {
     /// Why the response could not be parsed for this version.
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -20,7 +18,7 @@ pub trait Parse<M>: Sized {
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error>;
 }
 
-impl<M> Parse<M> for String {
+impl Parse for String {
     type Error = Infallible;
 
     fn parse(text: &str, _: Version) -> Result<Self, Self::Error> {
@@ -58,9 +56,9 @@ impl std::error::Error for EncodeError {}
 /// The kernel can later report each row in two modes:
 ///
 /// - `STATUSTYPE_TABLE` reports the row's construction parameters. Parse
-///   those parameters as [`Table`](Self::Table) with [`Parse<crate::row::Table>`].
+///   those parameters as [`Table`](Self::Table).
 /// - `STATUSTYPE_INFO` reports the target's current runtime state. Parse
-///   that state as [`Info`](Self::Info) with [`Parse<crate::row::Info>`].
+///   that state as [`Info`](Self::Info).
 ///
 /// Table read-back is not necessarily a loadable target. The kernel may
 /// normalize, omit, or redact inputs. When read-back loses information,
@@ -90,10 +88,10 @@ pub trait Target: Sized {
     /// value originally passed to [`Builder::add`](crate::device::Builder::add).
     /// A lossy report should not be modeled as a loadable target merely
     /// because its text parses successfully.
-    type Table: Parse<Table>;
+    type Table: Parse;
 
     /// Runtime state returned for this target in `STATUSTYPE_INFO` mode.
     ///
     /// Use [`Empty`](crate::target::Empty) when the kernel reports no runtime fields.
-    type Info: Parse<Info>;
+    type Info: Parse;
 }
