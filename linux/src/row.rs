@@ -28,6 +28,30 @@ pub enum Table {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Info {}
 
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Associates a response mode with the corresponding type from a [`Target`].
+///
+/// This trait is sealed; the supported modes are [`Table`] and [`Info`].
+pub trait Mode: sealed::Sealed {
+    /// Type produced for target family `T` in this response mode.
+    type Parsed<T: Target>: Parse;
+}
+
+impl sealed::Sealed for Table {}
+
+impl Mode for Table {
+    type Parsed<T: Target> = T::Table;
+}
+
+impl sealed::Sealed for Info {}
+
+impl Mode for Info {
+    type Parsed<T: Target> = T::Info;
+}
+
 /// An owned device-mapper table response in mode `M`.
 ///
 /// The response retains the kernel buffer. [`Response::rows`] decodes rows
@@ -216,12 +240,12 @@ impl<M> Row<'_, M> {
     }
 }
 
-impl Row<'_, Table> {
-    /// Read this table row as target `T`'s table type ([`Target::Table`]).
+impl<M: Mode> Row<'_, M> {
+    /// Parse this row as the response type associated with target `T`.
     ///
     /// Returns `InvalidInput` for a different target name or `InvalidData`
-    /// when the target cannot parse the reported parameters or version.
-    pub fn parse<T: Target>(&self) -> io::Result<T::Table> {
+    /// when the target cannot parse the reported response or version.
+    pub fn parse<T: Target>(&self) -> io::Result<M::Parsed<T>> {
         if self.type_name != T::NAME {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -236,32 +260,7 @@ impl Row<'_, Table> {
                 format!("query version for target {:?}: {error}", T::NAME),
             )
         })?;
-        <T::Table as Parse<Table>>::parse(params, version)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-    }
-}
-
-impl Row<'_, Info> {
-    /// Parse this status row as target `T`'s runtime status ([`Target::Info`]).
-    ///
-    /// Returns `InvalidInput` for a different target name or `InvalidData`
-    /// when the target cannot parse the reported status or version.
-    pub fn parse<T: Target>(&self) -> io::Result<T::Info> {
-        if self.type_name != T::NAME {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("expected target {}, found {}", T::NAME, self.type_name),
-            ));
-        }
-        let params = std::str::from_utf8(self.params)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let version = crate::control::target_version(self.control, T::NAME).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("query version for target {:?}: {error}", T::NAME),
-            )
-        })?;
-        <T::Info as Parse<Info>>::parse(params, version)
+        <M::Parsed<T> as Parse>::parse(params, version)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use devmap_linux::{
     DevId,
-    row::{Info, Table},
     target::Parse,
     target::{Empty, Version},
 };
@@ -28,8 +27,7 @@ fn empty_status_rejects_unexpected_text() {
     assert!("unexpected".parse::<Empty>().is_err());
 
     let version = Version::from([1, 0, 0]);
-    assert_eq!(<Empty as Parse<Table>>::parse("", version), Ok(Empty));
-    assert_eq!(<Empty as Parse<Info>>::parse("", version), Ok(Empty));
+    assert_eq!(<Empty as Parse>::parse("", version), Ok(Empty));
 }
 
 #[cfg(target_os = "linux")]

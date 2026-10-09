@@ -21,7 +21,7 @@ impl FromStr for Empty {
     }
 }
 
-impl<M> Parse<M> for Empty {
+impl Parse for Empty {
     type Error = ParseError;
 
     fn parse(text: &str, _: Version) -> Result<Self, Self::Error> {
