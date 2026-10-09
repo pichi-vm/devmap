@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Device-mapper tables and their rows.
+//! Device-mapper responses and their rows.
 //!
 //! A [`Response<Table>`] contains the active table's construction parameters;
 //! a [`Response<Info>`] contains its runtime information. Responses own the
 //! kernel buffer and lazily yield borrowed [`Row`] values.
+
+mod mode;
+mod row;
+
+pub use mode::{Info, Mode, Table};
+pub use row::Row;
 
 use std::fmt;
 use std::fs::File;
@@ -17,40 +23,6 @@ use devmap_core::Span;
 
 use crate::header::DmHeader;
 use crate::uapi::{DM_MAX_TYPE_NAME, DM_TARGET_SPEC_SIZE};
-
-use crate::target::{Parse, Target};
-
-/// `STATUSTYPE_TABLE`: the mapping's construction parameters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Table {}
-
-/// `STATUSTYPE_INFO`: per-target runtime information.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Info {}
-
-mod sealed {
-    pub trait Sealed {}
-}
-
-/// Associates a response mode with the corresponding type from a [`Target`].
-///
-/// This trait is sealed; the supported modes are [`Table`] and [`Info`].
-pub trait Mode: sealed::Sealed {
-    /// Type produced for target family `T` in this response mode.
-    type Parsed<T: Target>: Parse;
-}
-
-impl sealed::Sealed for Table {}
-
-impl Mode for Table {
-    type Parsed<T: Target> = T::Table;
-}
-
-impl sealed::Sealed for Info {}
-
-impl Mode for Info {
-    type Parsed<T: Target> = T::Info;
-}
 
 /// An owned device-mapper table response in mode `M`.
 ///
@@ -201,74 +173,11 @@ impl<M> fmt::Debug for Response<M> {
     }
 }
 
-/// A target's sector range and kernel response, returned by
-/// [`Device::table`](crate::device::Device::table) or
-/// [`Device::info`](crate::device::Device::info).
-///
-/// Call [`parse`](Row::parse) with the expected [`Target`] type. A table row
-/// yields `T::Table`; an info row yields `T::Info`. A different target name
-/// produces `InvalidInput`; an undecodable response produces `InvalidData`.
-/// The kernel target version is supplied to the target's parser automatically.
-/// Raw response parameters are not exposed; `Debug` redacts them.
-pub struct Row<'a, M> {
-    span: Span<u64>,
-    type_name: &'a str,
-    params: &'a [u8],
-    control: &'a File,
-    _mode: PhantomData<M>,
-}
-
-impl<M> fmt::Debug for Row<'_, M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Row")
-            .field("span", &self.span)
-            .field("type_name", &self.type_name)
-            .field("params", &"<redacted>")
-            .finish()
-    }
-}
-
-impl<M> Row<'_, M> {
-    /// Sector span covered by this row.
-    pub fn span(&self) -> Span<u64> {
-        self.span
-    }
-
-    /// Kernel target name for this row.
-    pub fn name(&self) -> &str {
-        self.type_name
-    }
-}
-
-impl<M: Mode> Row<'_, M> {
-    /// Parse this row as the response type associated with target `T`.
-    ///
-    /// Returns `InvalidInput` for a different target name or `InvalidData`
-    /// when the target cannot parse the reported response or version.
-    pub fn parse<T: Target>(&self) -> io::Result<M::Parsed<T>> {
-        if self.type_name != T::NAME {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("expected target {}, found {}", T::NAME, self.type_name),
-            ));
-        }
-        let params = std::str::from_utf8(self.params)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let version = crate::control::target_version(self.control, T::NAME).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("query version for target {:?}: {error}", T::NAME),
-            )
-        })?;
-        <M::Parsed<T> as Parse>::parse(params, version)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::cast_possible_truncation)] // test fixtures: sizes are tiny, never near u32::MAX
 mod tests {
     use super::*;
+    use crate::response::Table;
     use zerocopy::{FromBytes as _, IntoBytes as _};
 
     /// Hand-builds a synthetic `DM_TABLE_STATUS`-shaped response buffer:

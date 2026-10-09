@@ -19,7 +19,7 @@ use std::io;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::row::{Info, Response, Table};
+use crate::response::{Info, Response, Table};
 use crate::uapi::{
     DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT, DM_IOCTL_VERSION_MAJOR,
     DM_TABLE_CLEAR,
@@ -216,7 +216,7 @@ impl Device {
 
     /// `DM_TABLE_STATUS` in table mode (`STATUSTYPE_TABLE`) — the active
     /// table's construction params. Iterate over its borrowed rows and
-    /// reconstruct a target with [`Row::parse`](crate::row::Row::parse).
+    /// reconstruct a target with [`Row::parse`](crate::response::Row::parse).
     pub fn table(&self) -> io::Result<Response<Table>> {
         let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         header.set_status_table();
@@ -225,7 +225,7 @@ impl Device {
 
     /// `DM_TABLE_STATUS` in info mode (`STATUSTYPE_INFO`) — per-target
     /// runtime status. Iterate over its borrowed rows and decode them with
-    /// [`Row::parse`](crate::row::Row::parse).
+    /// [`Row::parse`](crate::response::Row::parse).
     pub fn info(&self) -> io::Result<Response<Info>> {
         let header = DmHeader::by_dev(u64::from(self.dev_t));
         self.table_status(header)
