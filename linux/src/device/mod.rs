@@ -19,7 +19,7 @@ use std::io;
 use std::sync::Arc;
 
 use crate::header::DmHeader;
-use crate::row::{Info, Row, Table};
+use crate::row::{Info, Response, Table};
 use crate::uapi::{
     DM_DEV_REMOVE, DM_DEV_STATUS, DM_DEV_SUSPEND, DM_DEV_WAIT, DM_IOCTL_VERSION_MAJOR,
     DM_TABLE_CLEAR,
@@ -215,25 +215,24 @@ impl Device {
     }
 
     /// `DM_TABLE_STATUS` in table mode (`STATUSTYPE_TABLE`) — the active
-    /// table's construction params, one [`Row<Table>`] per target.
-    /// Reconstruct a target with [`Row::parse`]. Target versions are resolved
-    /// before rows are returned.
-    pub fn table(&self) -> io::Result<impl Iterator<Item = Row<Table>>> {
+    /// table's construction params. Iterate over its borrowed rows and
+    /// reconstruct a target with [`Row::parse`](crate::row::Row::parse).
+    pub fn table(&self) -> io::Result<Response<Table>> {
         let mut header = DmHeader::by_dev(u64::from(self.dev_t));
         header.set_status_table();
-        self.table_status_iter(header)
+        self.table_status(header)
     }
 
     /// `DM_TABLE_STATUS` in info mode (`STATUSTYPE_INFO`) — per-target
-    /// runtime status, one [`Row<Info>`] per target. Decode with
-    /// [`Row::parse`]. Target versions are resolved before rows are returned.
-    pub fn info(&self) -> io::Result<impl Iterator<Item = Row<Info>>> {
+    /// runtime status. Iterate over its borrowed rows and decode them with
+    /// [`Row::parse`](crate::row::Row::parse).
+    pub fn info(&self) -> io::Result<Response<Info>> {
         let header = DmHeader::by_dev(u64::from(self.dev_t));
-        self.table_status_iter(header)
+        self.table_status(header)
     }
 
     #[allow(clippy::large_types_passed_by_value)] // DmHeader is a cheap Copy value, not "large"
-    fn table_status_iter<M>(&self, header: DmHeader) -> io::Result<std::vec::IntoIter<Row<M>>> {
+    fn table_status<M>(&self, header: DmHeader) -> io::Result<Response<M>> {
         let buf = crate::control::ioctl_with_growing_buffer(
             &self.control,
             |fd, h| crate::uapi::DM_TABLE_STATUS.ioctl(fd, h),
@@ -241,19 +240,7 @@ impl Device {
             &[],
             4096,
         )?;
-        let parsed = DmHeader::response(&buf)?;
-        let target_count = parsed.target_count();
-        let data_start = (parsed.data_start() as usize).min(buf.len());
-        let rows = crate::row::decode(&buf, data_start, target_count, |name| {
-            crate::control::target_version(&self.control, name).map_err(|error| {
-                io::Error::new(
-                    error.kind(),
-                    format!("query version for target {name:?}: {error}"),
-                )
-            })
-        })?;
-
-        Ok(rows.into_iter())
+        Response::new(buf, Arc::clone(&self.control))
     }
 }
 

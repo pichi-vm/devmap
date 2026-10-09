@@ -52,7 +52,8 @@ fn create_load_resume_read_zeros_remove() {
     );
 
     // dm-zero has no `.status` callback, so its info row parses as Empty.
-    let info: Vec<_> = dev.info().expect("DM_TABLE_STATUS (info)").collect();
+    let status = dev.info().expect("DM_TABLE_STATUS (info)");
+    let info: Vec<_> = status.rows().collect::<std::io::Result<_>>().unwrap();
     assert_eq!(info.len(), 1);
     assert_eq!(info[0].parse::<ZeroTarget>().unwrap(), Empty);
 
@@ -134,7 +135,8 @@ fn table_status_reports_back_the_loaded_target() {
         .expect("DM_TABLE_LOAD");
     dev.resume().expect("DM_DEV_SUSPEND (resume)");
 
-    let reported: Vec<_> = dev.table().expect("DM_TABLE_STATUS").collect();
+    let table = dev.table().expect("DM_TABLE_STATUS");
+    let reported: Vec<_> = table.rows().collect::<std::io::Result<_>>().unwrap();
     assert_eq!(reported.len(), 1);
     let row = &reported[0];
     assert_eq!(row.span(), Span::new(0, 8192));
