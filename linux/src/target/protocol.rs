@@ -3,7 +3,7 @@
 use std::convert::Infallible;
 use std::fmt;
 
-use crate::row::{Info, Mode, Table};
+use crate::row::{Info, Table};
 
 use super::Version;
 
@@ -12,7 +12,7 @@ use super::Version;
 /// A type can implement this differently for [`Table`] and [`Info`]
 /// when it represents both grammars. An unversioned `FromStr` implementation
 /// may be used internally, but is not required.
-pub trait Parse<M: Mode>: Sized {
+pub trait Parse<M>: Sized {
     /// Why the response could not be parsed for this version.
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -20,7 +20,7 @@ pub trait Parse<M: Mode>: Sized {
     fn parse(text: &str, version: Version) -> Result<Self, Self::Error>;
 }
 
-impl<M: Mode> Parse<M> for String {
+impl<M> Parse<M> for String {
     type Error = Infallible;
 
     fn parse(text: &str, _: Version) -> Result<Self, Self::Error> {

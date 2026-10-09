@@ -2,7 +2,6 @@
 
 use super::Version;
 use crate::ParseError;
-use crate::row::Mode;
 use crate::target::Parse;
 use std::{fmt, str::FromStr};
 
@@ -22,7 +21,7 @@ impl FromStr for Empty {
     }
 }
 
-impl<M: Mode> Parse<M> for Empty {
+impl<M> Parse<M> for Empty {
     type Error = ParseError;
 
     fn parse(text: &str, _: Version) -> Result<Self, Self::Error> {
