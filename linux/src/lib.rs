@@ -9,7 +9,7 @@ mod control;
 mod dev_id;
 pub mod device;
 mod parse_error;
-pub mod row;
+pub mod response;
 pub mod target;
 
 pub(crate) use abi::{header, uapi};
