@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-use devmap_linux::DevId;
-use devmap_linux::target::snapshot;
-use devmap_linux::target::zero::ZeroTarget;
+
+use devmap_linux::targets::Zero;
+use devmap_linux::{targets::Parse, targets::Version};
+
+const VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+
 #[test]
-fn from_str_round_trips_trivial_targets() {
-    assert_eq!("".parse::<ZeroTarget>(), Ok(ZeroTarget));
-    assert_eq!(
-        "252:1".parse::<snapshot::SnapshotOriginTarget>(),
-        Ok(snapshot::SnapshotOriginTarget {
-            origin: DevId::new(252, 1).unwrap()
-        })
-    );
+fn zero_accepts_empty_parameters() {
+    assert_eq!(Zero::parse("", VERSION).unwrap(), Zero);
 }
+
 #[test]
 fn zero_rejects_non_empty_params() {
-    assert!("junk".parse::<ZeroTarget>().is_err());
+    assert!(Zero::parse("junk", VERSION).is_err());
 }

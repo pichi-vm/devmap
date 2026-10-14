@@ -1,26 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use devmap_linux::target::Target as _;
+use devmap_linux::{
+    targets::Target,
+    targets::{Error, Linear, Zero},
+};
 
 #[test]
-fn supported_kernel_targets_have_expected_owners() {
-    let actual = [
-        devmap_linux::target::crypt::CryptTarget::NAME,
-        devmap_linux::target::snapshot::SnapshotTarget::NAME,
-        devmap_linux::target::snapshot::SnapshotOriginTarget::NAME,
-        devmap_linux::target::snapshot::SnapshotMergeTarget::NAME,
-        devmap_linux::target::zero::ZeroTarget::NAME,
-    ]
-    .into_iter()
-    .collect::<std::collections::BTreeSet<_>>();
-    let expected = [
-        "crypt",
-        "snapshot",
-        "snapshot-origin",
-        "snapshot-merge",
-        "zero",
-    ]
-    .into_iter()
-    .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(actual, expected);
+fn basic_targets_have_the_expected_kernel_names() {
+    assert_eq!(Zero::NAME, "zero");
+    assert_eq!(Linear::NAME, "linear");
+    assert_eq!(Error::NAME, "error");
 }

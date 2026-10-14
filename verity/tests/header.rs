@@ -8,6 +8,7 @@ use std::{
     fs::File,
     io::{Read as _, Write as _},
     num::NonZero,
+    os::unix::fs::PermissionsExt as _,
     process::Command,
 };
 
@@ -16,14 +17,21 @@ use devmap_verity::header::{Algorithm, Constraint, HashType, Header, Salt};
 
 #[test]
 fn reads_a_header_written_by_veritysetup() {
-    let directory = tempfile::tempdir().unwrap();
+    let directory = tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap();
     let data_path = directory.path().join("data.img");
     let hash_path = directory.path().join("hash.img");
 
     // Create the protected data extent. `veritysetup` owns all writes to the
     // hash image, making the resulting header an independent compatibility
     // fixture rather than output produced by this crate.
-    let mut data = File::create(&data_path).unwrap();
+    let mut data = File::options()
+        .write(true)
+        .create_new(true)
+        .open(&data_path)
+        .unwrap();
     data.write_all(&vec![0x5a; 8 * 4096]).unwrap();
     drop(data);
 

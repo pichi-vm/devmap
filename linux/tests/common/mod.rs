@@ -12,15 +12,13 @@
 //! unused code.
 #![allow(dead_code)]
 
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use devmap_linux::{Control, device::Device};
-
-static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+use devmap_linux::{Control, DevId};
 
 /// Returns `None` (and prints a skip notice) if this process can't open
 /// `/dev/mapper/control` — i.e. isn't root / doesn't have `CAP_SYS_ADMIN`.
@@ -32,47 +30,39 @@ pub(crate) fn open_control() -> Option<Control> {
     None
 }
 
-/// A dm device that this test owns, torn down when the test's scope ends.
-///
-/// This harness guard uses deferred removal on drop, unlike the library's
-/// [`devmap_linux::device::Guard`], which attempts immediate removal. That
-/// lets tests release devices still held open by udev or other processes.
-///
-/// Removal is deferred: a device a test still has open (or that udev is
-/// mid-scan on) is reclaimed by the kernel once released, instead of
-/// leaking on `EBUSY`. Errors are swallowed because a cleanup failure
-/// during unwind must not mask the assertion that actually failed; call
-/// [`Owned::remove`] where the removal itself is what's under test.
-pub(crate) struct Owned(Option<Device>);
-
-impl Owned {
-    /// `DM_DEV_CREATE` a device this scope owns.
-    pub(crate) fn create(control: &Control, name: &str) -> io::Result<Self> {
-        control.create(name).map(|d| Self(Some(d)))
-    }
-
-    /// Remove it now, surfacing the kernel's error, and disarm the guard.
-    pub(crate) fn remove(mut self) -> io::Result<()> {
-        self.0.take().expect("armed").remove(false)
-    }
-
-    /// Give up ownership: the device outlives this scope.
-    pub(crate) fn leak(mut self) -> Device {
-        self.0.take().expect("armed")
-    }
+/// Test-only cleanup for a mapping; no device operations are wrapped here.
+pub(crate) struct Owned {
+    control: Control,
+    id: Option<DevId>,
 }
 
-impl std::ops::Deref for Owned {
-    type Target = Device;
-    fn deref(&self) -> &Device {
-        self.0.as_ref().expect("armed")
+impl Owned {
+    pub(crate) fn create(control: &Control, name: &str) -> io::Result<Self> {
+        Ok(Self {
+            control: control.clone(),
+            id: Some(control.create(name)?),
+        })
+    }
+
+    pub(crate) fn id(&self) -> DevId {
+        self.id.expect("armed")
+    }
+
+    pub(crate) fn node_path(&self) -> PathBuf {
+        PathBuf::from(format!("/dev/dm-{}", self.id().minor()))
+    }
+
+    pub(crate) fn remove(mut self, deferred: bool) -> io::Result<()> {
+        self.control.remove(self.id(), deferred)?;
+        self.id.take();
+        Ok(())
     }
 }
 
 impl Drop for Owned {
     fn drop(&mut self) {
-        if let Some(device) = self.0.take() {
-            let _ = device.remove(true);
+        if let Some(id) = self.id.take() {
+            let _ = self.control.remove(id, true);
         }
     }
 }
@@ -81,16 +71,23 @@ impl Drop for Owned {
 /// the loop device and deletes the backing file on drop (best-effort).
 pub(crate) struct LoopDevice {
     pub(crate) path: String,
-    file_path: PathBuf,
+    _directory: tempfile::TempDir,
 }
 
 impl LoopDevice {
     /// Creates a `size_bytes`-sized sparse file and attaches it.
     pub(crate) fn create(name: &str, size_bytes: u64) -> Self {
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let file_path =
-            std::env::temp_dir().join(format!("devmap-test-{name}-{}-{id}", std::process::id()));
-        let file = File::create(&file_path).expect("create backing file");
+        let directory = tempfile::Builder::new()
+            .prefix(&format!("devmap-test-{name}-"))
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .expect("create private backing directory");
+        let file_path = directory.path().join("backing.img");
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file_path)
+            .expect("create backing file");
         file.set_len(size_bytes).expect("set_len backing file");
         drop(file);
 
@@ -109,14 +106,16 @@ impl LoopDevice {
             .trim()
             .to_string();
 
-        Self { path, file_path }
+        Self {
+            path,
+            _directory: directory,
+        }
     }
 }
 
 impl Drop for LoopDevice {
     fn drop(&mut self) {
         let _ = Command::new("losetup").args(["-d", &self.path]).status();
-        let _ = std::fs::remove_file(&self.file_path);
     }
 }
 

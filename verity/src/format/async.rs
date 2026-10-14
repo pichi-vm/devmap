@@ -36,8 +36,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeek, AsyncWrite, AsyncWriteExt};
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::header::{Header, RECORD_SIZE};
-
+use super::tree::TreeWriter;
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -48,7 +47,7 @@ use crate::header::{Header, RECORD_SIZE};
     feature = "sm3",
     feature = "blake2"
 ))]
-use super::tree::TreeWriter;
+use crate::header::{Header, RECORD_SIZE};
 
 /// Asynchronously streams protected data into a dm-verity hash volume.
 #[cfg(any(

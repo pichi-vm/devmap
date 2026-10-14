@@ -24,8 +24,7 @@ use std::io::{self, Read, Seek, Write};
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::header::{Header, RECORD_SIZE};
-
+use super::tree::TreeWriter;
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -36,7 +35,7 @@ use crate::header::{Header, RECORD_SIZE};
     feature = "sm3",
     feature = "blake2"
 ))]
-use super::tree::TreeWriter;
+use crate::header::{Header, RECORD_SIZE};
 
 /// Streams protected data into a standard dm-verity hash volume.
 #[cfg(any(

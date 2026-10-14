@@ -6,7 +6,6 @@ use std::io;
 
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
-
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -18,28 +17,20 @@ use blake2::{Blake2b, Blake2s};
     feature = "blake2"
 ))]
 use digest::DynDigest;
-
 #[cfg(feature = "blake2")]
 use digest::consts::{U16, U20, U28, U32, U48, U64};
-
 #[cfg(feature = "ripemd")]
 use ripemd::Ripemd160;
-
 #[cfg(feature = "sha1")]
 use sha1::Sha1;
-
 #[cfg(feature = "sha2")]
 use sha2::{Sha224, Sha256, Sha384, Sha512};
-
 #[cfg(feature = "sha3")]
 use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512};
-
 #[cfg(feature = "sm3")]
 use sm3::Sm3;
-
 #[cfg(feature = "streebog")]
 use streebog::{Streebog256, Streebog512};
-
 #[cfg(feature = "whirlpool")]
 use whirlpool::Whirlpool;
 

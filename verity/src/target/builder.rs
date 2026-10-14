@@ -5,13 +5,12 @@ use std::{io, num::NonZero};
 use devmap_core::{BlockSize, Geometry};
 use devmap_linux::DevId;
 
+use super::{CorruptionPolicy, IoErrorPolicy, Verity};
 use crate::header::{Algorithm, HashType, Header, Salt};
-
-use super::{CorruptionPolicy, IoErrorPolicy, VerityTarget};
 
 /// Configures a Linux dm-verity target.
 ///
-/// Create a builder with [`VerityTarget::builder`] for a headerless tree or
+/// Create a builder with [`Verity::builder`] for a headerless tree or
 /// [`Header::builder`] for a tree described by an on-disk header.
 /// Format metadata is kept together as a single [`Header`].
 #[derive(Debug, Clone)]
@@ -29,46 +28,6 @@ pub struct Builder {
     root_hash_sig_key_desc: Option<String>,
     data_sectors: u64,
     tree_sectors: u64,
-}
-
-impl VerityTarget {
-    /// Starts a headerless target with default hashing, block sizes, and policy.
-    ///
-    /// The hash tree starts at hash block zero.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`io::ErrorKind::InvalidInput`] if the root length does not
-    /// match the default algorithm or the resulting layout overflows.
-    pub fn builder(
-        data: DevId,
-        hash: DevId,
-        data_blocks: NonZero<u64>,
-        root: impl Into<Box<[u8]>>,
-    ) -> io::Result<Builder> {
-        Builder::new(data, hash, data_blocks, root)
-    }
-}
-
-impl Header {
-    /// Starts a target builder with this header's format metadata.
-    ///
-    /// The hash tree defaults to block one, immediately after a standard
-    /// header block. The UUID remains in the builder but is not a dm-verity
-    /// table parameter and therefore does not affect the constructed target.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`io::ErrorKind::InvalidInput`] if the header and root do not
-    /// describe a valid kernel target or the resulting layout overflows.
-    pub fn builder(
-        &self,
-        data: DevId,
-        hash: DevId,
-        root: impl Into<Box<[u8]>>,
-    ) -> io::Result<Builder> {
-        Builder::from_header(self, data, hash, root)
-    }
 }
 
 impl Builder {
@@ -222,8 +181,8 @@ impl Builder {
     }
 
     /// Converts this valid configuration into an owned target description.
-    pub fn build(self) -> VerityTarget {
-        VerityTarget {
+    pub fn build(self) -> Verity {
+        Verity {
             hash_type: self.header.hash_type,
             data: self.data,
             hash: self.hash,
@@ -241,6 +200,46 @@ impl Builder {
             root: self.root,
             data_sectors: self.data_sectors,
         }
+    }
+}
+
+impl Verity {
+    /// Starts a headerless target with default hashing, block sizes, and policy.
+    ///
+    /// The hash tree starts at hash block zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] if the root length does not
+    /// match the default algorithm or the resulting layout overflows.
+    pub fn builder(
+        data: DevId,
+        hash: DevId,
+        data_blocks: NonZero<u64>,
+        root: impl Into<Box<[u8]>>,
+    ) -> io::Result<Builder> {
+        Builder::new(data, hash, data_blocks, root)
+    }
+}
+
+impl Header {
+    /// Starts a target builder with this header's format metadata.
+    ///
+    /// The hash tree defaults to block one, immediately after a standard
+    /// header block. The UUID remains in the builder but is not a dm-verity
+    /// table parameter and therefore does not affect the constructed target.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] if the header and root do not
+    /// describe a valid kernel target or the resulting layout overflows.
+    pub fn builder(
+        &self,
+        data: DevId,
+        hash: DevId,
+        root: impl Into<Box<[u8]>>,
+    ) -> io::Result<Builder> {
+        Builder::from_header(self, data, hash, root)
     }
 }
 
@@ -269,7 +268,7 @@ mod tests {
     #[test]
     fn default_and_custom_tree_offsets_are_preserved() {
         let (data, hash) = devices();
-        let headerless = VerityTarget::builder(data, hash, NonZero::new(2).unwrap(), vec![0; 32])
+        let headerless = Verity::builder(data, hash, NonZero::new(2).unwrap(), vec![0; 32])
             .unwrap()
             .build();
         assert_eq!(headerless.hash_start, 0);
@@ -289,8 +288,7 @@ mod tests {
     #[test]
     fn tree_offset_extent_uses_checked_sector_arithmetic() {
         let (data, hash) = devices();
-        let builder =
-            VerityTarget::builder(data, hash, NonZero::new(2).unwrap(), vec![0; 32]).unwrap();
+        let builder = Verity::builder(data, hash, NonZero::new(2).unwrap(), vec![0; 32]).unwrap();
 
         // Two data blocks produce one 4096-byte tree block: eight sectors.
         let maximum = (u64::MAX - 8) / 8;

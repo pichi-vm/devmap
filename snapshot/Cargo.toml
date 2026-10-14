@@ -1,0 +1,25 @@
+[package]
+name = "devmap-snapshot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "Apache-2.0"
+description = "Typed Linux device-mapper snapshot targets."
+repository = "https://github.com/pichi-vm/devmap"
+homepage = "https://github.com/pichi-vm/devmap"
+readme = "README.md"
+keywords = ["linux", "device-mapper", "snapshot", "block-device"]
+categories = ["os::unix-apis", "api-bindings"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+devmap-core = { version = "0.1.0", path = "../core" }
+devmap-linux = { version = "0.1.0", path = "../linux" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

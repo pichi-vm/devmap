@@ -1,33 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
-use devmap_linux::{
-    DevId,
-    target::Parse,
-    target::{Empty, Version},
-};
+
+use devmap_linux::{DevId, targets::Parse, targets::Version};
 
 #[test]
 fn identifiers_round_trip() {
-    for (major, minor, encoded) in [(252, 5, 0xfc05), (1, 0x1_2345, 0x1230_0145)] {
+    for (major, minor) in [(252, 5), (1, 0x1_2345)] {
         let id = DevId::new(major, minor).unwrap();
-        assert_eq!(u64::from(id), encoded);
-        assert_eq!(DevId::from(u32::try_from(encoded).unwrap()), id);
         assert_eq!(id.to_string().parse::<DevId>().unwrap(), id);
     }
     assert!(DevId::new(4096, 0).is_none());
     assert!(DevId::new(0, 1 << 20).is_none());
     for text in ["", "1", "1:2:3", "4096:0", "0:1048576"] {
-        assert!(text.parse::<DevId>().is_err());
+        assert_eq!(
+            text.parse::<DevId>().unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
     }
 }
 
 #[test]
 fn empty_status_rejects_unexpected_text() {
-    assert!("".parse::<Empty>().is_ok());
-    assert!(" \t\n".parse::<Empty>().is_ok());
-    assert!("unexpected".parse::<Empty>().is_err());
-
-    let version = Version::from([1, 0, 0]);
-    assert_eq!(<Empty as Parse>::parse("", version), Ok(Empty));
+    let version = Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    <() as Parse>::parse("", version).unwrap();
+    <() as Parse>::parse(" \t\n", version).unwrap();
+    assert_eq!(
+        <() as Parse>::parse("unexpected", version)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
 }
 
 #[cfg(target_os = "linux")]

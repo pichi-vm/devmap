@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use devmap_linux::ParseError as Error;
-use devmap_linux::target::{Parse, Version};
-use std::{fmt, str::FromStr};
+use std::io;
+
+use devmap_linux::{targets::Parse, targets::Version};
 
 /// Runtime corruption status and number of FEC-corrected blocks.
 ///
@@ -15,58 +15,73 @@ pub struct Info {
     /// Corrected blocks, or `None` if FEC is disabled.
     pub fec_corrected: Option<u64>,
 }
-impl fmt::Display for Info {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ", if self.corrupted { 'C' } else { 'V' })?;
-        match self.fec_corrected {
-            Some(count) => count.fmt(f),
-            None => f.write_str("-"),
-        }
-    }
-}
-impl FromStr for Info {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut fields = s.split_whitespace();
-        let corrupted = match fields.next().ok_or(Error)? {
-            "C" => true,
-            "V" => false,
-            _ => return Err(Error),
-        };
-        let fec_corrected = match fields.next().ok_or(Error)? {
-            "-" => None,
-            count => Some(count.parse()?),
-        };
-        if fields.next().is_some() {
-            return Err(Error);
-        }
-        Ok(Self {
-            corrupted,
-            fec_corrected,
-        })
-    }
-}
 
 impl Parse for Info {
-    type Error = Error;
-
-    fn parse(text: &str, version: Version) -> Result<Self, Self::Error> {
+    fn parse(text: &str, version: Version) -> io::Result<Self> {
         if version.major != 1 {
-            return Err(Error);
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "unsupported verity target version or configuration",
+            ));
         }
 
-        let status: Self = if version < Version::from([1, 13, 0]) {
+        let status: Self = if version
+            < (Version {
+                major: 1,
+                minor: 13,
+                patch: 0,
+            }) {
             let corrupted = match text.trim() {
                 "C" => true,
                 "V" => false,
-                _ => return Err(Error),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid legacy verity status",
+                    ));
+                }
             };
             Self {
                 corrupted,
                 fec_corrected: None,
             }
         } else {
-            text.parse()?
+            let mut fields = text.split_whitespace();
+            let corrupted = match fields.next().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "missing verity corruption status",
+                )
+            })? {
+                "C" => true,
+                "V" => false,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid verity corruption status",
+                    ));
+                }
+            };
+            let fec_corrected = match fields.next().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "missing verity FEC status")
+            })? {
+                "-" => None,
+                count => Some(
+                    count
+                        .parse()
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+                ),
+            };
+            if fields.next().is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected trailing verity status",
+                ));
+            }
+            Self {
+                corrupted,
+                fec_corrected,
+            }
         };
 
         Ok(status)
@@ -81,36 +96,87 @@ mod tests {
     fn versioned_info_parser_matches_the_kernel_status_grammar() {
         for status in ["V", "C"] {
             assert_eq!(
-                <Info as Parse>::parse(status, Version::from([1, 12, 0]),),
-                Ok(Info {
+                <Info as Parse>::parse(
+                    status,
+                    Version {
+                        major: 1,
+                        minor: 12,
+                        patch: 0
+                    },
+                )
+                .unwrap(),
+                Info {
                     corrupted: status == "C",
                     fec_corrected: None,
-                })
+                }
             );
             assert_eq!(
-                <Info as Parse>::parse(status, Version::from([1, 13, 0]),),
-                Err(Error)
+                <Info as Parse>::parse(
+                    status,
+                    Version {
+                        major: 1,
+                        minor: 13,
+                        patch: 0
+                    },
+                )
+                .unwrap_err()
+                .kind(),
+                io::ErrorKind::InvalidData
             );
         }
 
         assert_eq!(
-            <Info as Parse>::parse("C 3", Version::from([1, 13, 0])),
-            Ok(Info {
+            <Info as Parse>::parse(
+                "C 3",
+                Version {
+                    major: 1,
+                    minor: 13,
+                    patch: 0
+                }
+            )
+            .unwrap(),
+            Info {
                 corrupted: true,
                 fec_corrected: Some(3)
-            })
+            }
         );
         assert_eq!(
-            <Info as Parse>::parse("V -", Version::from([1, 13, 0])),
-            Ok(Info::default())
+            <Info as Parse>::parse(
+                "V -",
+                Version {
+                    major: 1,
+                    minor: 13,
+                    patch: 0
+                }
+            )
+            .unwrap(),
+            Info::default()
         );
         assert_eq!(
-            <Info as Parse>::parse("C 3", Version::from([1, 12, 0])),
-            Err(Error)
+            <Info as Parse>::parse(
+                "C 3",
+                Version {
+                    major: 1,
+                    minor: 12,
+                    patch: 0
+                }
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidData
         );
         assert_eq!(
-            <Info as Parse>::parse("V -", Version::from([2, 0, 0])),
-            Err(Error)
+            <Info as Parse>::parse(
+                "V -",
+                Version {
+                    major: 2,
+                    minor: 0,
+                    patch: 0
+                }
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::Unsupported
         );
     }
 }

@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{BlockSize, Constraint, Geometry};
-#[cfg(target_os = "linux")]
-use iocuddle::{Group, Ioctl, Read};
 use std::{fs::File, io, num::NonZero};
 #[cfg(target_os = "linux")]
 use std::{os::fd::AsFd, os::unix::fs::FileTypeExt as _};
 
 #[cfg(target_os = "linux")]
+use iocuddle::{Group, Ioctl, Read};
+
+use crate::{BlockSize, Constraint, Geometry};
+
+#[cfg(target_os = "linux")]
 const BLOCK: Group = Group::new(0x12);
 
 // SAFETY: BLKSSZGET is `_IO(0x12, 104)` in <linux/fs.h>, but writes an
-// `int` through its argument despite carrying no direction bits. The
-// classic request number and `u32` output match that stable Linux ABI.
+// `int` through its argument despite using the `_IO` encoding. The
+// architecture-specific request encoding and `u32` output match the Linux ABI.
 #[cfg(target_os = "linux")]
 #[expect(unsafe_code, reason = "declares the documented Linux ioctl ABI")]
-const BLKSSZGET: Ioctl<Read, &u32> = unsafe { Ioctl::classic(0x1268) };
+const BLKSSZGET: Ioctl<Read, &u32> = unsafe { BLOCK.none(104) };
 
 // SAFETY: BLKGETSIZE64 is `_IOR(0x12, 114, size_t)` in <linux/fs.h>, so
 // the request encodes the native `size_t` width. The kernel operation

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{BlockSize, Constraint, General};
 use std::{
     fmt,
     hash::{Hash, Hasher},
     num::NonZero,
 };
+
+use crate::{BlockSize, Constraint, General};
 
 /// A nonempty extent expressed as a block size and block count.
 pub struct Geometry<C: Constraint = General> {

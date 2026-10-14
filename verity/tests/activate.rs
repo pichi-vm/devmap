@@ -6,13 +6,16 @@
 
 use std::{fs::OpenOptions, io::Read as _, num::NonZero};
 
-use devmap_linux::{Control, Defer as _, DevId};
-use devmap_verity::{header::Header, target::VerityTarget};
+use devmap_linux::{Control, DevId};
+use devmap_verity::{header::Header, target::Verity};
+
+use fixture::Fixture;
 
 mod fixture {
     use std::{
         fs::File,
         io::{self, Write as _},
+        os::unix::fs::PermissionsExt as _,
     };
 
     use devmap_core::{BlockSize, Detect as _, Geometry};
@@ -23,6 +26,7 @@ mod fixture {
     use lodown::{Configurable, Control as LoopControl, Device as LoopDevice, Writable};
 
     pub(super) struct Fixture {
+        pub(super) mapping: Option<(devmap_linux::Control, devmap_linux::DevId)>,
         data_loop: File,
         hash_loop: File,
         root: Box<[u8]>,
@@ -34,12 +38,17 @@ mod fixture {
 
     impl Fixture {
         pub(super) fn new() -> io::Result<Self> {
-            let directory = tempfile::tempdir()?;
+            let directory = tempfile::Builder::new()
+                .permissions(std::fs::Permissions::from_mode(0o700))
+                .tempdir()?;
             let data_path = directory.path().join("data.img");
             let hash_path = directory.path().join("hash.img");
             let expected = vec![0x5a; 8 * 4096];
 
-            let mut data = File::create(&data_path)?;
+            let mut data = File::options()
+                .write(true)
+                .create_new(true)
+                .open(&data_path)?;
             data.write_all(&expected)?;
             drop(data);
 
@@ -47,8 +56,7 @@ mod fixture {
             let mut hash = File::options()
                 .read(true)
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
                 .open(&hash_path)?;
 
             let header = Header {
@@ -70,6 +78,7 @@ mod fixture {
             let hash_loop = Self::attach(&hash_backing)?;
 
             Ok(Self {
+                mapping: None,
                 data_loop,
                 hash_loop,
                 root,
@@ -120,15 +129,21 @@ mod fixture {
             &self.expected
         }
     }
-}
 
-use fixture::Fixture;
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            if let Some((control, id)) = self.mapping.take() {
+                let _ = control.remove(id, true);
+            }
+        }
+    }
+}
 
 #[test]
 #[ignore = "requires root and real loop/device-mapper devices"]
 fn activates_from_an_on_disk_header() {
     // Set up the verity fixture and open the control device.
-    let fixture = Fixture::new().expect("create verity fixture");
+    let mut fixture = Fixture::new().expect("create verity fixture");
     let control = Control::open().expect("open /dev/mapper/control");
 
     // Get the device numbers for the backing data and hash loop devices.
@@ -150,17 +165,28 @@ fn activates_from_an_on_disk_header() {
 
     // Activate the target from the on-disk header.
     let name = format!("devmap-verity-header-{}", std::process::id());
-    let guard = control.create(&name).unwrap().guard();
-    guard
-        .builder()
-        .read_only()
-        .add(0, target.data_sectors(), target)
-        .unwrap()
-        .load()
+    let id = control.create(&name).unwrap();
+    fixture.mapping = Some((control.clone(), id));
+    control
+        .load(
+            id,
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, target.data_sectors()),
+                    &target,
+                    control.version("verity").unwrap(),
+                )
+                .unwrap(),
+            true,
+        )
         .unwrap();
-    guard.resume().unwrap();
+    control.suspend(id, false).unwrap();
 
-    let mut file = guard.defer(OpenOptions::new().read(true)).unwrap();
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(format!("/dev/dm-{}", id.minor()))
+        .unwrap();
+    control.remove(id, true).unwrap();
     let mut actual = Vec::new();
     file.read_to_end(&mut actual).unwrap();
     assert_eq!(actual, fixture.expected());
@@ -170,7 +196,7 @@ fn activates_from_an_on_disk_header() {
 #[ignore = "requires root and real loop/device-mapper devices"]
 fn activates_from_out_of_band_parameters() {
     // Set up the verity fixture and open the control device.
-    let fixture = Fixture::new().expect("create verity fixture");
+    let mut fixture = Fixture::new().expect("create verity fixture");
     let control = Control::open().expect("open /dev/mapper/control");
 
     // Get the device numbers for the backing data and hash loop devices.
@@ -179,7 +205,7 @@ fn activates_from_out_of_band_parameters() {
 
     // Create the verity target without reading the header. The tree starts
     // after the header block, but every parameter is supplied out of band.
-    let target = VerityTarget::builder(data, hash, NonZero::new(8).unwrap(), fixture.root())
+    let target = Verity::builder(data, hash, NonZero::new(8).unwrap(), fixture.root())
         .unwrap()
         .hash_start(1)
         .unwrap()
@@ -187,17 +213,28 @@ fn activates_from_out_of_band_parameters() {
 
     // Activate the target from the out-of-band parameters.
     let name = format!("devmap-verity-params-{}", std::process::id());
-    let guard = control.create(&name).unwrap().guard();
-    guard
-        .builder()
-        .read_only()
-        .add(0, target.data_sectors(), target)
-        .unwrap()
-        .load()
+    let id = control.create(&name).unwrap();
+    fixture.mapping = Some((control.clone(), id));
+    control
+        .load(
+            id,
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, target.data_sectors()),
+                    &target,
+                    control.version("verity").unwrap(),
+                )
+                .unwrap(),
+            true,
+        )
         .unwrap();
-    guard.resume().unwrap();
+    control.suspend(id, false).unwrap();
 
-    let mut file = guard.defer(OpenOptions::new().read(true)).unwrap();
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(format!("/dev/dm-{}", id.minor()))
+        .unwrap();
+    control.remove(id, true).unwrap();
     let mut actual = Vec::new();
     file.read_to_end(&mut actual).unwrap();
     assert_eq!(actual, fixture.expected());

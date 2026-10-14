@@ -10,28 +10,38 @@
 
 mod common;
 
-use common::{LoopDevice, Owned, open_control};
 use devmap_linux::{
-    DevId,
-    device::Status,
-    target::{EncodeError, Target, Version, zero::ZeroTarget},
+    DevId, Status, records::Records, targets::Target, targets::Version, targets::Zero,
 };
 
-struct LinearTarget {
+use common::{LoopDevice, Owned, open_control};
+
+struct Linear {
     device: DevId,
     offset: u64,
 }
 
-impl Target for LinearTarget {
+impl Target for Linear {
     const NAME: &'static str = "linear";
+
     type Table = String;
     type Info = String;
 
-    fn encode(&self, version: Version) -> Result<String, EncodeError> {
+    fn encode(
+        &self,
+        version: Version,
+        output: &mut (impl std::io::Write + ?Sized),
+    ) -> std::io::Result<()> {
         if version.major != 1 {
-            return Err(EncodeError { version });
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!(
+                    "unsupported target version {}.{}.{}",
+                    version.major, version.minor, version.patch
+                ),
+            ));
         }
-        Ok(format!("{} {}", self.device, self.offset))
+        write!(output, "{} {}", self.device, self.offset)
     }
 }
 
@@ -42,31 +52,48 @@ fn deps_reports_the_devices_the_table_opens() {
     };
 
     let backing = LoopDevice::create("deps", 8 * 1024 * 1024);
-    let backing_device = control.by_node(&backing.path).expect("by_node backing");
+    let backing_device = devmap_linux::DevId::try_from(std::fs::metadata(&backing.path).unwrap())
+        .expect("by_node backing");
 
     let name = format!("devmap-test-deps-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(
-            0,
-            8 * 1024 * 1024 / 512,
-            LinearTarget {
-                device: backing_device.id(),
-                offset: 0,
-            },
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8 * 1024 * 1024 / 512),
+                    &Linear {
+                        device: backing_device,
+                        offset: 0,
+                    },
+                    control.version("linear").unwrap(),
+                )
+                .expect("add linear"),
+            false,
         )
-        .expect("add linear")
-        .load()
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
 
     // A linear mapping opens exactly the one device it maps.
-    let deps = dev.deps().expect("DM_TABLE_DEPS");
-    assert_eq!(
-        deps,
-        [backing_device.id()],
-        "deps must name the loop device"
-    );
+    let mut deps = control.deps::<4096>(dev.id()).expect("DM_TABLE_DEPS");
+    assert_eq!(deps.next().unwrap().unwrap(), backing_device);
+    assert!(deps.next().is_none());
+}
+
+#[test]
+fn deps_is_empty_without_an_active_table() {
+    let Some(control) = open_control() else {
+        return;
+    };
+    let dev = Owned::create(
+        &control,
+        &format!("devmap-test-deps-unloaded-{}", std::process::id()),
+    )
+    .unwrap();
+    let mut deps = control.deps::<0>(dev.id()).unwrap();
+    assert!(deps.next().is_none());
+    assert!(deps.next().is_none());
 }
 
 #[test]
@@ -77,15 +104,29 @@ fn deps_is_empty_for_a_target_that_opens_no_devices() {
 
     let name = format!("devmap-test-deps-zero-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
 
     // dm-zero is purely synthetic — it opens nothing.
-    assert_eq!(dev.deps().expect("DM_TABLE_DEPS"), []);
+    assert!(
+        control
+            .deps::<4096>(dev.id())
+            .expect("DM_TABLE_DEPS")
+            .next()
+            .is_none()
+    );
 }
 
 #[test]
@@ -98,32 +139,49 @@ fn clear_discards_the_staged_table() {
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
     // Stage and activate a first table so the device has an active one.
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
     assert!(
-        dev.status().expect("status").flags & Status::ACTIVE_TABLE != 0,
+        control.status(dev.id()).expect("status").flags & Status::ACTIVE_TABLE != 0,
         "the resumed table is active"
     );
 
     // Stage a second, larger table but do NOT resume it.
-    dev.builder()
-        .add(0, 16384, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 16384),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD (staged)");
     assert!(
-        dev.status().expect("status").flags & Status::INACTIVE_TABLE != 0,
+        control.status(dev.id()).expect("status").flags & Status::INACTIVE_TABLE != 0,
         "the staged table is inactive"
     );
 
-    dev.clear()
+    control
+        .clear(dev.id())
         .expect("DM_TABLE_CLEAR must discard the staged table");
 
-    let status = dev.status().expect("status");
+    let status = control.status(dev.id()).expect("status");
     assert!(
         status.flags & Status::INACTIVE_TABLE == 0,
         "the staged table must be gone after a clear"
@@ -142,18 +200,27 @@ fn clear_is_a_no_op_with_nothing_staged() {
 
     let name = format!("devmap-test-clear-noop-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
 
     // Nothing is staged; clearing must succeed rather than error.
-    dev.clear()
+    control
+        .clear(dev.id())
         .expect("clearing with nothing staged is not an error");
     assert_eq!(
-        dev.status().expect("status").flags & Status::INACTIVE_TABLE,
+        control.status(dev.id()).expect("status").flags & Status::INACTIVE_TABLE,
         0
     );
 }
@@ -167,20 +234,28 @@ fn rename_moves_the_device_to_the_new_name() {
     let old = format!("devmap-test-rename-old-{}", std::process::id());
     let new = format!("devmap-test-rename-new-{}", std::process::id());
     let dev = Owned::create(&control, &old).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
     let id = dev.id();
 
     let renamed = control.rename(&old, &new).expect("DM_DEV_RENAME");
-    assert_eq!(renamed.id(), id, "rename keeps the same dev_t");
+    assert_eq!(renamed, id, "rename keeps the same dev_t");
 
     // The new name resolves and the old one is gone.
     let (found, _) = control.by_name(&new).expect("by_name after rename");
-    assert_eq!(found.id(), id);
+    assert_eq!(found, id);
     assert!(
         control.by_name(&old).is_err(),
         "the old name must no longer resolve"
@@ -196,19 +271,35 @@ fn rename_rejects_a_name_already_in_use() {
     let first = format!("devmap-test-rename-clash-a-{}", std::process::id());
     let second = format!("devmap-test-rename-clash-b-{}", std::process::id());
     let a = Owned::create(&control, &first).expect("create first");
-    a.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add")
-        .load()
+    control
+        .load(
+            a.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add"),
+            false,
+        )
         .expect("load");
-    a.resume().expect("resume");
+    control.suspend(a.id(), false).expect("resume");
     let b = Owned::create(&control, &second).expect("create second");
-    b.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add")
-        .load()
+    control
+        .load(
+            b.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add"),
+            false,
+        )
         .expect("load");
-    b.resume().expect("resume");
+    control.suspend(b.id(), false).expect("resume");
 
     assert!(
         control.rename(&first, &second).is_err(),
@@ -228,12 +319,20 @@ fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
     let name = format!("devmap-test-uuid-{}", std::process::id());
     let uuid = format!("devmap-test-uuid-value-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
     let id = dev.id();
 
     control
@@ -241,7 +340,7 @@ fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
         .expect("DM_DEV_RENAME (uuid)");
 
     let (found, _) = control.by_uuid(&uuid).expect("by_uuid after set_uuid");
-    assert_eq!(found.id(), id);
+    assert_eq!(found, id);
 
     // The kernel allows a uuid to be set once, never changed.
     let other = format!("{uuid}-again");
@@ -257,7 +356,12 @@ fn list_targets_reports_the_targets_the_kernel_has_registered() {
         return;
     };
 
-    let versions: Vec<_> = control.versions().expect("DM_LIST_VERSIONS").collect();
+    let mut reply = control.versions::<4096>().expect("DM_LIST_VERSIONS");
+    let mut versions = Vec::new();
+    while let Some(record) = reply.next() {
+        let (name, version) = record.expect("decode version");
+        versions.push((name.to_owned(), version));
+    }
     assert!(
         !versions.is_empty(),
         "a kernel with device-mapper has at least one target registered"
@@ -282,30 +386,38 @@ fn a_custom_target_loads_a_table_line() {
     };
 
     let backing = LoopDevice::create("addraw", 8 * 1024 * 1024);
-    let backing_device = control.by_node(&backing.path).expect("by_node backing");
+    let backing_device = devmap_linux::DevId::try_from(std::fs::metadata(&backing.path).unwrap())
+        .expect("by_node backing");
 
-    let params = format!("{} 0", backing_device.id());
+    let params = format!("{backing_device} 0");
     let name = format!("devmap-test-addraw-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(
-            0,
-            8 * 1024 * 1024 / 512,
-            LinearTarget {
-                device: backing_device.id(),
-                offset: 0,
-            },
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8 * 1024 * 1024 / 512),
+                    &Linear {
+                        device: backing_device,
+                        offset: 0,
+                    },
+                    control.version("linear").unwrap(),
+                )
+                .expect("add linear"),
+            false,
         )
-        .expect("add linear")
-        .load()
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
 
     // The kernel accepts it and reads the same line back.
-    let table = dev.table().expect("DM_TABLE_STATUS");
-    let rows: Vec<_> = table.rows().collect::<std::io::Result<_>>().unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].parse::<LinearTarget>().unwrap(), params.clone());
+    let mut table = control.table::<4096>(dev.id()).expect("DM_TABLE_STATUS");
+    let rows = table.next().unwrap().unwrap();
+    assert_eq!(
+        rows.parse::<Linear>(control.version("linear").unwrap())
+            .unwrap(),
+        params.clone()
+    );
 }
 
 #[test]
@@ -316,19 +428,29 @@ fn wait_returns_at_once_when_the_counter_already_differs() {
 
     let name = format!("devmap-test-wait-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("resume");
+    control.suspend(dev.id(), false).expect("resume");
 
     // The kernel blocks only while the passed value EQUALS the device's
     // current counter, so a value that differs returns immediately. This
     // is the same path a caller hits when an event fired between reading
     // the status and waiting on it, and it keeps the test from hanging.
-    let event_nr = dev.status().expect("status").event_nr;
-    let status = dev.wait(event_nr.wrapping_add(1)).expect("DM_DEV_WAIT");
+    let event_nr = control.status(dev.id()).expect("status").event_nr;
+    let status = control
+        .wait(dev.id(), event_nr.wrapping_add(1))
+        .expect("DM_DEV_WAIT");
     assert_eq!(
         status.event_nr, event_nr,
         "wait returns the device's real counter, not the value waited on"
