@@ -176,6 +176,9 @@ impl<const N: usize> Command<N> {
 }
 
 impl<const N: usize> Size for Command<N> {
+    // Device-mapper request numbers encode sizeof(struct dm_ioctl), not the
+    // payload capacity. Header's layout assertions fix this at 312 bytes;
+    // execute supplies the full exchange size separately through data_size.
     const SIZE: usize = Header::SIZE;
 }
 

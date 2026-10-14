@@ -30,6 +30,9 @@ use digest::DynDigest;
 /// This setting is independent of the hash [`crate::header::Algorithm`]. Use
 /// [`HashType::Normal`] unless compatibility with a format-0 Chrome OS image
 /// is required.
+///
+/// [`Display`](fmt::Display) writes the dm-verity format number: `0` for
+/// [`ChromeOs`](Self::ChromeOs), or `1` for [`Normal`](Self::Normal).
 #[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HashType {

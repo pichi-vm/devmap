@@ -31,8 +31,9 @@ use crate::{
 ///
 /// Variable-length queries take a capacity `N` in bytes, excluding the ioctl
 /// header. Replies own inline storage and can outlive this connection; larger
-/// capacities increase their size. Retry with a larger capacity on
-/// [`StorageFull`](io::ErrorKind::StorageFull). Traverse replies with [`Records`].
+/// capacities increase their size. On [`StorageFull`](io::ErrorKind::StorageFull),
+/// issue another query with a larger const-generic `N`. Traverse replies with
+/// [`Records`].
 ///
 /// # Errors
 ///
@@ -138,6 +139,12 @@ impl Control {
     /// Pass [`Status::event_nr`] from an earlier [`status`](Self::status) call.
     /// If the counter already differs, this returns immediately. Otherwise it may
     /// block indefinitely; no timeout is provided.
+    ///
+    /// Only whole-device status is returned, without target rows. The returned
+    /// [`Status::flags`] may include the kernel's `DM_BUFFER_FULL_FLAG` (`1 << 8`)
+    /// because those rows do not fit. This does not invalidate the returned
+    /// status or indicate a device failure. Use [`info`](Self::info) to query
+    /// target-specific information separately.
     ///
     /// # Errors
     ///
