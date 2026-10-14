@@ -4,28 +4,16 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+pub mod records;
+pub mod targets;
+
 mod abi;
 mod control;
 mod dev_id;
-pub mod device;
-mod parse_error;
-pub mod response;
-pub mod target;
-
-pub(crate) use abi::{header, uapi};
+mod status;
+mod table;
 
 pub use control::Control;
 pub use dev_id::DevId;
-#[cfg(feature = "tokio")]
-pub use device::AsyncDefer;
-pub use device::Defer;
-pub use parse_error::ParseError;
-
-/// The primary handles are cheap to clone and safe to share across
-/// threads; assert it at compile time so a future field addition can't
-/// silently regress it.
-const _: () = {
-    const fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<Control>();
-    assert_send_sync::<device::Device>();
-};
+pub use status::Status;
+pub use table::Table;

@@ -17,6 +17,10 @@
     allow(dead_code)
 )]
 
+use std::{io, num::NonZero};
+
+use devmap_core::{BlockSize, Geometry};
+
 mod algorithm;
 mod constraint;
 mod hash_type;
@@ -27,9 +31,6 @@ pub use constraint::Constraint;
 pub use hash_type::HashType;
 pub use salt::Salt;
 
-use devmap_core::{BlockSize, Geometry};
-use std::{io, num::NonZero};
-
 pub(crate) const RECORD_SIZE: usize = 512;
 
 const SIGNATURE: [u8; 8] = *b"verity\0\0";
@@ -37,38 +38,6 @@ const ALGORITHM_SIZE: usize = 32;
 const RESERVED_SIZE: usize = 6;
 const SALT_SIZE: usize = 256;
 const PADDING_SIZE: usize = 168;
-
-trait Push {
-    fn push(&mut self, bytes: impl AsRef<[u8]>);
-    fn skip(&mut self, length: usize);
-}
-
-impl Push for &mut [u8] {
-    fn push(&mut self, bytes: impl AsRef<[u8]>) {
-        let bytes = bytes.as_ref();
-        let output = std::mem::take(self);
-        output[..bytes.len()].copy_from_slice(bytes);
-        *self = &mut output[bytes.len()..];
-    }
-
-    fn skip(&mut self, length: usize) {
-        *self = &mut std::mem::take(self)[length..];
-    }
-}
-
-trait Field {
-    fn field<const N: usize>(&mut self) -> [u8; N];
-}
-
-impl Field for &[u8] {
-    fn field<const N: usize>(&mut self) -> [u8; N] {
-        let (field, remaining) = std::mem::take(self)
-            .split_first_chunk::<N>()
-            .expect("verity header fields exceed the 512-byte record");
-        *self = remaining;
-        *field
-    }
-}
 
 /// Decoded metadata from a standard dm-verity on-disk header.
 ///
@@ -291,5 +260,37 @@ impl Header {
 
         debug_assert_eq!(output, []);
         bytes
+    }
+}
+
+trait Push {
+    fn push(&mut self, bytes: impl AsRef<[u8]>);
+    fn skip(&mut self, length: usize);
+}
+
+impl Push for &mut [u8] {
+    fn push(&mut self, bytes: impl AsRef<[u8]>) {
+        let bytes = bytes.as_ref();
+        let output = std::mem::take(self);
+        output[..bytes.len()].copy_from_slice(bytes);
+        *self = &mut output[bytes.len()..];
+    }
+
+    fn skip(&mut self, length: usize) {
+        *self = &mut std::mem::take(self)[length..];
+    }
+}
+
+trait Field {
+    fn field<const N: usize>(&mut self) -> [u8; N];
+}
+
+impl Field for &[u8] {
+    fn field<const N: usize>(&mut self) -> [u8; N] {
+        let (field, remaining) = std::mem::take(self)
+            .split_first_chunk::<N>()
+            .expect("verity header fields exceed the 512-byte record");
+        *self = remaining;
+        *field
     }
 }

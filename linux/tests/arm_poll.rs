@@ -15,9 +15,10 @@ mod common;
 
 use std::os::fd::AsFd as _;
 
-use common::{Owned, open_control};
 use devmap_linux::Control;
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+
+use common::{Owned, open_control};
 
 /// Poll the control fd for readability with a bounded timeout, so the
 /// test can never hang waiting on an event that will not arrive.

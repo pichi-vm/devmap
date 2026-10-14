@@ -31,7 +31,7 @@ jobs:
             def normal_deps($name):
               [$by_name[$name].dependencies[]? | select(.kind != "dev") | .name];
             (($packages | map(.name) | sort) ==
-             (["devmap-core", "devmap-linux", "devmap-verity"] | sort)) and
+             (["devmap-core", "devmap-linux", "devmap-snapshot", "devmap-verity"] | sort)) and
             all($packages[].targets[]; (.kind | index("bin")) == null) and
             ([normal_deps("devmap-core")[] | select(startswith("devmap-"))] == []) and
             all(["devmap-linux", "devmap-verity"][];
@@ -40,7 +40,9 @@ jobs:
             any($by_name["devmap-verity"].dependencies[]?;
                 .name == "devmap-linux" and .kind == null and .optional == false and
                 .target == "cfg(target_os = \"linux\")") and
-            ([normal_deps("devmap-linux")[] | select(startswith("devmap-"))] == ["devmap-core"])
+            ([normal_deps("devmap-linux")[] | select(startswith("devmap-"))] == ["devmap-core"]) and
+            (([normal_deps("devmap-snapshot")[] | select(startswith("devmap-"))] | sort) ==
+             ["devmap-core", "devmap-linux"])
           ' <<< "$metadata"
 
           tree=$(cargo tree -p devmap-verity --no-default-features --edges normal --prefix none)
@@ -51,11 +53,10 @@ jobs:
             exit 1
           fi
 
-          test -e linux/src/target/crypt.rs
-          test -e linux/src/target/snapshot.rs
-          test -e linux/src/target/zero.rs
-          unsafe_files=$(grep -rlE 'unsafe[[:space:]]*\{' core/src linux/src verity/src | sort)
-          expected_files=$(printf '%s\n' core/src/detect.rs linux/src/abi/uapi.rs)
+          test -e snapshot/src/lib.rs
+          test -e linux/src/targets/zero.rs
+          unsafe_files=$(grep -rlE 'unsafe[[:space:]]*\{' core/src linux/src snapshot/src verity/src | sort)
+          expected_files=$(printf '%s\n' core/src/detect.rs linux/src/abi/command.rs)
           test "$unsafe_files" = "$expected_files"
       - name: Format
         run: cargo fmt --all --check
@@ -67,10 +68,6 @@ jobs:
         run: |
           cargo test --workspace --all-features --doc
           cargo test --workspace --no-default-features --doc
-      - name: Test Linux Tokio feature independently
-        run: |
-          cargo test -p devmap-linux --no-default-features --features tokio --all-targets
-          cargo test -p devmap-linux --no-default-features --features tokio --doc
       - name: Test verity features independently
         run: |
           cargo test -p devmap-verity --no-default-features --features tokio --all-targets
@@ -121,7 +118,6 @@ jobs:
           sudo modprobe dm_mod
           sudo modprobe loop
           sudo modprobe dm_zero
-          sudo modprobe dm_crypt
           sudo modprobe dm_snapshot
           sudo modprobe dm_verity
 
@@ -142,7 +138,7 @@ jobs:
           sudo dmsetup version
           sudo losetup -f
           available_targets=$(sudo dmsetup targets)
-          for target in crypt snapshot snapshot-origin snapshot-merge verity zero; do
+          for target in linear error snapshot snapshot-origin snapshot-merge verity zero; do
             grep -q "^$target " <<< "$available_targets"
           done
           veritysetup --version

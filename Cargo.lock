@@ -61,7 +61,7 @@ dependencies = [
 name = "devmap-core"
 version = "0.1.0"
 dependencies = [
- "iocuddle",
+ "iocuddle 0.4.0",
  "tempfile",
 ]
 
@@ -70,10 +70,19 @@ name = "devmap-linux"
 version = "0.1.0"
 dependencies = [
  "devmap-core",
- "iocuddle",
+ "iocuddle 0.4.0",
  "rustix",
- "tokio",
+ "tempfile",
  "zerocopy",
+]
+
+[[package]]
+name = "devmap-snapshot"
+version = "0.1.0"
+dependencies = [
+ "devmap-core",
+ "devmap-linux",
+ "tempfile",
 ]
 
 [[package]]
@@ -154,6 +163,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iocuddle"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9faa2eb1051fb714783e08c74354aebf4ebf5c0cd3a11ed1059a4b474b4a5db"
+dependencies = [
+ "zerocopy",
+]
+
+[[package]]
 name = "keccak"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -179,7 +197,7 @@ name = "lodown"
 version = "0.1.0"
 source = "git+https://github.com/pichi-vm/lodown?rev=2492c468cc7968c512aa4f3f58220ab36d6424b3#2492c468cc7968c512aa4f3f58220ab36d6424b3"
 dependencies = [
- "iocuddle",
+ "iocuddle 0.3.0",
  "zerocopy",
 ]
 

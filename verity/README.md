@@ -102,7 +102,7 @@ The process needs device-mapper access.
 # #[cfg(target_os = "linux")]
 # fn activate(data: &std::fs::File, hash: &std::fs::File, trusted_root: &[u8]) -> std::io::Result<std::fs::File> {
 use std::{fs::OpenOptions, io::Read as _};
-use devmap_linux::{Control, Defer as _, DevId};
+use devmap_linux::{Control, DevId};
 use devmap_verity::header::Header;
 
 let mut record = [0; 512];
@@ -113,14 +113,23 @@ let data_id = DevId::try_from(data.metadata()?)?;
 let hash_id = DevId::try_from(hash.metadata()?)?;
 let target = header.builder(data_id, hash_id, trusted_root)?.build();
 
-let control = Control::open()?;
-let device = control.create("verified-data")?.guard();
-device.builder()
-    .read_only()
-    .add(0, target.data_sectors(), target)?
-    .load()?;
-device.resume()?;
-device.defer(OpenOptions::new().read(true))
+let dm = Control::open()?;
+let version = dm.version("verity")?;
+let table = devmap_linux::Table::<4096>::default()
+    .add(devmap_core::Span::new(0, target.data_sectors()), &target, version)?;
+let id = dm.create("verified-data")?;
+let result = (|| -> std::io::Result<std::fs::File> {
+    dm.load(id, table, true)?;
+    dm.suspend(id, false)?;
+    let file = OpenOptions::new().read(true)
+        .open(format!("/dev/dm-{}", id.minor()))?;
+    dm.remove(id, true)?;
+    Ok(file)
+})();
+if result.is_err() {
+    let _ = dm.remove(id, true); // Best-effort cleanup; preserve the original error.
+}
+result
 # }
 # fn main() {}
 ```

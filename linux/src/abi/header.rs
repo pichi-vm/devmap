@@ -1,96 +1,81 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! [`DmHeader`]: the safe `#[repr(C)]` mirror of `struct dm_ioctl`.
-//!
-//! This is the type iocuddle's typed ioctl declarations reference. Fields
-//! are private; every mutator enforces the kernel's coherency invariants
-//! (NUL-terminated name/uuid within their length limits, `version =
-//! [4, 0, 0]`, `data_size`/`data_start` correct for a fixed-size exchange
-//! by default). Supports building a header keyed by name, uuid, or raw
-//! `dev` — mutually exclusive, matching the kernel's own lookup priority
-//! (name, then uuid, then dev).
+//! Fixed device-mapper ioctl header.
 
 use std::io;
 
-use crate::uapi::{
-    DM_DEFERRED_REMOVE, DM_IOCTL_VERSION_MAJOR, DM_NAME_LEN, DM_READONLY_FLAG,
-    DM_STATUS_TABLE_FLAG, DM_SUSPEND_FLAG, DM_UUID_FLAG, DM_UUID_LEN,
-};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+use zerocopy::byteorder::native_endian::{I32, U32, U64};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-/// Safe mirror of `struct dm_ioctl` from `<linux/dm-ioctl.h>`. Field order
-/// is byte-for-byte identical to the kernel UAPI; fields are private, so the
-/// only way to build or mutate one is through the invariant-enforcing
-/// methods below. `#[repr(C)]` gives it the exact kernel layout that
-/// iocuddle passes as the `&mut DmHeader` ioctl argument. Sizeof locked at
-/// 312 bytes.
+const DM_READONLY_FLAG: u32 = 1 << 0;
+const DM_SUSPEND_FLAG: u32 = 1 << 1;
+const DM_DEFERRED_REMOVE: u32 = 1 << 17;
+const DM_STATUS_TABLE_FLAG: u32 = 1 << 4;
+const DM_UUID_FLAG: u32 = 1 << 14;
+
+/// Byte-layout mirror of `struct dm_ioctl`, with alignment-one integer fields.
 #[repr(C)]
-#[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Immutable)]
-pub(crate) struct DmHeader {
-    version: [u32; 3],
-    data_size: u32,
-    data_start: u32,
-    target_count: u32,
-    open_count: i32,
-    flags: u32,
-    event_nr: u32,
-    padding: u32,
-    dev: u64,
-    name: [u8; DM_NAME_LEN],
-    uuid: [u8; DM_UUID_LEN],
+#[derive(Clone, Copy, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
+pub(crate) struct Header {
+    version: [U32; 3],
+    data_size: U32,
+    data_start: U32,
+    target_count: U32,
+    open_count: I32,
+    flags: U32,
+    event_nr: U32,
+    padding: U32,
+    dev: U64,
+    name: [u8; Self::NAME_LEN],
+    uuid: [u8; Self::UUID_LEN],
     data: [u8; 7],
 }
 
-const _: () = assert!(core::mem::size_of::<DmHeader>() == 312);
+const _: () = assert!(core::mem::size_of::<Header>() == 312);
 // Field offsets are load-bearing for the `struct dm_ioctl` ABI; a
 // size-preserving reorder would break it while passing the size assert.
 const _: () = {
     use core::mem::offset_of;
-    assert!(offset_of!(DmHeader, version) == 0);
-    assert!(offset_of!(DmHeader, data_size) == 12);
-    assert!(offset_of!(DmHeader, data_start) == 16);
-    assert!(offset_of!(DmHeader, target_count) == 20);
-    assert!(offset_of!(DmHeader, flags) == 28);
-    assert!(offset_of!(DmHeader, event_nr) == 32);
-    assert!(offset_of!(DmHeader, dev) == 40);
-    assert!(offset_of!(DmHeader, name) == 48);
-    assert!(offset_of!(DmHeader, uuid) == 176);
-    assert!(offset_of!(DmHeader, data) == 305);
+    assert!(core::mem::align_of::<Header>() == 1);
+    assert!(offset_of!(Header, version) == 0);
+    assert!(offset_of!(Header, data_size) == 12);
+    assert!(offset_of!(Header, data_start) == 16);
+    assert!(offset_of!(Header, target_count) == 20);
+    assert!(offset_of!(Header, flags) == 28);
+    assert!(offset_of!(Header, event_nr) == 32);
+    assert!(offset_of!(Header, dev) == 40);
+    assert!(offset_of!(Header, name) == 48);
+    assert!(offset_of!(Header, uuid) == 176);
+    assert!(offset_of!(Header, data) == 305);
 };
 
-impl DmHeader {
-    pub(crate) const SIZE: usize = core::mem::size_of::<DmHeader>();
+impl Header {
+    pub(crate) const NAME_LEN: usize = 128;
+    pub(crate) const UUID_LEN: usize = 129;
+    pub(crate) const VERSION_MAJOR: u32 = 4;
+    pub(super) const BUFFER_FULL: u32 = 1 << 8;
 
-    /// Decode the fixed header of a kernel response without assuming the
-    /// response buffer is long enough.
-    pub(crate) fn response(buf: &[u8]) -> io::Result<&Self> {
-        Self::ref_from_prefix(buf)
-            .map(|(header, _)| header)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "short dm ioctl response"))
-    }
+    pub(crate) const SIZE: usize = core::mem::size_of::<Header>();
+    pub(super) const MIN_SIZE: usize = core::mem::offset_of!(Header, data);
 
     /// A header with no identification set at all — used for ioctls like
     /// `DM_LIST_DEVICES` that ignore name/uuid/dev and always operate on
     /// every device.
-    pub(crate) fn any() -> Self {
-        Self::blank()
-    }
-
-    // `DmHeader::SIZE` is a fixed 312-byte constant, nowhere near u32::MAX.
+    // `Header::SIZE` is a fixed 312-byte constant, nowhere near u32::MAX.
     #[allow(clippy::cast_possible_truncation)]
-    fn blank() -> Self {
+    pub(crate) fn any() -> Self {
         Self {
-            version: [DM_IOCTL_VERSION_MAJOR, 0, 0],
-            data_size: Self::SIZE as u32,
-            data_start: Self::SIZE as u32,
-            target_count: 0,
-            open_count: 0,
-            flags: 0,
-            event_nr: 0,
-            padding: 0,
-            dev: 0,
-            name: [0; DM_NAME_LEN],
-            uuid: [0; DM_UUID_LEN],
+            version: [U32::new(Self::VERSION_MAJOR), U32::ZERO, U32::ZERO],
+            data_size: U32::new(Self::SIZE as u32),
+            data_start: U32::new(Self::SIZE as u32),
+            target_count: 0.into(),
+            open_count: 0.into(),
+            flags: 0.into(),
+            event_nr: 0.into(),
+            padding: 0.into(),
+            dev: 0.into(),
+            name: [0; Self::NAME_LEN],
+            uuid: [0; Self::UUID_LEN],
             data: [0; 7],
         }
     }
@@ -98,15 +83,15 @@ impl DmHeader {
     /// A header identifying a device by name (used both for `DM_DEV_CREATE`
     /// and for looking up an existing device).
     pub(crate) fn by_name(name: &str) -> io::Result<Self> {
-        let mut header = Self::blank();
+        let mut header = Self::any();
         let bytes = name.as_bytes();
-        if bytes.len() >= DM_NAME_LEN {
+        if bytes.len() >= Self::NAME_LEN {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "dm device name too long: {} bytes (max {})",
                     bytes.len(),
-                    DM_NAME_LEN - 1
+                    Self::NAME_LEN - 1
                 ),
             ));
         }
@@ -122,15 +107,15 @@ impl DmHeader {
 
     /// A header identifying a device by uuid.
     pub(crate) fn by_uuid(uuid: &str) -> io::Result<Self> {
-        let mut header = Self::blank();
+        let mut header = Self::any();
         let bytes = uuid.as_bytes();
-        if bytes.len() >= DM_UUID_LEN {
+        if bytes.len() >= Self::UUID_LEN {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "dm uuid too long: {} bytes (max {})",
                     bytes.len(),
-                    DM_UUID_LEN - 1
+                    Self::UUID_LEN - 1
                 ),
             ));
         }
@@ -147,174 +132,121 @@ impl DmHeader {
     /// A header identifying a device by its raw `dev_t` — the kernel's
     /// lookup falls back to this when both `name` and `uuid` are empty.
     pub(crate) fn by_dev(dev_t: u64) -> Self {
-        let mut header = Self::blank();
-        header.dev = dev_t;
+        let mut header = Self::any();
+        header.dev = dev_t.into();
         header
     }
 
     /// Request `STATUSTYPE_TABLE` output from `DM_TABLE_STATUS` (the table
     /// params) instead of the default `STATUSTYPE_INFO` (runtime status).
-    pub(crate) fn set_status_table(&mut self) {
-        self.flags |= DM_STATUS_TABLE_FLAG;
-    }
-
-    /// Toggle `DM_SUSPEND_FLAG` in place — set to suspend, clear to resume.
-    pub(crate) fn set_suspend(&mut self, suspend: bool) {
-        if suspend {
-            self.flags |= DM_SUSPEND_FLAG;
+    #[must_use]
+    pub(crate) fn with_status_table(mut self, table: bool) -> Self {
+        if table {
+            self.flags.set(self.flags.get() | DM_STATUS_TABLE_FLAG);
         } else {
-            self.flags &= !DM_SUSPEND_FLAG;
+            self.flags.set(self.flags.get() & !DM_STATUS_TABLE_FLAG);
         }
+        self
     }
 
-    /// Set `DM_UUID_FLAG` — for `DM_DEV_RENAME`, the string in the data
-    /// area is a new uuid rather than a new name.
-    pub(crate) fn set_uuid_flag(&mut self) {
-        self.flags |= DM_UUID_FLAG;
+    /// Set `DM_SUSPEND_FLAG` to suspend, or clear it to resume.
+    #[must_use]
+    pub(crate) fn with_suspend(mut self, suspend: bool) -> Self {
+        if suspend {
+            self.flags.set(self.flags.get() | DM_SUSPEND_FLAG);
+        } else {
+            self.flags.set(self.flags.get() & !DM_SUSPEND_FLAG);
+        }
+        self
     }
 
-    /// Set `DM_DEFERRED_REMOVE` — schedule removal for when the device is no
-    /// longer in use rather than failing with `EBUSY`.
-    pub(crate) fn set_deferred_remove(&mut self) {
-        self.flags |= DM_DEFERRED_REMOVE;
+    /// Select whether `DM_DEV_RENAME` sets a new uuid rather than a new name.
+    #[must_use]
+    pub(crate) fn with_uuid_flag(mut self, uuid: bool) -> Self {
+        if uuid {
+            self.flags.set(self.flags.get() | DM_UUID_FLAG);
+        } else {
+            self.flags.set(self.flags.get() & !DM_UUID_FLAG);
+        }
+        self
     }
 
-    /// Set `DM_READONLY_FLAG` — load the table read-only. dm-verity refuses a
+    /// Select deferred removal rather than failing with `EBUSY` when in use.
+    #[must_use]
+    pub(crate) fn with_deferred_remove(mut self, deferred: bool) -> Self {
+        if deferred {
+            self.flags.set(self.flags.get() | DM_DEFERRED_REMOVE);
+        } else {
+            self.flags.set(self.flags.get() & !DM_DEFERRED_REMOVE);
+        }
+        self
+    }
+
+    /// Select whether to load the table read-only. dm-verity refuses a
     /// writable table (`-EINVAL` "Device must be readonly"); read-only
     /// dm-snapshot composition wants it too.
-    pub(crate) fn set_readonly(&mut self) {
-        self.flags |= DM_READONLY_FLAG;
+    #[must_use]
+    pub(crate) fn with_readonly(mut self, readonly: bool) -> Self {
+        if readonly {
+            self.flags.set(self.flags.get() | DM_READONLY_FLAG);
+        } else {
+            self.flags.set(self.flags.get() & !DM_READONLY_FLAG);
+        }
+        self
     }
 
     /// Set total buffer size (for variable-length `DM_TABLE_LOAD`,
     /// `DM_LIST_DEVICES`, `DM_TABLE_STATUS`).
-    pub(crate) fn set_data_size(&mut self, size: u32) {
-        self.data_size = size;
+    pub(super) fn set_data_size(&mut self, size: u32) {
+        self.data_size = size.into();
     }
 
-    pub(crate) fn set_target_count(&mut self, count: u32) {
-        self.target_count = count;
+    #[must_use]
+    pub(crate) fn with_target_count(mut self, count: u32) -> Self {
+        self.target_count = count.into();
+        self
     }
 
     /// Set the event number `DM_DEV_WAIT` blocks against — the ioctl
     /// returns once the device's event counter has advanced past this.
-    pub(crate) fn set_event_nr(&mut self, event_nr: u32) {
-        self.event_nr = event_nr;
+    #[must_use]
+    pub(crate) fn with_event_nr(mut self, event_nr: u32) -> Self {
+        self.event_nr = event_nr.into();
+        self
     }
 
-    /// Test-only: overwrite the raw `flags` word, simulating what the kernel
-    /// writes back (e.g. `DM_BUFFER_FULL_FLAG`). Not part of the normal API —
-    /// production code never sets arbitrary flags.
-    #[cfg(test)]
-    pub(crate) fn set_flags_raw(&mut self, flags: u32) {
-        self.flags = flags;
+    pub(crate) fn open_count(&self) -> i32 {
+        self.open_count.get()
     }
 
-    /// Test-only: overwrite the major version the kernel is pretending to
-    /// have returned, to exercise the version-mismatch path.
-    #[cfg(test)]
-    pub(crate) fn set_major_version(&mut self, major: u32) {
-        self.version[0] = major;
+    pub(crate) fn event_nr(&self) -> u32 {
+        self.event_nr.get()
     }
 
     /// Kernel-returned `dev_t` — populated synchronously by `DM_DEV_CREATE`
     /// and returned by any lookup ioctl.
     pub(crate) fn dev(&self) -> u64 {
-        self.dev
+        self.dev.get()
     }
 
-    /// Kernel-returned dm-ioctl major version. Every call site should
-    /// check this == `DM_IOCTL_VERSION_MAJOR` after an ioctl succeeds.
-    pub(crate) fn major_version(&self) -> u32 {
-        self.version[0]
-    }
-
-    pub(crate) fn open_count(&self) -> i32 {
-        self.open_count
+    /// Kernel-returned dm-ioctl major version. Checked by Command after an ioctl succeeds.
+    pub(super) fn major_version(&self) -> u32 {
+        self.version[0].get()
     }
 
     pub(crate) fn target_count(&self) -> u32 {
-        self.target_count
-    }
-
-    pub(crate) fn event_nr(&self) -> u32 {
-        self.event_nr
+        self.target_count.get()
     }
 
     pub(crate) fn flags(&self) -> u32 {
-        self.flags
+        self.flags.get()
     }
 
-    pub(crate) fn data_start(&self) -> u32 {
-        self.data_start
+    pub(super) fn data_start(&self) -> u32 {
+        self.data_start.get()
     }
 
-    pub(crate) fn data_size(&self) -> u32 {
-        self.data_size
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sizeof_and_align_match_the_kernel_dm_ioctl() {
-        assert_eq!(core::mem::size_of::<DmHeader>(), 312);
-        assert_eq!(core::mem::align_of::<DmHeader>(), 8);
-    }
-
-    #[test]
-    fn by_name_zero_pads_and_sets_version() {
-        let h = DmHeader::by_name("foo").unwrap();
-        assert_eq!(&h.name[..3], b"foo");
-        assert!(h.name[3..].iter().all(|&b| b == 0));
-        assert_eq!(h.version, [DM_IOCTL_VERSION_MAJOR, 0, 0]);
-        assert_eq!(h.dev, 0);
-        assert!(h.uuid.iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn by_name_rejects_nul_and_overlong() {
-        assert!(matches!(
-            DmHeader::by_name("foo\0bar"),
-            Err(e) if e.kind() == io::ErrorKind::InvalidInput
-        ));
-        let long = "a".repeat(200);
-        assert!(matches!(
-            DmHeader::by_name(&long),
-            Err(e) if e.kind() == io::ErrorKind::InvalidInput
-        ));
-    }
-
-    #[test]
-    fn by_uuid_sets_uuid_not_name() {
-        let h = DmHeader::by_uuid("some-uuid").unwrap();
-        assert_eq!(&h.uuid[.."some-uuid".len()], b"some-uuid");
-        assert!(h.name.iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn by_dev_sets_dev_not_name_or_uuid() {
-        let h = DmHeader::by_dev(0x1234_5678);
-        assert_eq!(h.dev, 0x1234_5678);
-        assert!(h.name.iter().all(|&b| b == 0));
-        assert!(h.uuid.iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn set_suspend_toggles_only_that_bit() {
-        let mut h = DmHeader::by_name("x").unwrap();
-        h.set_suspend(true);
-        assert_eq!(h.flags() & DM_SUSPEND_FLAG, DM_SUSPEND_FLAG);
-        h.set_suspend(false);
-        assert_eq!(h.flags() & DM_SUSPEND_FLAG, 0);
-    }
-
-    #[test]
-    fn set_status_table_sets_only_that_bit() {
-        let mut h = DmHeader::by_name("x").unwrap();
-        h.set_status_table();
-        assert_eq!(h.flags(), crate::uapi::DM_STATUS_TABLE_FLAG);
+    pub(super) fn data_size(&self) -> u32 {
+        self.data_size.get()
     }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! End-to-end validation of the whole generic plumbing (`Control`,
-//! `Device`, `DmTableBuf`, the ioctl sequence itself) via the simplest
+//! `Table`, `Rows`, the ioctl sequence itself) via the simplest
 //! possible target: dm-zero has no parameters, so this exercises
 //! everything *except* target-specific parameter rendering.
 //!
@@ -15,15 +15,14 @@
 
 mod common;
 
-use std::{
-    fs::{File, OpenOptions},
-    io::Read as _,
-};
+use std::{fs::File, io::Read as _};
+
+use devmap_core::Span;
+use devmap_linux::records::Records;
+use devmap_linux::targets::Zero;
+use devmap_linux::{DevId, Status};
 
 use common::{Owned, open_control};
-use devmap_core::Span;
-use devmap_linux::target::zero::ZeroTarget;
-use devmap_linux::{Defer as _, DevId, device::Status, target::Empty};
 
 #[test]
 fn create_load_resume_read_zeros_remove() {
@@ -34,12 +33,22 @@ fn create_load_resume_read_zeros_remove() {
     let name = format!("devmap-test-zero-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
     let mut file = File::open(dev.node_path())
         .unwrap_or_else(|e| panic!("open {} ({}): {e}", dev.node_path().display(), dev.id()));
@@ -51,11 +60,13 @@ fn create_load_resume_read_zeros_remove() {
         "dm-zero must read back as all zeros"
     );
 
-    // dm-zero has no `.status` callback, so its info row parses as Empty.
-    let status = dev.info().expect("DM_TABLE_STATUS (info)");
-    let info: Vec<_> = status.rows().collect::<std::io::Result<_>>().unwrap();
-    assert_eq!(info.len(), 1);
-    assert_eq!(info[0].parse::<ZeroTarget>().unwrap(), Empty);
+    // dm-zero has no `.status` callback, so its info row parses as ().
+    let mut status = control
+        .info::<4096>(dev.id())
+        .expect("DM_TABLE_STATUS (info)");
+    let info = status.next().unwrap().unwrap();
+    info.parse::<Zero>(control.version("zero").unwrap())
+        .unwrap();
 
     // The test harness's `Owned` guard drops here and removes the mapping;
     // the library itself never removes anything implicitly.
@@ -70,28 +81,42 @@ fn suspend_resume_round_trips() {
     let name = format!("devmap-test-suspend-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
-    let status = dev.status().expect("DM_DEV_STATUS");
+    let status = control.status(dev.id()).expect("DM_DEV_STATUS");
     assert!(
         status.flags & Status::SUSPENDED == 0,
         "device should not be suspended after resume()"
     );
 
-    dev.suspend().expect("DM_DEV_SUSPEND (suspend)");
-    let status = dev.status().expect("DM_DEV_STATUS");
+    control
+        .suspend(dev.id(), true)
+        .expect("DM_DEV_SUSPEND (suspend)");
+    let status = control.status(dev.id()).expect("DM_DEV_STATUS");
     assert!(
         status.flags & Status::SUSPENDED != 0,
         "device should be suspended after suspend()"
     );
 
-    dev.resume().expect("DM_DEV_SUSPEND (resume again)");
-    let status = dev.status().expect("DM_DEV_STATUS");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume again)");
+    let status = control.status(dev.id()).expect("DM_DEV_STATUS");
     assert!(
         status.flags & Status::SUSPENDED == 0,
         "device should not be suspended after resuming again"
@@ -107,14 +132,24 @@ fn status_reports_sane_values_for_a_fresh_device() {
     let name = format!("devmap-test-status-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
-    let status = dev.status().expect("DM_DEV_STATUS");
+    let status = control.status(dev.id()).expect("DM_DEV_STATUS");
     assert_eq!(status.target_count, 1);
     assert!(status.open_count >= 0);
 }
@@ -128,19 +163,31 @@ fn table_status_reports_back_the_loaded_target() {
     let name = format!("devmap-test-tstatus-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
 
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
-    let table = dev.table().expect("DM_TABLE_STATUS");
-    let reported: Vec<_> = table.rows().collect::<std::io::Result<_>>().unwrap();
-    assert_eq!(reported.len(), 1);
-    let row = &reported[0];
+    let mut table = control.table::<4096>(dev.id()).expect("DM_TABLE_STATUS");
+    let reported = table.next().unwrap().unwrap();
+    let row = &reported;
     assert_eq!(row.span(), Span::new(0, 8192));
-    assert_eq!(row.parse::<ZeroTarget>().unwrap(), ZeroTarget);
+    assert_eq!(
+        row.parse::<Zero>(control.version("zero").unwrap()).unwrap(),
+        Zero
+    );
 }
 
 #[test]
@@ -151,19 +198,91 @@ fn list_reports_the_created_device() {
 
     let name = format!("devmap-test-list-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
-    let found = control
-        .devices()
-        .expect("DM_LIST_DEVICES")
-        .find(|(listed_name, _)| *listed_name == name)
-        .unwrap_or_else(|| panic!("device {name} not found in DM_LIST_DEVICES output"));
-    assert_eq!(found.1.id(), dev.id());
+    let mut reply = control.devices::<4096>().expect("DM_LIST_DEVICES");
+    let mut found = None;
+    while let Some(record) = reply.next() {
+        let (listed_name, id) = record.expect("decode device");
+        if listed_name == name {
+            found = Some(id);
+            break;
+        }
+    }
+    assert_eq!(
+        found,
+        Some(dev.id()),
+        "device {name} not found in DM_LIST_DEVICES output"
+    );
+}
+
+#[test]
+fn fixed_capacity_queries_report_full_buffers_and_allow_larger_retries() {
+    let Some(control) = open_control() else {
+        return;
+    };
+    let name = format!("devmap-test-capacity-{}", std::process::id());
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<48>::default()
+                .add(
+                    devmap_core::Span::new(0, 8),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("exact-fit row"),
+            false,
+        )
+        .expect("DM_TABLE_LOAD");
+    control.suspend(dev.id(), false).expect("resume");
+
+    assert_eq!(
+        control.table::<0>(dev.id()).unwrap_err().kind(),
+        std::io::ErrorKind::StorageFull
+    );
+    assert_eq!(
+        control.info::<47>(dev.id()).unwrap_err().kind(),
+        std::io::ErrorKind::StorageFull
+    );
+    assert_eq!(
+        control.deps::<0>(dev.id()).unwrap_err().kind(),
+        std::io::ErrorKind::StorageFull
+    );
+    assert!(
+        matches!(control.devices::<0>(), Err(error) if error.kind() == std::io::ErrorKind::StorageFull)
+    );
+    assert!(
+        matches!(control.versions::<0>(), Err(error) if error.kind() == std::io::ErrorKind::StorageFull)
+    );
+
+    let mut table = control.table::<48>(dev.id()).expect("exact-fit response");
+    let rows = table.next().unwrap().unwrap();
+    assert_eq!(
+        rows.parse::<Zero>(control.version("zero").unwrap())
+            .unwrap(),
+        Zero
+    );
+    let mut info = control.info::<49>(dev.id()).unwrap();
+    assert!(info.next().unwrap().is_ok());
+    assert!(info.next().is_none());
+    assert!(control.deps::<8>(dev.id()).unwrap().next().is_none());
 }
 
 #[test]
@@ -174,27 +293,37 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
 
     let name = format!("devmap-test-attach-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
     let id = dev.id();
     let (major, minor) = (id.major(), id.minor());
 
-    let by_device = control.by_device(DevId::new(major, minor).expect("in range"));
+    let by_device = DevId::new(major, minor).expect("in range");
     assert_eq!(
-        by_device
-            .status()
+        control
+            .status(by_device)
             .expect("DM_DEV_STATUS via by_device")
             .target_count,
         1
     );
 
-    let by_node = control.by_node(dev.node_path()).expect("by_node");
-    assert_eq!(by_node.id(), id);
+    let by_node = DevId::try_from(std::fs::metadata(dev.node_path()).unwrap()).unwrap();
+    assert_eq!(by_node, id);
 }
 
 #[test]
@@ -205,45 +334,63 @@ fn by_name_finds_device_and_reports_status() {
 
     let name = format!("devmap-test-byname-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
     let (device, status) = control.by_name(&name).expect("DM_DEV_STATUS by_name");
-    assert_eq!(device.id(), dev.id());
+    assert_eq!(device, dev.id());
     assert_eq!(status.target_count, 1);
 }
 
 #[test]
-fn dropping_a_handle_leaves_the_device_alone() {
-    // The core of the no-autoremoval contract: a `Device` is a handle to
-    // kernel state, and letting it go must not touch that state. Anything
-    // else would mean an error path or a panic could tear down a device the
-    // caller still wants — and would silently do so, since `Drop` has
-    // nowhere to report a failure.
+fn dropping_a_connection_leaves_the_device_alone() {
     let Some(control) = open_control() else {
         return;
     };
 
     let name = format!("devmap-test-drop-{}", std::process::id());
-    let dev = control.create(&name).expect("DM_DEV_CREATE");
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    let connection = control.clone();
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
-    drop(dev);
+    drop(control);
+    let control = connection;
     let (survivor, _) = control
         .by_name(&name)
         .expect("dropping a handle must not remove the device");
 
     // Removal is explicit, and it reports its own success.
-    survivor.remove(false).expect("DM_DEV_REMOVE");
+    assert_eq!(survivor, dev.id());
+    dev.remove(false).expect("DM_DEV_REMOVE");
     assert!(
         control.by_name(&name).is_err(),
         "the device is gone once it is actually removed"
@@ -251,88 +398,40 @@ fn dropping_a_handle_leaves_the_device_alone() {
 }
 
 #[test]
-fn guard_drop_removes_but_disarm_preserves() {
-    let Some(control) = open_control() else {
-        return;
-    };
-
-    let dropped = format!("devmap-test-guard-drop-{}", std::process::id());
-    drop(control.create(&dropped).expect("DM_DEV_CREATE").guard());
-    assert!(control.by_name(&dropped).is_err());
-
-    let disarmed = format!("devmap-test-guard-disarm-{}", std::process::id());
-    let device = control
-        .create(&disarmed)
-        .expect("DM_DEV_CREATE")
-        .guard()
-        .disarm();
-    control
-        .by_name(&disarmed)
-        .expect("disarmed device remains persistent");
-    device.remove(false).expect("DM_DEV_REMOVE");
-}
-
-#[test]
-fn guard_defer_rolls_back_when_opening_fails() {
-    let Some(control) = open_control() else {
-        return;
-    };
-
-    let name = format!("devmap-test-guard-rollback-{}", std::process::id());
-    let guard = control.create(&name).expect("DM_DEV_CREATE").guard();
-    guard
-        .builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
-        .expect("DM_TABLE_LOAD");
-    guard.resume().expect("DM_DEV_SUSPEND (resume)");
-
-    let error = guard
-        .defer(&OpenOptions::new())
-        .expect_err("options without access mode must fail");
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-    assert!(
-        control.by_name(&name).is_err(),
-        "failed defer must roll back the mapping"
-    );
-}
-
-#[test]
 fn deferred_removal_reclaims_a_device_that_is_still_open() {
-    // `Guard::defer` opens the device before requesting deferred removal, so
-    // the returned file owns the remainder of the mapping's lifetime.
+    // Open a holder before requesting kernel-managed deferred removal.
     let Some(control) = open_control() else {
         return;
     };
 
     let name = format!("devmap-test-deferred-{}", std::process::id());
-    let dev = control.create(&name).expect("DM_DEV_CREATE").guard();
-    dev.builder()
-        .add(0, 8192, ZeroTarget)
-        .expect("add zero")
-        .load()
+    let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
+    control
+        .load(
+            dev.id(),
+            devmap_linux::Table::<4096>::default()
+                .add(
+                    devmap_core::Span::new(0, 8192),
+                    &Zero,
+                    control.version("zero").unwrap(),
+                )
+                .expect("add zero"),
+            false,
+        )
         .expect("DM_TABLE_LOAD");
-    dev.resume().expect("DM_DEV_SUSPEND (resume)");
+    control
+        .suspend(dev.id(), false)
+        .expect("DM_DEV_SUSPEND (resume)");
 
     // Held open, an immediate removal would be refused rather than silently
-    // deferred. The guard has not changed kernel removal policy yet.
+    // deferred. No deferred removal has been requested yet.
     let file = File::open(dev.node_path()).expect("open active device");
-    let err = dev
-        .clone()
-        .remove(false)
+    let err = control
+        .remove(dev.id(), false)
         .expect_err("an open device cannot be removed immediately");
     assert_eq!(err.kind(), std::io::ErrorKind::ResourceBusy);
-    drop(file);
-
-    let mut options = OpenOptions::new();
-    options.read(true);
-    let holder = match dev.defer(&options) {
-        Ok(file) => file,
-        Err(e) => {
-            panic!("defer active device: {e}");
-        }
-    };
+    let holder = file;
+    dev.remove(true).expect("defer removal");
 
     control
         .by_name(&name)
@@ -347,125 +446,6 @@ fn deferred_removal_reclaims_a_device_that_is_still_open() {
         false
     });
     assert!(gone, "the kernel must reclaim the device once it is closed");
-}
-
-#[cfg(feature = "tokio")]
-mod async_defer {
-    use devmap_linux::AsyncDefer as _;
-    use tokio::io::AsyncReadExt as _;
-
-    use super::{ZeroTarget, open_control};
-
-    #[tokio::test]
-    async fn deferred_removal_returns_a_tokio_holder() {
-        let Some(control) = open_control() else {
-            return;
-        };
-
-        let name = format!("devmap-test-async-deferred-{}", std::process::id());
-        let dev = control.create(&name).expect("DM_DEV_CREATE").guard();
-        dev.builder()
-            .add(0, 8192, ZeroTarget)
-            .expect("add zero")
-            .load()
-            .expect("DM_TABLE_LOAD");
-        dev.resume().expect("DM_DEV_SUSPEND (resume)");
-
-        let mut options = tokio::fs::OpenOptions::new();
-        options.read(true);
-        let mut holder = dev
-            .defer(&options)
-            .await
-            .expect("asynchronously defer active device");
-
-        let mut sector = [1_u8; 512];
-        holder
-            .read_exact(&mut sector)
-            .await
-            .expect("read from dm-zero device");
-        assert_eq!(sector, [0; 512]);
-        control
-            .by_name(&name)
-            .expect("mapping remains while the Tokio holder is open");
-
-        drop(holder);
-        let gone = tokio::task::spawn_blocking(move || {
-            (0..50).any(|_| {
-                if control.by_name(&name).is_err() {
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                false
-            })
-        })
-        .await
-        .expect("join removal poll");
-        assert!(gone, "the kernel must reclaim the device once it is closed");
-    }
-
-    #[tokio::test]
-    async fn failed_async_open_rolls_back_the_mapping() {
-        let Some(control) = open_control() else {
-            return;
-        };
-
-        let name = format!("devmap-test-async-rollback-{}", std::process::id());
-        let guard = control.create(&name).expect("DM_DEV_CREATE").guard();
-        guard
-            .builder()
-            .add(0, 8192, ZeroTarget)
-            .expect("add zero")
-            .load()
-            .expect("DM_TABLE_LOAD");
-        guard.resume().expect("DM_DEV_SUSPEND (resume)");
-
-        let error = guard
-            .defer(&tokio::fs::OpenOptions::new())
-            .await
-            .expect_err("options without an access mode must fail");
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-        assert!(
-            control.by_name(&name).is_err(),
-            "failed async defer must roll back the mapping"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancelling_async_defer_still_reclaims_the_mapping() {
-        let Some(control) = open_control() else {
-            return;
-        };
-
-        let name = format!("devmap-test-async-cancel-{}", std::process::id());
-        let guard = control.create(&name).expect("DM_DEV_CREATE").guard();
-        guard
-            .builder()
-            .add(0, 8192, ZeroTarget)
-            .expect("add zero")
-            .load()
-            .expect("DM_TABLE_LOAD");
-        guard.resume().expect("DM_DEV_SUSPEND (resume)");
-
-        let mut options = tokio::fs::OpenOptions::new();
-        options.read(true);
-        let operation = tokio::spawn(async move { guard.defer(&options).await });
-        tokio::task::yield_now().await;
-        operation.abort();
-        let _ = operation.await;
-
-        let gone = tokio::task::spawn_blocking(move || {
-            (0..50).any(|_| {
-                if control.by_name(&name).is_err() {
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                false
-            })
-        })
-        .await
-        .expect("join removal poll");
-        assert!(gone, "cancelled async defer must not leak the mapping");
-    }
 }
 
 #[test]

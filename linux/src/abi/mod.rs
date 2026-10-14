@@ -2,5 +2,10 @@
 
 //! Private device-mapper ioctl representation.
 
-pub(crate) mod header;
-pub(crate) mod uapi;
+mod command;
+mod header;
+mod spec;
+
+pub(crate) use command::Command;
+pub(crate) use header::Header;
+pub(crate) use spec::TargetSpec;

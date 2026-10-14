@@ -2,11 +2,10 @@
 
 use std::io;
 
+use crate::header::Header;
 #[cfg(feature = "tokio")]
 use state::PendingBlock;
 use state::State;
-
-use crate::header::Header;
 
 #[cfg(feature = "tokio")]
 mod r#async;

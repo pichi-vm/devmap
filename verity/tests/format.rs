@@ -2,24 +2,20 @@
 
 //! Path 2: format a verity hash volume compatible with `veritysetup`.
 
-use std::{
-    io::{Cursor, ErrorKind},
-    num::NonZero,
-};
-
 #[cfg(target_os = "linux")]
 use std::{
     fmt::Write as _,
     fs::{self, File},
     io::Write as _,
+    os::unix::fs::PermissionsExt as _,
     process::Command,
 };
+use std::{
+    io::{Cursor, ErrorKind},
+    num::NonZero,
+};
 
-#[cfg(target_os = "linux")]
-use devmap_core::Detect as _;
 use devmap_core::{BlockSize, Geometry};
-#[cfg(target_os = "linux")]
-use devmap_verity::header::Constraint;
 use devmap_verity::{
     Format as _,
     header::{Algorithm, HashType, Header, Salt},
@@ -49,29 +45,52 @@ fn oversized_data_extent_is_rejected_before_writing() {
 #[test]
 #[cfg(target_os = "linux")]
 fn matches_veritysetup_byte_for_byte() {
-    let directory = tempfile::tempdir().unwrap();
+    for algorithm in [Algorithm::Sha256, Algorithm::Sha224] {
+        for hash_type in [HashType::Normal, HashType::ChromeOs] {
+            compare_with_veritysetup(algorithm, hash_type);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn compare_with_veritysetup(algorithm: Algorithm, hash_type: HashType) {
+    let directory = tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .unwrap();
     let data_path = directory.path().join("data.img");
     let our_hash_path = directory.path().join("ours.img");
     let reference_hash_path = directory.path().join("veritysetup.img");
 
     // Both formatters consume the same deterministic protected data.
-    let mut data = File::create(&data_path).unwrap();
-    data.write_all(&vec![0x5a; 8 * 4096]).unwrap();
+    let mut data = File::options()
+        .write(true)
+        .create_new(true)
+        .open(&data_path)
+        .unwrap();
+    // More than one leaf hash block exercises padding and parent hashing.
+    // SHA-224 additionally distinguishes packed format-0 digests from the
+    // power-of-two slots used by format 1.
+    data.write_all(&vec![0x5a; 33 * 512]).unwrap();
     drop(data);
 
-    // Detect the storage geometry and select the remaining on-disk policy.
+    // Set a small geometry so this fixture crosses a hash-tree level.
     let mut data = File::open(&data_path).unwrap();
-    let mut hash = File::create(&our_hash_path).unwrap();
-    let data_geometry = Geometry::<Constraint>::detect(&data).unwrap();
-    let hash_block_size = BlockSize::<Constraint>::detect(&hash).unwrap();
-
+    let mut hash = File::options()
+        .write(true)
+        .create_new(true)
+        .open(&our_hash_path)
+        .unwrap();
     let header = Header {
         uuid: [0x5a; 16],
-        hash_type: HashType::Normal,
-        algorithm: Algorithm::Sha256,
+        hash_type,
+        algorithm,
         salt: Salt::new(&[1, 2, 3]).unwrap(),
-        data: data_geometry,
-        hash: hash_block_size,
+        data: Geometry {
+            size: BlockSize::from_exponent(9).unwrap(),
+            count: NonZero::new(33).unwrap(),
+        },
+        hash: BlockSize::from_exponent(9).unwrap(),
     };
     let total_size = header.total_size().unwrap();
 
@@ -85,13 +104,13 @@ fn matches_veritysetup_byte_for_byte() {
     let output = Command::new("veritysetup")
         .args([
             "format",
-            "--format=1",
-            "--data-block-size=4096",
-            "--hash-block-size=4096",
-            "--hash=sha256",
+            "--data-block-size=512",
+            "--hash-block-size=512",
             "--salt=010203",
             "--uuid=5a5a5a5a-5a5a-5a5a-5a5a-5a5a5a5a5a5a",
         ])
+        .arg(format!("--format={hash_type}"))
+        .arg(format!("--hash={algorithm}"))
         .arg(&data_path)
         .arg(&reference_hash_path)
         .output()
