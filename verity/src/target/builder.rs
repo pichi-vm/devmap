@@ -56,15 +56,6 @@ impl Builder {
         )
     }
 
-    pub(super) fn from_header(
-        header: &Header,
-        data: DevId,
-        hash: DevId,
-        root: impl Into<Box<[u8]>>,
-    ) -> io::Result<Self> {
-        Self::with_header(header, data, hash, 1, root.into())
-    }
-
     fn with_header(
         header: &Header,
         data: DevId,
@@ -239,7 +230,7 @@ impl Header {
         hash: DevId,
         root: impl Into<Box<[u8]>>,
     ) -> io::Result<Builder> {
-        Builder::from_header(self, data, hash, root)
+        Builder::with_header(self, data, hash, 1, root.into())
     }
 }
 
