@@ -446,6 +446,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rename_and_uuid_reject_invalid_input_before_ioctl() {
+        let control = Control::dummy();
+        for (name, replacement) in [
+            ("old\0name".to_owned(), "new".to_owned()),
+            ("n".repeat(128), "new".to_owned()),
+            ("é".repeat(64), "new".to_owned()),
+            ("old".to_owned(), "new\0name".to_owned()),
+            ("old".to_owned(), "n".repeat(129)),
+        ] {
+            assert_eq!(
+                control.rename(&name, &replacement).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "rename({name:?}, {replacement:?})"
+            );
+            assert_eq!(
+                control.set_uuid(&name, &replacement).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "set_uuid({name:?}, {replacement:?})"
+            );
+        }
+        for replacement in ["n".repeat(128), "é".repeat(64)] {
+            assert_eq!(
+                control.rename("old", &replacement).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+    }
+
+    #[test]
+    fn rename_and_uuid_accept_byte_limits_before_ioctl() {
+        let control = Control::dummy();
+        let name = "n".repeat(127);
+        // /dev/null returns ENOTTY only after local validation accepts the input.
+        for replacement in ["n".repeat(127), format!("{}a", "é".repeat(63))] {
+            assert_eq!(
+                control
+                    .rename(&name, &replacement)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(25)
+            );
+        }
+        for uuid in ["u".repeat(128), "é".repeat(64)] {
+            assert_eq!(
+                control.set_uuid(&name, &uuid).unwrap_err().raw_os_error(),
+                Some(25)
+            );
+        }
+    }
+
+    #[test]
     fn operation_replies_do_not_borrow_the_connection() {
         fn assert_traits<T: Send + Sync + Debug>(_: &T) {}
 
