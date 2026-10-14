@@ -24,12 +24,11 @@ impl Target for Error {
     type Info = ();
 
     fn encode(&self, version: Version, output: &mut (impl io::Write + ?Sized)) -> io::Result<()> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported error target version",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
         output.write_all(b"")
     }
 }

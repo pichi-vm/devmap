@@ -31,24 +31,22 @@ impl Target for Linear {
     type Info = ();
 
     fn encode(&self, version: Version, output: &mut (impl io::Write + ?Sized)) -> io::Result<()> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported linear target version",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
         write!(output, "{} {}", self.device, self.offset)
     }
 }
 
 impl Parse for Linear {
     fn parse(text: &str, version: Version) -> io::Result<Self> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported linear target version",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
         let mut fields = text.split_whitespace();
         let device = fields
             .next()

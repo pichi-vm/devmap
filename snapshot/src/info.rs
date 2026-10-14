@@ -89,12 +89,11 @@ impl Parse for Info {
     /// for a major version other than 1, or an `Overflow` response with a version
     /// earlier than 1.4.0.
     fn parse(text: &str, version: Version) -> io::Result<Self> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported snapshot target version or configuration",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
 
         // The sentinels replace the entire line, and "Merge failed" is two
         // tokens, so match the trimmed line before tokenizing at all.

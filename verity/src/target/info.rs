@@ -18,12 +18,11 @@ pub struct Info {
 
 impl Parse for Info {
     fn parse(text: &str, version: Version) -> io::Result<Self> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported verity target version or configuration",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
 
         let status: Self = if version
             < (Version {
