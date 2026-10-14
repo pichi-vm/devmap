@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io;
+use std::{fmt, io};
 
 /// Version reported by the kernel for one device-mapper target type.
 ///
 /// These are target-specific numbers, not a semantic-versioning promise.
 /// Compare versions only within the same target type.
+/// [`Display`](fmt::Display) writes the version as `major.minor.patch`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Version {
     /// Major version.
@@ -33,17 +34,17 @@ impl Version {
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 format!(
-                    "unsupported target version {}.{}.{}; expected at least {}.{}.{} within major version {}",
-                    self.major,
-                    self.minor,
-                    self.patch,
-                    minimum.major,
-                    minimum.minor,
-                    minimum.patch,
+                    "unsupported target version {self}; expected at least {minimum} within major version {}",
                     minimum.major,
                 ),
             ))
         }
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 
@@ -73,6 +74,7 @@ mod tests {
                 patch,
             };
             let result = version.require(minimum);
+            assert_eq!(version.to_string(), format!("{major}.{minor}.{patch}"));
             assert_eq!(result.is_ok(), accepted, "{version:?}");
             if let Err(error) = result {
                 assert_eq!(error.kind(), io::ErrorKind::Unsupported);

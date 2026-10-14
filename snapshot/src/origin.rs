@@ -42,15 +42,11 @@ impl Target for Origin {
         version: Version,
         output: &mut (impl std::io::Write + ?Sized),
     ) -> io::Result<()> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!(
-                    "unsupported target version {}.{}.{}",
-                    version.major, version.minor, version.patch
-                ),
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
         write!(output, "{}", self.origin)
     }
 }
@@ -63,12 +59,11 @@ impl Parse for Origin {
     /// Returns `Unsupported` for a target major version other than 1, or
     /// `InvalidData` for a missing, malformed, or extra parameter.
     fn parse(text: &str, version: Version) -> io::Result<Self> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported snapshot target version or configuration",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
 
         let mut it = text.split_whitespace();
         let origin = it

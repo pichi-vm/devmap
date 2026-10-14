@@ -28,27 +28,22 @@ impl Target for Zero {
         version: Version,
         output: &mut (impl std::io::Write + ?Sized),
     ) -> io::Result<()> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!(
-                    "unsupported target version {}.{}.{}",
-                    version.major, version.minor, version.patch
-                ),
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
         output.write_all(b"")
     }
 }
 
 impl Parse for Zero {
     fn parse(text: &str, version: Version) -> io::Result<Self> {
-        if version.major != 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "unsupported zero target version or configuration",
-            ));
-        }
+        version.require(Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        })?;
         if text.is_empty() {
             Ok(Zero)
         } else {
