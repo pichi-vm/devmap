@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Shared helpers for real-kernel integration tests: a root-gated
 //! `Control::open()` skip check, and a sparse-file-backed loop device for
 //! tests that need a real (if tiny) block device without touching real

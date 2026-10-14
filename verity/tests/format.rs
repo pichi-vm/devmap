@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Path 2: format a verity hash volume compatible with `veritysetup`.
 
 #[cfg(target_os = "linux")]

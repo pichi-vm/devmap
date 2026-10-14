@@ -165,18 +165,18 @@ impl Header {
         let invalid = |message| io::Error::new(io::ErrorKind::InvalidData, message);
         let mut input = bytes.as_slice();
 
-        if input.field() != SIGNATURE {
+        if input.field()? != SIGNATURE {
             return Err(invalid("invalid verity signature"));
         }
-        if u32::from_le_bytes(input.field()) != 1 {
+        if u32::from_le_bytes(input.field()?) != 1 {
             return Err(invalid("unsupported verity version"));
         }
 
-        let hash_type = HashType::from_le_bytes(input.field())
+        let hash_type = HashType::from_le_bytes(input.field()?)
             .ok_or_else(|| invalid("unsupported verity hash type"))?;
-        let uuid = input.field();
+        let uuid = input.field()?;
 
-        let name = input.field::<ALGORITHM_SIZE>();
+        let name = input.field::<ALGORITHM_SIZE>()?;
         let end = name
             .iter()
             .position(|byte| *byte == 0)
@@ -188,19 +188,19 @@ impl Header {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
             .parse()?;
 
-        let data_size = NonZero::new(u32::from_le_bytes(input.field()))
+        let data_size = NonZero::new(u32::from_le_bytes(input.field()?))
             .and_then(BlockSize::<Constraint>::from_bytes)
             .ok_or_else(|| invalid("invalid verity data block size"))?;
-        let hash_size = NonZero::new(u32::from_le_bytes(input.field()))
+        let hash_size = NonZero::new(u32::from_le_bytes(input.field()?))
             .and_then(BlockSize::<Constraint>::from_bytes)
             .ok_or_else(|| invalid("invalid verity hash block size"))?;
-        let count = NonZero::<u64>::new(u64::from_le_bytes(input.field()))
+        let count = NonZero::<u64>::new(u64::from_le_bytes(input.field()?))
             .ok_or_else(|| invalid("verity data block count must be nonzero"))?;
 
-        let salt_size = usize::from(u16::from_le_bytes(input.field()));
-        let reserved = input.field::<RESERVED_SIZE>();
-        let salt_bytes = input.field::<SALT_SIZE>();
-        let padding = input.field::<PADDING_SIZE>();
+        let salt_size = usize::from(u16::from_le_bytes(input.field()?));
+        let reserved = input.field::<RESERVED_SIZE>()?;
+        let salt_bytes = input.field::<SALT_SIZE>()?;
+        let padding = input.field::<PADDING_SIZE>()?;
         debug_assert_eq!(input, []);
 
         if salt_size > SALT_SIZE {
@@ -282,15 +282,15 @@ impl Push for &mut [u8] {
 }
 
 trait Field {
-    fn field<const N: usize>(&mut self) -> [u8; N];
+    fn field<const N: usize>(&mut self) -> io::Result<[u8; N]>;
 }
 
 impl Field for &[u8] {
-    fn field<const N: usize>(&mut self) -> [u8; N] {
+    fn field<const N: usize>(&mut self) -> io::Result<[u8; N]> {
         let (field, remaining) = std::mem::take(self)
             .split_first_chunk::<N>()
-            .expect("verity header fields exceed the 512-byte record");
+            .ok_or_else(|| io::Error::other("verity header fields exceed the 512-byte record"))?;
         *self = remaining;
-        *field
+        Ok(*field)
     }
 }

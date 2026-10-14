@@ -20,7 +20,7 @@ use crate::abi::{Command, TargetSpec};
 ///
 pub(crate) struct Rows<M: Mode, const N: usize = 4096> {
     command: Command<N>,
-    cursor: (usize, u32),
+    cursor: Option<(usize, u32)>,
     mode: PhantomData<M>,
 }
 
@@ -30,7 +30,7 @@ impl<M: Mode, const N: usize> Rows<M, N> {
         Ok(Self {
             command,
             mode: PhantomData,
-            cursor: (0, 0),
+            cursor: Some((0, 0)),
         })
     }
 }
@@ -39,34 +39,34 @@ impl<M: Mode, const N: usize> Records for Rows<M, N> {
     type Item<'a> = Row<'a, M>;
 
     fn next(&mut self) -> Option<io::Result<Self::Item<'_>>> {
-        let payload = self
-            .command
-            .payload()
-            .expect("response command was validated");
+        let (offset, index) = self.cursor.take()?;
+        let payload = match self.command.payload() {
+            Ok(payload) => payload,
+            Err(error) => {
+                return Some(Err(io::Error::other(format!(
+                    "validated reply became invalid: {error}"
+                ))));
+            }
+        };
         let end = payload.len();
-        let (offset, index) = self.cursor;
         let count = self.command.header().target_count();
         if index >= count {
             return None;
         }
         let remaining = count - index;
-        // Exhaust the cursor before decoding so errors and a zero next offset stop it.
-        self.cursor.1 = count;
-
-        let Some(spec_end) = offset.checked_add(TargetSpec::SIZE) else {
+        let Some(record) = payload.get(offset..) else {
             return Some(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "dm target spec offset overflow",
+                "dm target spec offset outside response",
             )));
         };
-        if spec_end > end {
+        let Ok((spec, params)) = TargetSpec::ref_from_prefix(record) else {
             return Some(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "truncated dm target spec",
             )));
-        }
-        let spec = TargetSpec::ref_from_bytes(&payload[offset..spec_end])
-            .expect("target spec has fixed size and byte alignment");
+        };
+        let spec_end = end - params.len();
         let next = spec.next();
 
         // The last row's next offset can include padding beyond data_size.
@@ -97,7 +97,7 @@ impl<M: Mode, const N: usize> Records for Rows<M, N> {
             .unwrap_or(params.len());
 
         if next != 0 {
-            self.cursor = (record_end, index + 1);
+            self.cursor = Some((record_end, index + 1));
         }
 
         Some(Ok(Row::new(spec.span(), type_name, &params[..params_end])))
@@ -121,6 +121,22 @@ mod tests {
     use super::super::mode::Table;
     use super::*;
     use crate::abi::Header;
+
+    #[test]
+    fn invalidated_reply_returns_one_error_then_stops() {
+        let mut header = Header::any();
+        header.as_mut_bytes()[12..16]
+            .copy_from_slice(&u32::try_from(Header::SIZE + 8).unwrap().to_ne_bytes());
+        let mut reply = Rows::<Table, 8>::new(Command::<8>::new(header)).unwrap();
+        // Only test code can mutate the owned response after validation.
+        reply.command.as_mut_bytes()[12..16].copy_from_slice(&0u32.to_ne_bytes());
+        assert_eq!(
+            reply.next().unwrap().unwrap_err().kind(),
+            io::ErrorKind::Other
+        );
+        assert!(reply.next().is_none());
+        assert!(reply.next().is_none());
+    }
 
     /// Hand-builds a synthetic `DM_TABLE_STATUS`-shaped response buffer:
     /// header + N `dm_target_spec` entries whose `next` fields use the

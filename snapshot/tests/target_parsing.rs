@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::fmt::Debug;
 
 use devmap_linux::{targets::Parse, targets::Version};

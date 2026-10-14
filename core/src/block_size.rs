@@ -10,11 +10,11 @@ use crate::{Constraint, General};
 
 /// A power-of-two block size governed by constraint `C`.
 ///
-/// The value is stored as a base-two exponent. Constructors and accessors
+/// The value is stored as a validated nonzero byte count. Constructors and accessors
 /// explicitly identify whether their argument or result is bytes or an
 /// exponent.
 pub struct BlockSize<C: Constraint = General> {
-    exponent: u32,
+    bytes: NonZero<u32>,
     constraint: PhantomData<C>,
 }
 
@@ -39,38 +39,55 @@ impl<C: Constraint> BlockSize<C> {
         if exponent < C::MIN || exponent > C::MAX || 1u32.checked_shl(exponent).is_none() {
             return None;
         }
+        let Some(bytes) = NonZero::new(1u32 << exponent) else {
+            return None;
+        };
         Some(Self {
-            exponent,
+            bytes,
             constraint: PhantomData,
         })
     }
 
     /// Returns the block size in bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the type's private exponent invariant has been violated.
-    /// Every public constructor preserves the invariant.
     pub const fn bytes(self) -> NonZero<u32> {
-        NonZero::new(1u32 << self.exponent).unwrap()
+        self.bytes
     }
 
     /// Returns the base-two exponent of the block size.
     pub const fn exponent(self) -> u32 {
-        self.exponent
+        self.bytes.get().trailing_zeros()
     }
 
     /// Converts this block size to another constraint.
     ///
     /// Returns `None` when the exponent is not permitted by `D`.
     pub const fn convert<D: Constraint>(self) -> Option<BlockSize<D>> {
-        BlockSize::<D>::from_exponent(self.exponent)
+        BlockSize::<D>::from_exponent(self.exponent())
     }
 }
 
+/// Constructs the constraint's default size, checked at compile time.
+///
+/// Invalid defaults fail compilation when this implementation is instantiated.
+///
+/// ```compile_fail
+/// use devmap_core::{BlockSize, Constraint};
+///
+/// enum Invalid {}
+/// impl Constraint for Invalid {
+///     const MAX: u32 = 4;
+///     const DEFAULT: u32 = 5;
+/// }
+/// let _ = BlockSize::<Invalid>::default();
+/// ```
 impl<C: Constraint> Default for BlockSize<C> {
     fn default() -> Self {
-        Self::from_exponent(C::DEFAULT).expect("invalid Constraint::DEFAULT")
+        const {
+            match Self::from_exponent(C::DEFAULT) {
+                Some(size) => size,
+                None => panic!("invalid Constraint::DEFAULT"),
+            }
+        }
     }
 }
 
@@ -93,7 +110,7 @@ impl<C: Constraint> fmt::Debug for BlockSize<C> {
 
 impl<C: Constraint> PartialEq for BlockSize<C> {
     fn eq(&self, other: &Self) -> bool {
-        self.exponent == other.exponent
+        self.bytes == other.bytes
     }
 }
 
@@ -107,12 +124,12 @@ impl<C: Constraint> PartialOrd for BlockSize<C> {
 
 impl<C: Constraint> Ord for BlockSize<C> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.exponent.cmp(&other.exponent)
+        self.bytes.cmp(&other.bytes)
     }
 }
 
 impl<C: Constraint> Hash for BlockSize<C> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.exponent.hash(state);
+        self.bytes.hash(state);
     }
 }
