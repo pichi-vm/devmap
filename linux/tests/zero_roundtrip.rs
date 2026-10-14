@@ -257,8 +257,10 @@ fn fixed_capacity_queries_report_full_buffers_and_allow_larger_retries() {
         control.table::<0>(dev.id()).unwrap_err().kind(),
         std::io::ErrorKind::StorageFull
     );
+    // A 40-byte target spec still needs a terminating NUL. Do not rely on
+    // the kernel requiring alignment padding after the final response row.
     assert_eq!(
-        control.info::<47>(dev.id()).unwrap_err().kind(),
+        control.info::<40>(dev.id()).unwrap_err().kind(),
         std::io::ErrorKind::StorageFull
     );
     assert_eq!(
