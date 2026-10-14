@@ -6,7 +6,7 @@
 //! hardware.
 //!
 //! Every test binary that `mod common;`s this file compiles the whole
-//! thing but typically uses only part of it (e.g. `zoned_target.rs`
+//! thing but typically uses only part of it (e.g. `arm_poll.rs`
 //! doesn't need `LoopDevice`) — `#![allow(dead_code)]` avoids per-binary
 //! false-positive dead-code warnings from that, not from genuinely
 //! unused code.
@@ -117,12 +117,4 @@ impl Drop for LoopDevice {
     fn drop(&mut self) {
         let _ = Command::new("losetup").args(["-d", &self.path]).status();
     }
-}
-
-/// Best-effort `modprobe` for a dm target's kernel module. Most targets
-/// auto-load via `request_module` when first referenced in a table, but
-/// this makes failures easier to diagnose than a bare `ENOENT`/`EINVAL`
-/// from `DM_TABLE_LOAD`. Ignored if it fails (e.g. already built in).
-pub(crate) fn ensure_module_loaded(name: &str) {
-    let _ = Command::new("modprobe").arg("-q").arg(name).status();
 }
