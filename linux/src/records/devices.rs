@@ -2,19 +2,24 @@
 
 use std::io;
 
+use zerocopy::FromBytes;
+
 use super::Records;
 use crate::{DevId, abi::Command};
 
 /// Owns the reply so names can be borrowed without allocating.
 pub(crate) struct Devices<const N: usize = 4096> {
     command: Command<N>,
-    offset: usize,
+    offset: Option<usize>,
 }
 
 impl<const N: usize> Devices<N> {
     pub(crate) fn new(command: Command<N>) -> io::Result<Self> {
         command.payload()?;
-        Ok(Self { command, offset: 0 })
+        Ok(Self {
+            command,
+            offset: Some(0),
+        })
     }
 }
 
@@ -22,22 +27,34 @@ impl<const N: usize> Records for Devices<N> {
     type Item<'a> = (&'a str, DevId);
 
     fn next(&mut self) -> Option<io::Result<Self::Item<'_>>> {
-        let payload = self.command.payload().expect("validated immutable reply");
-        let start = self.offset;
+        let start = self.offset.take()?;
+        let payload = match self.command.payload() {
+            Ok(payload) => payload,
+            Err(error) => {
+                return Some(Err(io::Error::other(format!(
+                    "validated reply became invalid: {error}"
+                ))));
+            }
+        };
         if start >= payload.len() {
             return None;
         }
         // Stop after malformed data rather than repeating the same error.
-        self.offset = payload.len();
         let record = &payload[start..];
-        if record.len() < 12 {
+        let Ok((device, fields)) = u64::read_from_prefix(record) else {
             return Some(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "truncated devices record",
             )));
-        }
-        let value = DevId::from_kernel(u64::from_ne_bytes(record[..8].try_into().unwrap()));
-        let next = u32::from_ne_bytes(record[8..12].try_into().unwrap()) as usize;
+        };
+        let Ok((next, _)) = u32::read_from_prefix(fields) else {
+            return Some(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "truncated devices record",
+            )));
+        };
+        let value = DevId::from_kernel(device);
+        let next = next as usize;
         let end = if next == 0 { record.len() } else { next };
         if end <= 12 || end > record.len() {
             return Some(Err(io::Error::new(
@@ -57,7 +74,7 @@ impl<const N: usize> Records for Devices<N> {
             Err(error) => return Some(Err(io::Error::new(io::ErrorKind::InvalidData, error))),
         };
         if next != 0 {
-            self.offset = start + next;
+            self.offset = Some(start + next);
         }
         Some(Ok((name, value)))
     }
@@ -77,6 +94,22 @@ mod tests {
 
     use super::*;
     use crate::abi::Header;
+
+    #[test]
+    fn invalidated_reply_returns_one_error_then_stops() {
+        let mut header = Header::any();
+        header.as_mut_bytes()[12..16]
+            .copy_from_slice(&u32::try_from(Header::SIZE + 8).unwrap().to_ne_bytes());
+        let mut reply = Devices::new(Command::<8>::new(header)).unwrap();
+        // Only test code can mutate the owned response after validation.
+        reply.command.as_mut_bytes()[12..16].copy_from_slice(&0u32.to_ne_bytes());
+        assert_eq!(
+            reply.next().unwrap().unwrap_err().kind(),
+            io::ErrorKind::Other
+        );
+        assert!(reply.next().is_none());
+        assert!(reply.next().is_none());
+    }
 
     fn devices(buf: &[u8]) -> Devices<4096> {
         let mut command = Command::new(Header::any());

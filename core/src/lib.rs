@@ -17,6 +17,7 @@ pub use span::Span;
 ///
 /// Implementations must choose a `DEFAULT` between `MIN` and `MAX` that can
 /// be represented as a nonzero `u32` byte count.
+/// An invalid default fails compilation when [`BlockSize::default`] is instantiated.
 pub trait Constraint {
     /// The default base-two exponent.
     const DEFAULT: u32;

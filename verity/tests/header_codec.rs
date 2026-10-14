@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::{io::ErrorKind, num::NonZero};
 
 use devmap_core::{BlockSize, Geometry};

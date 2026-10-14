@@ -2,35 +2,39 @@
 
 use std::io;
 
+use zerocopy::FromBytes;
+
 use super::Records;
 use crate::{DevId, abi::Command};
 
 /// Owned device dependencies, available through [`super::Records`].
 pub(crate) struct Dependencies<const N: usize = 4096> {
     command: Command<N>,
-    cursor: usize,
+    cursor: Option<usize>,
 }
 
 impl<const N: usize> Dependencies<N> {
     pub(crate) fn new(command: Command<N>) -> io::Result<Self> {
         let payload = command.payload()?;
         if payload.is_empty() {
-            return Ok(Self { command, cursor: 0 });
+            return Ok(Self {
+                command,
+                cursor: None,
+            });
         }
-        if payload.len() < 8 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "truncated dependency header",
-            ));
-        }
-        let count = u32::from_ne_bytes(payload[..4].try_into().unwrap()) as usize;
-        if count > (payload.len() - 8) / 8 {
+        let ([count, _], data) = <[u32; 2]>::read_from_prefix(payload).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "truncated dependency header")
+        })?;
+        if count as usize > data.len() / 8 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "truncated dependency array",
             ));
         }
-        Ok(Self { command, cursor: 0 })
+        Ok(Self {
+            command,
+            cursor: Some(0),
+        })
     }
 }
 
@@ -38,19 +42,38 @@ impl<const N: usize> Records for Dependencies<N> {
     type Item<'a> = DevId;
 
     fn next(&mut self) -> Option<io::Result<Self::Item<'_>>> {
-        let payload = self.command.payload().expect("validated immutable reply");
-        if payload.is_empty() {
+        let index = self.cursor.take()?;
+        let payload = match self.command.payload() {
+            Ok(payload) => payload,
+            Err(error) => {
+                return Some(Err(io::Error::other(format!(
+                    "validated reply became invalid: {error}"
+                ))));
+            }
+        };
+        let Ok(([count, _], data)) = <[u32; 2]>::read_from_prefix(payload) else {
+            return Some(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "truncated dependency header",
+            )));
+        };
+        if index >= count as usize {
             return None;
         }
-        let count = u32::from_ne_bytes(payload[..4].try_into().unwrap()) as usize;
-        if self.cursor >= count {
-            return None;
-        }
-        let start = 8 + self.cursor * 8;
-        self.cursor += 1;
-        Some(Ok(DevId::from_kernel(u64::from_ne_bytes(
-            payload[start..start + 8].try_into().unwrap(),
-        ))))
+        let Some(data) = index.checked_mul(8).and_then(|start| data.get(start..)) else {
+            return Some(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid dependency offset",
+            )));
+        };
+        let Ok((device, _)) = u64::read_from_prefix(data) else {
+            return Some(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "truncated dependency array",
+            )));
+        };
+        self.cursor = Some(index + 1);
+        Some(Ok(DevId::from_kernel(device)))
     }
 }
 
@@ -68,6 +91,22 @@ mod tests {
 
     use super::*;
     use crate::abi::Header;
+
+    #[test]
+    fn invalidated_reply_returns_one_error_then_stops() {
+        let mut header = Header::any();
+        header.as_mut_bytes()[12..16]
+            .copy_from_slice(&u32::try_from(Header::SIZE + 8).unwrap().to_ne_bytes());
+        let mut reply = Dependencies::new(Command::<8>::new(header)).unwrap();
+        // Only test code can mutate the owned response after validation.
+        reply.command.as_mut_bytes()[12..16].copy_from_slice(&0u32.to_ne_bytes());
+        assert_eq!(
+            reply.next().unwrap().unwrap_err().kind(),
+            io::ErrorKind::Other
+        );
+        assert!(reply.next().is_none());
+        assert!(reply.next().is_none());
+    }
 
     #[test]
     fn header_only_reply_has_no_dependencies() {

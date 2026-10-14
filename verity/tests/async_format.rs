@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::{
     io::{self, Cursor, ErrorKind, Seek as _, SeekFrom, Write as _},
     num::NonZero,

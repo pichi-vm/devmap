@@ -76,14 +76,3 @@ fn block_sizes_are_copyable() {
     copy::<BlockSize>();
     copy::<BlockSize<Restricted>>();
 }
-
-#[test]
-#[should_panic(expected = "invalid Constraint::DEFAULT")]
-fn invalid_constraint_default_panics() {
-    enum Invalid {}
-    impl Constraint for Invalid {
-        const MAX: u32 = 4;
-        const DEFAULT: u32 = 5;
-    }
-    let _ = BlockSize::<Invalid>::default();
-}

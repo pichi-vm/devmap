@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Real-kernel coverage for `DM_DEV_ARM_POLL` and the `AsFd` impl that
 //! makes it usable — the readiness path an async reactor would drive.
 //!

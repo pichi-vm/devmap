@@ -98,16 +98,19 @@ impl<C: Constraint> Detect for Geometry<C> {
 
         let block = u64::from(size.bytes().get());
 
-        if extent == 0 || extent % block != 0 {
+        if extent % block != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "storage extent must be a nonzero whole number of blocks",
             ));
         }
 
-        Ok(Self {
-            size,
-            count: NonZero::new(extent / block).expect("storage extent is nonzero"),
-        })
+        let count = NonZero::new(extent / block).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "storage extent must be nonzero",
+            )
+        })?;
+        Ok(Self { size, count })
     }
 }
