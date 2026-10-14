@@ -10,14 +10,13 @@ const VERSION: Version = Version {
     patch: 0,
 };
 
-fn row<T: Parse + Debug + PartialEq>(text: &str, allowed_prefixes: &[usize]) {
+fn row<T: Parse + Debug + PartialEq>(text: &str) {
     let parsed = T::parse(text, VERSION).unwrap();
     let fields: Vec<_> = text.split_whitespace().collect();
     for length in 0..fields.len() {
         let prefix = fields[..length].join(" ");
-        assert_eq!(
-            T::parse(&prefix, VERSION).is_ok(),
-            allowed_prefixes.contains(&length),
+        assert!(
+            T::parse(&prefix, VERSION).is_err(),
             "prefix {prefix:?} of {text:?}"
         );
     }
@@ -94,7 +93,7 @@ fn transient_persistence_is_only_accepted_by_snapshot() {
 
 #[test]
 fn table_parsers_preserve_required_optional_and_trailing_fields() {
-    row::<devmap_snapshot::Snapshot>("7:0 7:1 PO 32", &[]);
+    row::<devmap_snapshot::Snapshot>("7:0 7:1 PO 32");
 }
 
 #[test]
@@ -129,7 +128,7 @@ fn persistent_modes_preserve_parameters_across_targets() {
 
 #[test]
 fn status_parsers_preserve_required_optional_and_trailing_fields() {
-    row::<devmap_snapshot::Info>("12/64 8", &[]);
+    row::<devmap_snapshot::Info>("12/64 8");
 }
 
 #[test]
@@ -182,7 +181,7 @@ fn discard_modes_round_trip_and_reject_invalid_combinations() {
 #[test]
 fn special_statuses_remain_whole_row_alternatives() {
     for text in ["Invalid", "Overflow", "Unknown"] {
-        row::<devmap_snapshot::Info>(text, &[]);
+        row::<devmap_snapshot::Info>(text);
     }
     let merge = devmap_snapshot::Info::parse(" Merge failed ", VERSION).unwrap();
     assert_eq!(merge, devmap_snapshot::Info::MergeFailed);
@@ -191,7 +190,7 @@ fn special_statuses_remain_whole_row_alternatives() {
 
 #[test]
 fn usage_fields_do_not_gain_new_relationship_constraints() {
-    row::<devmap_snapshot::Info>("0/0 0", &[]);
+    row::<devmap_snapshot::Info>("0/0 0");
     reject::<devmap_snapshot::Info>(&[
         "1/2/3 0",
         "/2 0",
