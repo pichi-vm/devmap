@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::ops::Deref;
+use std::{fmt, ops::Deref};
 
 const MAX_SIZE: usize = 256;
 
@@ -8,7 +8,7 @@ const MAX_SIZE: usize = 256;
 ///
 /// Holds up to 256 bytes; the default is an empty salt. Borrowing as a byte
 /// slice exposes only the supplied bytes, not the unused storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Salt([u8; MAX_SIZE], usize);
 
 impl Salt {
@@ -32,6 +32,12 @@ impl Default for Salt {
     }
 }
 
+impl fmt::Debug for Salt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Salt").field(&self.as_ref()).finish()
+    }
+}
+
 impl Deref for Salt {
     type Target = [u8];
 
@@ -43,5 +49,19 @@ impl Deref for Salt {
 impl AsRef<[u8]> for Salt {
     fn as_ref(&self) -> &[u8] {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Salt;
+
+    #[test]
+    fn debug_shows_only_salt_bytes() {
+        assert_eq!(format!("{:?}", Salt::default()), "Salt([])");
+        assert_eq!(
+            format!("{:?}", Salt::new(&[1, 0, 3]).unwrap()),
+            "Salt([1, 0, 3])"
+        );
     }
 }
