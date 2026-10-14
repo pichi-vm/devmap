@@ -5,11 +5,16 @@ use std::ops::Deref;
 const MAX_SIZE: usize = 256;
 
 /// Salt bytes recorded in a dm-verity header.
+///
+/// Holds up to 256 bytes; the default is an empty salt. Borrowing as a byte
+/// slice exposes only the supplied bytes, not the unused storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Salt([u8; MAX_SIZE], usize);
 
 impl Salt {
     /// Constructs a salt when the bytes fit in the on-disk header.
+    ///
+    /// Returns `None` for more than 256 bytes. An empty slice is accepted.
     pub fn new(bytes: &[u8]) -> Option<Self> {
         if bytes.len() > MAX_SIZE {
             return None;

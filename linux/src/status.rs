@@ -34,8 +34,9 @@ pub struct Status {
     pub target_count: u32,
     /// Event counter to pass to [`Control::wait`](crate::Control::wait).
     pub event_nr: u32,
-    /// State flags; test individual bits with the associated constants.
-    /// Unknown bits are preserved.
+    /// Device-state and operation-result flags; test individual bits with the
+    /// associated constants. Unknown bits are preserved, including the buffer-full
+    /// flag that [`Control::wait`](crate::Control::wait) may return.
     pub flags: u32,
 }
 

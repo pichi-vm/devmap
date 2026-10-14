@@ -36,8 +36,12 @@ use whirlpool::Whirlpool;
 
 /// A dm-verity hash algorithm.
 ///
-/// Values remain representable without their hash-family features. Formatting
-/// with an unavailable algorithm returns [`std::io::ErrorKind::Unsupported`].
+/// The default is [`Sha256`](Self::Sha256). [`Display`](fmt::Display) and
+/// [`AsRef<str>`] return the kernel spelling documented on each variant;
+/// [`FromStr`] accepts exactly those case-sensitive spellings.
+///
+/// Parsing and displaying names do not require hash-family features. Building a
+/// hash tree with an unavailable algorithm returns [`io::ErrorKind::Unsupported`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Algorithm {
@@ -182,6 +186,11 @@ impl Algorithm {
 impl FromStr for Algorithm {
     type Err = io::Error;
 
+    /// Parses a kernel algorithm name without trimming whitespace or accepting aliases.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidData`] for an unrecognized name.
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         match name {
             "sha1" => Ok(Self::Sha1),

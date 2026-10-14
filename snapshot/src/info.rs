@@ -78,11 +78,16 @@ pub enum Info {
 impl Parse for Info {
     /// Parses usage counters or an exceptional state from a target response.
     ///
+    /// Supply the version of the row's actual target. This shared parser receives
+    /// no target identity, so it accepts `Overflow` from version 1.4.0, the
+    /// [`Merge`](crate::Merge) threshold. It cannot enforce
+    /// [`Snapshot`](crate::Snapshot)'s stricter 1.15.0 threshold.
+    ///
     /// # Errors
     ///
     /// Returns `InvalidData` for malformed or extra fields. Returns `Unsupported`
     /// for a major version other than 1, or an `Overflow` response with a version
-    /// earlier than 1.4.0. Supply the version of the row's actual target.
+    /// earlier than 1.4.0.
     fn parse(text: &str, version: Version) -> io::Result<Self> {
         if version.major != 1 {
             return Err(io::Error::new(
