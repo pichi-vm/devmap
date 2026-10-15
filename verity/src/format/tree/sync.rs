@@ -62,13 +62,6 @@ impl<W: Write + Seek> TreeWriter<W> {
                 )));
             }
             Phase::Complete(_) => return self.output.flush().map_err(Failure::Fatal),
-            #[cfg(feature = "tokio")]
-            Phase::Draining(_) | Phase::SeekingEnd { .. } | Phase::FlushingOutput(_) => {
-                return Err(Failure::Recoverable(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "an asynchronous tree-writer operation is still in progress",
-                )));
-            }
             Phase::Open | Phase::Sealed => {}
         }
 

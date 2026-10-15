@@ -117,11 +117,13 @@ impl AsyncFormat for Header {
         let mut tree = TreeWriter::new(hash, &self.parameters)?;
         tree.output_mut().write_all(&encoded).await?;
         tokio::io::copy(&mut tokio::io::repeat(0).take(padding), tree.output_mut()).await?;
-        let copied = tokio::io::copy(&mut data.take(data_size), &mut tree).await?;
-        if copied != data_size {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+        let mut data = data.take(data_size);
+        let block_size = self.parameters.data.size.bytes().get() as usize;
+        let mut buffer = vec![0; block_size].into_boxed_slice();
+        while data.limit() != 0 {
+            data.read_exact(&mut buffer).await?;
+            tree.write_all_async(&buffer).await?;
         }
-        tree.flush().await?;
-        tree.finish()
+        tree.finish_async().await
     }
 }
