@@ -29,7 +29,7 @@ blake2 = ["dep:blake2", "dep:digest"]
 
 [dependencies]
 devmap-core = { version = "0.1.0", path = "../core" }
-blake2 = { version = "0.10", optional = true }
+blake2 = { version = "0.11", optional = true }
 digest = { version = "0.10", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ripemd = { version = "0.1", optional = true }
