@@ -2,10 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Shared helpers for real-kernel integration tests: a root-gated
-//! `Control::open()` skip check, and a sparse-file-backed loop device for
-//! tests that need a real (if tiny) block device without touching real
-//! hardware.
+//! Shared mapping cleanup and sparse-file-backed loop devices for
+//! real-kernel integration tests.
 //!
 //! Every test binary that `mod common;`s this file compiles the whole
 //! thing but typically uses only part of it (e.g. `arm_poll.rs`
@@ -21,16 +19,6 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use devmap_linux::{Control, DevId};
-
-/// Returns `None` (and prints a skip notice) if this process can't open
-/// `/dev/mapper/control` — i.e. isn't root / doesn't have `CAP_SYS_ADMIN`.
-pub(crate) fn open_control() -> Option<Control> {
-    if let Ok(control) = Control::open() {
-        return Some(control);
-    }
-    eprintln!("skip: requires root (or CAP_SYS_ADMIN) for /dev/mapper/control");
-    None
-}
 
 /// Test-only cleanup for a mapping; no device operations are wrapped here.
 pub(crate) struct Owned {

@@ -11,10 +11,10 @@
 mod common;
 
 use devmap_linux::{
-    DevId, Status, records::Records, targets::Target, targets::Version, targets::Zero,
+    Control, DevId, Status, records::Records, targets::Target, targets::Version, targets::Zero,
 };
 
-use common::{LoopDevice, Owned, open_control};
+use common::{LoopDevice, Owned};
 
 struct Linear {
     device: DevId,
@@ -46,10 +46,9 @@ impl Target for Linear {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn deps_reports_the_devices_the_table_opens() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let backing = LoopDevice::create("deps", 8 * 1024 * 1024);
     let backing_device = devmap_linux::DevId::try_from(std::fs::metadata(&backing.path).unwrap())
@@ -82,10 +81,9 @@ fn deps_reports_the_devices_the_table_opens() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn deps_is_empty_without_an_active_table() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
     let dev = Owned::create(
         &control,
         &format!("devmap-test-deps-unloaded-{}", std::process::id()),
@@ -97,10 +95,9 @@ fn deps_is_empty_without_an_active_table() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn deps_is_empty_for_a_target_that_opens_no_devices() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-deps-zero-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -130,10 +127,9 @@ fn deps_is_empty_for_a_target_that_opens_no_devices() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn clear_discards_the_staged_table() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-clear-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -193,10 +189,9 @@ fn clear_discards_the_staged_table() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn clear_is_a_no_op_with_nothing_staged() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-clear-noop-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -226,10 +221,9 @@ fn clear_is_a_no_op_with_nothing_staged() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn rename_moves_the_device_to_the_new_name() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let old = format!("devmap-test-rename-old-{}", std::process::id());
     let new = format!("devmap-test-rename-new-{}", std::process::id());
@@ -263,10 +257,9 @@ fn rename_moves_the_device_to_the_new_name() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn rename_rejects_a_name_already_in_use() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let first = format!("devmap-test-rename-clash-a-{}", std::process::id());
     let second = format!("devmap-test-rename-clash-b-{}", std::process::id());
@@ -308,10 +301,9 @@ fn rename_rejects_a_name_already_in_use() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     // `create` never assigns a uuid, so DM_DEV_RENAME with DM_UUID_FLAG is
     // the only way to give a device one — and the only way `by_uuid` can
@@ -351,10 +343,9 @@ fn set_uuid_attaches_a_uuid_that_by_uuid_then_finds() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn list_targets_reports_the_targets_the_kernel_has_registered() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let mut reply = control.versions::<4096>().expect("DM_LIST_VERSIONS");
     let mut versions = Vec::new();
@@ -380,10 +371,9 @@ fn list_targets_reports_the_targets_the_kernel_has_registered() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn a_custom_target_loads_a_table_line() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let backing = LoopDevice::create("addraw", 8 * 1024 * 1024);
     let backing_device = devmap_linux::DevId::try_from(std::fs::metadata(&backing.path).unwrap())
@@ -421,10 +411,9 @@ fn a_custom_target_loads_a_table_line() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn wait_returns_at_once_when_the_counter_already_differs() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-wait-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
