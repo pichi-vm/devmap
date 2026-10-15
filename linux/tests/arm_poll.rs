@@ -20,7 +20,7 @@ use std::os::fd::AsFd as _;
 use devmap_linux::Control;
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
-use common::{Owned, open_control};
+use common::Owned;
 
 /// Poll the control fd for readability with a bounded timeout, so the
 /// test can never hang waiting on an event that will not arrive.
@@ -36,10 +36,9 @@ fn poll_readable(control: &Control, millis: i32) -> bool {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn arm_poll_drives_readiness_on_the_control_fd() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     // Arming clears readiness left over from earlier dm activity, so the
     // fd starts quiet.

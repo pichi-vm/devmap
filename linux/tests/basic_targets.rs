@@ -10,10 +10,10 @@ use std::{
 use devmap_core::Span;
 use devmap_linux::targets::{Error, Linear};
 use devmap_linux::{
-    DevId, Table, records::Records, targets::Parse, targets::Target, targets::Version,
+    Control, DevId, Table, records::Records, targets::Parse, targets::Target, targets::Version,
 };
 
-use common::{LoopDevice, Owned, open_control};
+use common::{LoopDevice, Owned};
 
 const VERSION: Version = Version {
     major: 1,
@@ -80,10 +80,9 @@ fn codecs_validate_parameters_versions_and_destination_errors() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn linear_maps_reads_and_writes_at_the_backing_offset() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
     let backing = LoopDevice::create("linear", 1024 * 1024);
     let mut file = OpenOptions::new()
         .read(true)
@@ -160,10 +159,9 @@ fn linear_maps_reads_and_writes_at_the_backing_offset() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn error_fails_io_and_reports_empty_parameters() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
     let version = control.version(Error::NAME).unwrap();
     let dev = Owned::create(
         &control,

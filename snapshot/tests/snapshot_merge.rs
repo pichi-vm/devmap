@@ -9,11 +9,11 @@ mod common;
 use std::io::Write;
 
 use devmap_core::BlockSize;
-use devmap_linux::records::Records;
+use devmap_linux::{Control, records::Records};
 use devmap_snapshot as snapshot;
 use devmap_snapshot::{Merge, Persistent, Snapshot};
 
-use common::{LoopDevice, Owned, ensure_module_loaded, open_control};
+use common::{LoopDevice, Owned, ensure_module_loaded};
 
 fn parameters<P>(
     origin: devmap_linux::DevId,
@@ -42,10 +42,9 @@ fn parameters<P>(
 /// its COW device is already suspended — that's what makes step 5 below
 /// load-bearing, not optional.
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn snapshot_merge_takes_over_from_snapshot_and_merges() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
     ensure_module_loaded("dm-snapshot");
 
     let origin_backing = LoopDevice::create("snapmerge-origin", 16 * 1024 * 1024);

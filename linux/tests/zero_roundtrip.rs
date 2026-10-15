@@ -5,9 +5,7 @@
 //! possible target: dm-zero has no parameters, so this exercises
 //! everything *except* target-specific parameter rendering.
 //!
-//! Requires root (or `CAP_SYS_ADMIN`) to open `/dev/mapper/control` for
-//! writing — skips gracefully otherwise, matching the pattern this
-//! project's other ioctl-touching tests already use.
+//! Ignored by default; explicit runs require privileged device-mapper access.
 //!
 //! `by_uuid()` is not exercised here because `Control::create` never
 //! assigns a uuid; `lifecycle_ioctls.rs` covers it, attaching one first
@@ -20,15 +18,14 @@ use std::{fs::File, io::Read as _};
 use devmap_core::Span;
 use devmap_linux::records::Records;
 use devmap_linux::targets::Zero;
-use devmap_linux::{DevId, Status};
+use devmap_linux::{Control, DevId, Status};
 
-use common::{Owned, open_control};
+use common::Owned;
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn create_load_resume_read_zeros_remove() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-zero-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -73,10 +70,9 @@ fn create_load_resume_read_zeros_remove() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn suspend_resume_round_trips() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-suspend-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -124,10 +120,9 @@ fn suspend_resume_round_trips() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn status_reports_sane_values_for_a_fresh_device() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-status-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -155,10 +150,9 @@ fn status_reports_sane_values_for_a_fresh_device() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn table_status_reports_back_the_loaded_target() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-tstatus-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -191,10 +185,9 @@ fn table_status_reports_back_the_loaded_target() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn list_reports_the_created_device() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-list-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -232,10 +225,9 @@ fn list_reports_the_created_device() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn fixed_capacity_queries_report_full_buffers_and_allow_larger_retries() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
     let name = format!("devmap-test-capacity-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
     control
@@ -288,10 +280,9 @@ fn fixed_capacity_queries_report_full_buffers_and_allow_larger_retries() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn by_device_and_by_node_attach_to_an_existing_device() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-attach-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -329,10 +320,9 @@ fn by_device_and_by_node_attach_to_an_existing_device() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn by_name_finds_device_and_reports_status() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-byname-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -359,10 +349,9 @@ fn by_name_finds_device_and_reports_status() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn dropping_a_connection_leaves_the_device_alone() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-drop-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -400,11 +389,10 @@ fn dropping_a_connection_leaves_the_device_alone() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn deferred_removal_reclaims_a_device_that_is_still_open() {
     // Open a holder before requesting kernel-managed deferred removal.
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-deferred-{}", std::process::id());
     let dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
@@ -451,10 +439,9 @@ fn deferred_removal_reclaims_a_device_that_is_still_open() {
 }
 
 #[test]
+#[ignore = "requires privileged device-mapper access"]
 fn create_rejects_a_duplicate_name() {
-    let Some(control) = open_control() else {
-        return;
-    };
+    let control = Control::open().expect("open /dev/mapper/control");
 
     let name = format!("devmap-test-dup-{}", std::process::id());
     let _dev = Owned::create(&control, &name).expect("DM_DEV_CREATE");
