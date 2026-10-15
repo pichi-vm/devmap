@@ -47,7 +47,7 @@ use super::tree::TreeWriter;
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::header::{Header, RECORD_SIZE};
+use crate::{Header, header::RECORD_SIZE};
 
 /// Asynchronously streams protected data into a dm-verity hash volume.
 #[cfg(any(
@@ -110,11 +110,11 @@ impl AsyncFormat for Header {
         R: AsyncRead + Unpin + Send,
         W: AsyncWrite + AsyncSeek + Unpin + Send,
     {
-        let data_size = self.data_size()?;
+        let data_size = self.parameters.data_size()?;
         self.total_size()?;
         let encoded = self.encode();
         let padding = self.prefix_size() - RECORD_SIZE as u64;
-        let mut tree = TreeWriter::new(hash, &self)?;
+        let mut tree = TreeWriter::new(hash, &self.parameters)?;
         tree.output_mut().write_all(&encoded).await?;
         tokio::io::copy(&mut tokio::io::repeat(0).take(padding), tree.output_mut()).await?;
         let copied = tokio::io::copy(&mut data.take(data_size), &mut tree).await?;

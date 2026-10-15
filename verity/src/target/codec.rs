@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::borrow::Cow;
-use std::io;
-use std::num::NonZero;
+use std::{borrow::Cow, io, num::NonZero};
 
 use devmap_core::BlockSize;
-use devmap_linux::{DevId, targets::Parse, targets::Target, targets::Version};
+use devmap_linux::{
+    DevId,
+    targets::{Parse, Target, Version},
+};
 
-use super::Info;
-use super::Verity;
-use super::{CorruptionPolicy, IoErrorPolicy};
-use crate::header::{Constraint, HashType, Header, Salt};
+use super::{CorruptionPolicy, Info, IoErrorPolicy, Verity};
+use crate::{Constraint, HashType, Parameters, Salt};
 
 impl Verity {
     fn hex(f: &mut (impl io::Write + ?Sized), bytes: &[u8]) -> io::Result<()> {
@@ -150,28 +149,28 @@ impl Target for Verity {
         write!(
             output,
             "{} {} {} {} {} {} {} {} ",
-            self.hash_type,
+            self.parameters.hash_type,
             self.data,
             self.hash,
-            self.geometry.size.bytes(),
-            self.block.bytes(),
-            self.geometry.count,
+            self.parameters.data.size.bytes(),
+            self.parameters.hash.bytes(),
+            self.parameters.data.count,
             self.hash_start,
-            self.algorithm
+            self.parameters.algorithm
         )?;
         Self::hex(output, &self.root)?;
         output.write_all(b" ")?;
-        if self.salt.is_empty() {
+        if self.parameters.salt.is_empty() {
             output.write_all(b"-")?;
         } else {
-            Self::hex(output, self.salt.as_ref())?;
+            Self::hex(output, self.parameters.salt.as_ref())?;
         }
         let count = usize::from(self.corruption_policy != CorruptionPolicy::Error)
             + usize::from(self.io_error_policy != IoErrorPolicy::Error)
             + usize::from(self.ignore_zero_blocks)
             + usize::from(self.check_at_most_once)
             + usize::from(self.try_verify_in_tasklet)
-            + usize::from(self.signature.is_some()) * 2;
+            + usize::from(self.root_hash_sig_key_desc.is_some()) * 2;
         if count == 0 {
             return Ok(());
         }
@@ -196,7 +195,7 @@ impl Target for Verity {
         if self.try_verify_in_tasklet {
             output.write_all(b" try_verify_in_tasklet")?;
         }
-        if let Some(key) = &self.signature {
+        if let Some(key) = &self.root_hash_sig_key_desc {
             output.write_all(b" root_hash_sig_key_desc ")?;
             Self::token(output, key)?;
         }
@@ -236,19 +235,9 @@ impl Parse for Verity {
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "zero verity data-block count")
         })?;
-        let mut header = Header {
-            uuid: [0; 16],
-            hash_type,
-            algorithm: words[7].parse().map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "unknown verity hash algorithm")
-            })?,
-            salt: Salt::default(),
-            data: devmap_core::Geometry {
-                size: BlockSize::default(),
-                count,
-            },
-            hash: BlockSize::default(),
-        };
+        let algorithm = words[7].parse().map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "unknown verity hash algorithm")
+        })?;
         let data_block_size = NonZero::new(
             words[3]
                 .parse::<u32>()
@@ -267,16 +256,25 @@ impl Parse for Verity {
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "invalid verity hash-block size")
         })?;
-        header.data.size = data_block_size;
-        header.hash = hash_block_size;
         let root = Self::unhex(&words[8]).collect::<Result<Vec<_>, _>>()?;
-        if words[9] != "-" {
+        let salt = if words[9] == "-" {
+            Salt::default()
+        } else {
             let salt = Self::unhex(&words[9]).collect::<Result<Vec<_>, _>>()?;
-            header.salt = Salt::new(&salt).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "verity salt too long")
-            })?;
-        }
-        let mut builder = header
+            Salt::new(&salt)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "verity salt too long"))?
+        };
+        let parameters = Parameters {
+            hash_type,
+            algorithm,
+            salt,
+            data: devmap_core::Geometry {
+                size: data_block_size,
+                count,
+            },
+            hash: hash_block_size,
+        };
+        let mut builder = parameters
             .builder(data, hash, root)
             .map_err(|error| {
                 if error.kind() == io::ErrorKind::InvalidInput {

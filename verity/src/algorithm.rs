@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use core::fmt;
-use core::str::FromStr;
+use core::{fmt, str::FromStr};
 use std::io;
 
 #[cfg(feature = "blake2")]

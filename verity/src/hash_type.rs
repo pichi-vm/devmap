@@ -27,7 +27,7 @@ use digest::DynDigest;
 
 /// A dm-verity hash-tree compatibility profile.
 ///
-/// This setting is independent of the hash [`crate::header::Algorithm`]. Use
+/// This setting is independent of the hash [`crate::Algorithm`]. Use
 /// [`HashType::Normal`] unless compatibility with a format-0 Chrome OS image
 /// is required.
 ///

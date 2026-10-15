@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::header::Header;
+use crate::Parameters;
 #[cfg(feature = "tokio")]
 use state::PendingBlock;
 use state::State;
@@ -44,8 +44,8 @@ impl<W> TreeWriter<W> {
     ///
     /// Returns [`io::ErrorKind::Unsupported`] if the feature for the selected
     /// hash algorithm is not enabled.
-    pub(crate) fn new(output: W, header: &Header) -> io::Result<Self> {
-        let hasher = header.algorithm.hasher().ok_or_else(|| {
+    pub(crate) fn new(output: W, parameters: &Parameters) -> io::Result<Self> {
+        let hasher = parameters.algorithm.hasher().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "hash algorithm support is not enabled",
@@ -54,7 +54,7 @@ impl<W> TreeWriter<W> {
 
         Ok(Self {
             output,
-            tree: State::new(header, hasher)?,
+            tree: State::new(parameters, hasher)?,
             output_range: None,
             phase: Phase::Open,
             #[cfg(feature = "tokio")]

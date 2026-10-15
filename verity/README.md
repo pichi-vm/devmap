@@ -18,14 +18,14 @@ count, and other format parameters. It does **not** verify either volume.
 
 ```rust,no_run
 use std::{fs::File, io::Read as _};
-use devmap_verity::header::Header;
+use devmap_verity::Header;
 
 # fn main() -> std::io::Result<()> {
 let mut hash = File::open("hash.img")?;
 let mut record = [0; 512];
 hash.read_exact(&mut record)?;
 let header = Header::decode(record)?;
-println!("{} data blocks", header.data.count);
+println!("{} data blocks", header.parameters.data.count);
 # Ok(())
 # }
 ```
@@ -47,21 +47,20 @@ hash-family Cargo feature, such as `sha2`, to use it.
 # fn main() -> std::io::Result<()> {
 use std::fs::{File, OpenOptions};
 use devmap_core::{BlockSize, Detect as _, Geometry};
-use devmap_verity::{
-    header::{Algorithm, Constraint, HashType, Header},
-    Format as _,
-};
+use devmap_verity::{Algorithm, Constraint, Format as _, HashType, Header, Parameters};
 
 let data = File::open("data.img")?;
 let hash = OpenOptions::new().write(true).create_new(true).open("hash.img")?;
 
 let header = Header {
     uuid: [7; 16],
-    hash_type: HashType::default(),
-    algorithm: Algorithm::Sha256,
-    salt: Default::default(),
-    data: Geometry::<Constraint>::detect(&data)?,
-    hash: BlockSize::<Constraint>::detect(&hash)?,
+    parameters: Parameters {
+        hash_type: HashType::default(),
+        algorithm: Algorithm::Sha256,
+        salt: Default::default(),
+        data: Geometry::<Constraint>::detect(&data)?,
+        hash: BlockSize::<Constraint>::detect(&hash)?,
+    },
 };
 
 let root = header.format(&data, &hash)?;
@@ -103,7 +102,7 @@ The process needs device-mapper access.
 # fn activate(data: &std::fs::File, hash: &std::fs::File, trusted_root: &[u8]) -> std::io::Result<std::fs::File> {
 use std::{fs::OpenOptions, io::Read as _};
 use devmap_linux::{Control, DevId};
-use devmap_verity::header::Header;
+use devmap_verity::Header;
 
 let mut record = [0; 512];
 hash.try_clone()?.read_exact(&mut record)?;

@@ -2,10 +2,9 @@
 
 //! Linux dm-verity target descriptions and activation policy.
 
-use devmap_core::{BlockSize, Geometry};
 use devmap_linux::{DevId, targets::Version};
 
-use crate::header::{Algorithm, Constraint, HashType, Salt};
+use crate::Parameters;
 
 mod builder;
 mod codec;
@@ -18,30 +17,92 @@ pub use policy::{CorruptionPolicy, IoErrorPolicy};
 
 /// A validated Linux dm-verity table description.
 ///
-/// Construct through [`Verity::builder`] or
-/// [`Header::builder`](crate::header::Header::builder). The root must come
+/// Construct with default parameters through [`Verity::builder`], explicit
+/// parameters through [`Parameters::builder`], or an on-disk header through
+/// [`Header::builder`](crate::Header::builder). The root must come
 /// from an independently trusted source. Activate in a read-only table.
+///
+/// Table parsing produces the same validated description. Read back the format
+/// through [`Self::parameters`], the mapping inputs through [`Self::data`],
+/// [`Self::hash`], and [`Self::root`], and activation settings through the methods
+/// named after their builder counterparts. A target retains neither a header
+/// UUID nor evidence that an on-disk header exists.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Verity {
-    hash_type: HashType,
+    parameters: Parameters,
     data: DevId,
     hash: DevId,
-    geometry: Geometry<Constraint>,
-    block: BlockSize<Constraint>,
     hash_start: u64,
-    algorithm: Algorithm,
-    salt: Salt,
     corruption_policy: CorruptionPolicy,
     io_error_policy: IoErrorPolicy,
     ignore_zero_blocks: bool,
     check_at_most_once: bool,
     try_verify_in_tasklet: bool,
-    signature: Option<String>,
+    root_hash_sig_key_desc: Option<String>,
     root: Box<[u8]>,
     data_sectors: u64,
 }
 
 impl Verity {
+    /// Borrows the hash-tree format used to construct or parse this target.
+    pub const fn parameters(&self) -> &Parameters {
+        &self.parameters
+    }
+
+    /// Returns the device containing the protected data.
+    pub const fn data(&self) -> DevId {
+        self.data
+    }
+
+    /// Returns the device containing the hash tree.
+    pub const fn hash(&self) -> DevId {
+        self.hash
+    }
+
+    /// Borrows the root digest, without hex encoding.
+    ///
+    /// Reading this value from a table does not establish its authenticity.
+    pub fn root(&self) -> &[u8] {
+        &self.root
+    }
+
+    /// Returns the tree offset in hash-sized blocks, as set by [`Builder::hash_start`].
+    pub const fn hash_start(&self) -> u64 {
+        self.hash_start
+    }
+
+    /// Returns the selected action for a hash mismatch.
+    pub const fn corruption_policy(&self) -> CorruptionPolicy {
+        self.corruption_policy
+    }
+
+    /// Returns the selected action for a backing-device I/O error.
+    pub const fn io_error_policy(&self) -> IoErrorPolicy {
+        self.io_error_policy
+    }
+
+    /// Returns whether blocks with the expected zero-block digest are returned as zeroes.
+    pub const fn ignore_zero_blocks(&self) -> bool {
+        self.ignore_zero_blocks
+    }
+
+    /// Returns whether data blocks are verified only on their first read.
+    pub const fn check_at_most_once(&self) -> bool {
+        self.check_at_most_once
+    }
+
+    /// Returns whether verification may run in a kernel bottom half.
+    pub const fn try_verify_in_tasklet(&self) -> bool {
+        self.try_verify_in_tasklet
+    }
+
+    /// Borrows the kernel key description selected by [`Builder::root_hash_sig_key_desc`].
+    ///
+    /// This is a key description, not the signature itself.
+    pub fn root_hash_sig_key_desc(&self) -> Option<&str> {
+        self.root_hash_sig_key_desc.as_deref()
+    }
+
     /// Returns the full row length in 512-byte sectors.
     pub const fn data_sectors(&self) -> u64 {
         self.data_sectors
@@ -56,7 +117,7 @@ impl Verity {
             ) || release >= (1, 2, 0))
             && (!self.ignore_zero_blocks || release >= (1, 3, 0))
             && (!self.check_at_most_once || release >= (1, 4, 0))
-            && (self.signature.is_none() || release >= (1, 5, 0))
+            && (self.root_hash_sig_key_desc.is_none() || release >= (1, 5, 0))
             && (self.corruption_policy != CorruptionPolicy::Panic || release >= (1, 7, 0))
             && (!self.try_verify_in_tasklet || release >= (1, 9, 0))
             && (self.io_error_policy == IoErrorPolicy::Error || release >= (1, 10, 0))
@@ -116,7 +177,7 @@ mod tests {
             ),
             (
                 Verity {
-                    signature: Some("test-key".into()),
+                    root_hash_sig_key_desc: Some("test-key".into()),
                     ..base.clone()
                 },
                 [1, 4, 0],

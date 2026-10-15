@@ -2,34 +2,11 @@
 
 //! Semantic contents and fixed-record codec for a standard dm-verity header.
 
-#![cfg_attr(
-    not(any(
-        target_os = "linux",
-        feature = "sha1",
-        feature = "sha2",
-        feature = "sha3",
-        feature = "ripemd",
-        feature = "whirlpool",
-        feature = "streebog",
-        feature = "sm3",
-        feature = "blake2"
-    )),
-    allow(dead_code)
-)]
-
 use std::{io, num::NonZero};
 
 use devmap_core::{BlockSize, Geometry};
 
-mod algorithm;
-mod constraint;
-mod hash_type;
-mod salt;
-
-pub use algorithm::Algorithm;
-pub use constraint::Constraint;
-pub use hash_type::HashType;
-pub use salt::Salt;
+use crate::{Constraint, HashType, Parameters, Salt};
 
 pub(crate) const RECORD_SIZE: usize = 512;
 
@@ -48,37 +25,17 @@ pub struct Header {
     /// Identifier recorded when the hash volume was formatted.
     pub uuid: [u8; 16],
 
-    /// The hash-tree convention.
-    pub hash_type: HashType,
-
-    /// The digest algorithm.
-    pub algorithm: Algorithm,
-
-    /// At most 256 salt bytes.
-    pub salt: Salt,
-
-    /// Geometry of the protected data extent.
-    pub data: Geometry<Constraint>,
-
-    /// Size of each hash-tree block.
-    pub hash: BlockSize<Constraint>,
+    /// Hash-tree format and block geometry.
+    pub parameters: Parameters,
 }
 
 impl Header {
-    pub(crate) fn data_size(&self) -> io::Result<u64> {
-        u64::from(self.data.size.bytes().get())
-            .checked_mul(self.data.count.get())
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "verity data extent overflows")
-            })
-    }
-
     /// Returns the size of the padded header prefix in bytes.
     ///
     /// The prefix occupies one complete hash block: a 512-byte encoded header
     /// followed by padding through the block boundary.
     pub fn prefix_size(&self) -> u64 {
-        u64::from(self.hash.bytes().get())
+        u64::from(self.parameters.hash.bytes().get())
     }
 
     /// Returns the size of the complete hash tree in bytes.
@@ -91,24 +48,7 @@ impl Header {
     /// Returns [`io::ErrorKind::InvalidInput`] if the tree size cannot be
     /// represented as a `u64` byte count.
     pub fn tree_size(&self) -> io::Result<u64> {
-        let hashes_per_block = self.hashes_per_block()?;
-        let blocks = self
-            .level_blocks(hashes_per_block)
-            .try_fold(0u64, u64::checked_add)
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "verity hash tree size overflows",
-                )
-            })?;
-        blocks
-            .checked_mul(u64::from(self.hash.bytes().get()))
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "verity hash tree size overflows",
-                )
-            })
+        self.parameters.tree_size()
     }
 
     /// Returns the size of the padded header prefix and hash tree in bytes.
@@ -130,25 +70,6 @@ impl Header {
                     "verity hash volume size overflows",
                 )
             })
-    }
-
-    pub(crate) fn hashes_per_block(&self) -> io::Result<usize> {
-        let capacity = self.hash.bytes().get() as usize / self.algorithm.digest_size();
-        if capacity < 2 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "hash block cannot hold two digests",
-            ));
-        }
-        Ok(1usize << capacity.ilog2())
-    }
-
-    pub(crate) fn level_blocks(&self, hashes_per_block: usize) -> impl Iterator<Item = u64> {
-        let divisor = hashes_per_block as u64;
-        std::iter::successors(Some(self.data.count.get()), move |blocks| {
-            (*blocks > 1).then(|| blocks.div_ceil(divisor))
-        })
-        .skip(1)
     }
 
     /// Decodes and validates one standard 512-byte dm-verity header record.
@@ -221,14 +142,16 @@ impl Header {
 
         Ok(Self {
             uuid,
-            hash_type,
-            algorithm,
-            salt,
-            data: Geometry {
-                size: data_size,
-                count,
+            parameters: Parameters {
+                hash_type,
+                algorithm,
+                salt,
+                data: Geometry {
+                    size: data_size,
+                    count,
+                },
+                hash: hash_size,
             },
-            hash: hash_size,
         })
     }
 
@@ -241,21 +164,21 @@ impl Header {
         let mut bytes = [0; RECORD_SIZE];
         let mut output = bytes.as_mut_slice();
 
-        let name = self.algorithm.as_ref().as_bytes();
+        let name = self.parameters.algorithm.as_ref().as_bytes();
 
         output.push(SIGNATURE);
         output.push(1u32.to_le_bytes());
-        output.push(self.hash_type.to_le_bytes());
+        output.push(self.parameters.hash_type.to_le_bytes());
         output.push(self.uuid);
         output.push(name);
         output.skip(ALGORITHM_SIZE - name.len());
-        output.push(self.data.size.bytes().get().to_le_bytes());
-        output.push(self.hash.bytes().get().to_le_bytes());
-        output.push(self.data.count.get().to_le_bytes());
-        output.push((self.salt.len() as u16).to_le_bytes());
+        output.push(self.parameters.data.size.bytes().get().to_le_bytes());
+        output.push(self.parameters.hash.bytes().get().to_le_bytes());
+        output.push(self.parameters.data.count.get().to_le_bytes());
+        output.push((self.parameters.salt.len() as u16).to_le_bytes());
         output.skip(RESERVED_SIZE);
-        output.push(self.salt.as_ref());
-        output.skip(SALT_SIZE - self.salt.len());
+        output.push(self.parameters.salt.as_ref());
+        output.skip(SALT_SIZE - self.parameters.salt.len());
         output.skip(PADDING_SIZE);
 
         debug_assert_eq!(output, []);

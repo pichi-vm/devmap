@@ -16,10 +16,7 @@
 use std::{fmt::Write as _, io::Cursor, num::NonZero};
 
 use devmap_core::{BlockSize, Geometry};
-use devmap_verity::{
-    Format as _,
-    header::{Algorithm, HashType, Header, Salt},
-};
+use devmap_verity::{Algorithm, Format as _, HashType, Header, Parameters, Salt};
 
 // Each vector hashes 512 bytes of 0x5a, with salt 010203 prepended
 // (Normal) or appended (ChromeOs). Generated independently with Python
@@ -165,14 +162,16 @@ fn salted_single_block_roots_match_independent_vectors() {
         for (hash_type, expected) in [(HashType::Normal, normal), (HashType::ChromeOs, chrome_os)] {
             let header = Header {
                 uuid: [0; 16],
-                hash_type,
-                algorithm,
-                salt: Salt::new(&[1, 2, 3]).unwrap(),
-                data: Geometry {
-                    size: BlockSize::from_exponent(9).unwrap(),
-                    count: NonZero::new(1).unwrap(),
+                parameters: Parameters {
+                    hash_type,
+                    algorithm,
+                    salt: Salt::new(&[1, 2, 3]).unwrap(),
+                    data: Geometry {
+                        size: BlockSize::from_exponent(9).unwrap(),
+                        count: NonZero::new(1).unwrap(),
+                    },
+                    hash: BlockSize::from_exponent(9).unwrap(),
                 },
-                hash: BlockSize::from_exponent(9).unwrap(),
             };
             let mut output = Cursor::new(Vec::new());
             let root = header.format(&[0x5a; 512][..], &mut output).unwrap();

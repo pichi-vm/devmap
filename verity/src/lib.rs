@@ -10,11 +10,12 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-pub mod header;
 #[cfg(target_os = "linux")]
 #[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
 pub mod target;
 
+mod algorithm;
+mod constraint;
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -26,6 +27,18 @@ pub mod target;
     feature = "blake2"
 ))]
 mod format;
+mod hash_type;
+mod header;
+mod parameters;
+mod salt;
+
+pub use algorithm::Algorithm;
+pub use constraint::Constraint;
+pub use hash_type::HashType;
+pub use header::Header;
+pub use parameters::Parameters;
+pub use salt::Salt;
+
 #[cfg(all(
     feature = "tokio",
     any(
