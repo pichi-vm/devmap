@@ -13,7 +13,7 @@ use std::{
 };
 
 use devmap_core::{BlockSize, Geometry};
-use devmap_verity::header::{Algorithm, Constraint, HashType, Header, Salt};
+use devmap_verity::{Algorithm, Constraint, HashType, Header, Parameters, Salt};
 
 #[test]
 fn reads_a_header_written_by_veritysetup() {
@@ -64,14 +64,16 @@ fn reads_a_header_written_by_veritysetup() {
 
     let expected = Header {
         uuid: [0x5a; 16],
-        hash_type: HashType::Normal,
-        algorithm: Algorithm::Sha256,
-        salt: Salt::new(&[1, 2, 3]).unwrap(),
-        data: Geometry {
-            size: BlockSize::<Constraint>::default(),
-            count: NonZero::new(8).unwrap(),
+        parameters: Parameters {
+            hash_type: HashType::Normal,
+            algorithm: Algorithm::Sha256,
+            salt: Salt::new(&[1, 2, 3]).unwrap(),
+            data: Geometry {
+                size: BlockSize::<Constraint>::default(),
+                count: NonZero::new(8).unwrap(),
+            },
+            hash: BlockSize::default(),
         },
-        hash: BlockSize::default(),
     };
 
     assert_eq!(actual, expected);

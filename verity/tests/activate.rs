@@ -7,7 +7,7 @@
 use std::{fs::OpenOptions, io::Read as _, num::NonZero};
 
 use devmap_linux::{Control, DevId};
-use devmap_verity::{header::Header, target::Verity};
+use devmap_verity::{Header, target::Verity};
 
 use fixture::Fixture;
 
@@ -19,10 +19,7 @@ mod fixture {
     };
 
     use devmap_core::{BlockSize, Detect as _, Geometry};
-    use devmap_verity::{
-        Format as _,
-        header::{Algorithm, Constraint, HashType, Header, Salt},
-    };
+    use devmap_verity::{Algorithm, Constraint, Format as _, HashType, Header, Parameters, Salt};
     use lodown::{Configurable, Control as LoopControl, Device as LoopDevice, Writable};
 
     pub(super) struct Fixture {
@@ -61,11 +58,13 @@ mod fixture {
 
             let header = Header {
                 uuid: [0x5a; 16],
-                hash_type: HashType::Normal,
-                algorithm: Algorithm::Sha256,
-                salt: Salt::default(),
-                data: Geometry::<Constraint>::detect(&data)?,
-                hash: BlockSize::<Constraint>::detect(&hash)?,
+                parameters: Parameters {
+                    hash_type: HashType::Normal,
+                    algorithm: Algorithm::Sha256,
+                    salt: Salt::default(),
+                    data: Geometry::<Constraint>::detect(&data)?,
+                    hash: BlockSize::<Constraint>::detect(&hash)?,
+                },
             };
 
             let root = header.format(&mut data, &mut hash)?;

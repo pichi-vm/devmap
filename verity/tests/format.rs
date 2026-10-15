@@ -18,23 +18,22 @@ use std::{
 };
 
 use devmap_core::{BlockSize, Geometry};
-use devmap_verity::{
-    Format as _,
-    header::{Algorithm, HashType, Header, Salt},
-};
+use devmap_verity::{Algorithm, Format as _, HashType, Header, Parameters, Salt};
 
 #[test]
 fn oversized_data_extent_is_rejected_before_writing() {
     let header = Header {
         uuid: [0; 16],
-        hash_type: HashType::Normal,
-        algorithm: Algorithm::Sha256,
-        salt: Salt::default(),
-        data: Geometry {
-            size: BlockSize::default(),
-            count: NonZero::new(u64::MAX).unwrap(),
+        parameters: Parameters {
+            hash_type: HashType::Normal,
+            algorithm: Algorithm::Sha256,
+            salt: Salt::default(),
+            data: Geometry {
+                size: BlockSize::default(),
+                count: NonZero::new(u64::MAX).unwrap(),
+            },
+            hash: BlockSize::default(),
         },
-        hash: BlockSize::default(),
     };
     let mut output = Cursor::new(Vec::new());
 
@@ -85,14 +84,16 @@ fn compare_with_veritysetup(algorithm: Algorithm, hash_type: HashType) {
         .unwrap();
     let header = Header {
         uuid: [0x5a; 16],
-        hash_type,
-        algorithm,
-        salt: Salt::new(&[1, 2, 3]).unwrap(),
-        data: Geometry {
-            size: BlockSize::from_exponent(9).unwrap(),
-            count: NonZero::new(33).unwrap(),
+        parameters: Parameters {
+            hash_type,
+            algorithm,
+            salt: Salt::new(&[1, 2, 3]).unwrap(),
+            data: Geometry {
+                size: BlockSize::from_exponent(9).unwrap(),
+                count: NonZero::new(33).unwrap(),
+            },
+            hash: BlockSize::from_exponent(9).unwrap(),
         },
-        hash: BlockSize::from_exponent(9).unwrap(),
     };
     let total_size = header.total_size().unwrap();
 

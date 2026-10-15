@@ -6,16 +6,16 @@ use devmap_core::{BlockSize, Geometry};
 use devmap_linux::DevId;
 
 use super::{CorruptionPolicy, IoErrorPolicy, Verity};
-use crate::header::{Algorithm, HashType, Header, Salt};
+use crate::{Algorithm, HashType, Header, Parameters, Salt};
 
 /// Configures a Linux dm-verity target.
 ///
 /// Create a builder with [`Verity::builder`] for a headerless tree or
 /// [`Header::builder`] for a tree described by an on-disk header.
-/// Format metadata is kept together as a single [`Header`].
+/// Use [`Parameters::builder`] for an explicit headerless format.
 #[derive(Debug, Clone)]
 pub struct Builder {
-    header: Header,
+    parameters: Parameters,
     data: DevId,
     hash: DevId,
     hash_start: u64,
@@ -37,9 +37,8 @@ impl Builder {
         data_blocks: NonZero<u64>,
         root: impl Into<Box<[u8]>>,
     ) -> io::Result<Self> {
-        Self::with_header(
-            &Header {
-                uuid: [0; 16],
+        Self::with_parameters(
+            &Parameters {
                 hash_type: HashType::default(),
                 algorithm: Algorithm::default(),
                 salt: Salt::default(),
@@ -56,16 +55,16 @@ impl Builder {
         )
     }
 
-    fn with_header(
-        header: &Header,
+    fn with_parameters(
+        parameters: &Parameters,
         data: DevId,
         hash: DevId,
         hash_start: u64,
         root: Box<[u8]>,
     ) -> io::Result<Self> {
-        let data_sectors = header.data_size()? / 512;
-        let tree_sectors = header.tree_size()? / 512;
-        if root.len() != header.algorithm.digest_size() {
+        let data_sectors = parameters.data_size()? / 512;
+        let tree_sectors = parameters.tree_size()? / 512;
+        if root.len() != parameters.algorithm.digest_size() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "root digest length does not match the hash algorithm",
@@ -73,7 +72,7 @@ impl Builder {
         }
 
         Self {
-            header: *header,
+            parameters: *parameters,
             data,
             hash,
             hash_start: 0,
@@ -97,7 +96,7 @@ impl Builder {
     /// Returns [`io::ErrorKind::InvalidInput`] if the resulting hash extent
     /// overflows.
     pub fn hash_start(mut self, value: u64) -> io::Result<Self> {
-        let block_sectors = u64::from(self.header.hash.bytes().get() / 512);
+        let block_sectors = u64::from(self.parameters.hash.bytes().get() / 512);
         value
             .checked_mul(block_sectors)
             .and_then(|start| start.checked_add(self.tree_sectors))
@@ -136,7 +135,7 @@ impl Builder {
     /// Returns [`io::ErrorKind::InvalidInput`] if the data extent contains
     /// more blocks than the kernel can track for this mode.
     pub fn check_at_most_once(mut self, value: bool) -> io::Result<Self> {
-        if value && self.header.data.count.get() > i32::MAX as u64 {
+        if value && self.parameters.data.count.get() > i32::MAX as u64 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "too many data blocks for check_at_most_once",
@@ -174,20 +173,16 @@ impl Builder {
     /// Converts this valid configuration into an owned target description.
     pub fn build(self) -> Verity {
         Verity {
-            hash_type: self.header.hash_type,
+            parameters: self.parameters,
             data: self.data,
             hash: self.hash,
-            geometry: self.header.data,
-            block: self.header.hash,
             hash_start: self.hash_start,
-            algorithm: self.header.algorithm,
-            salt: self.header.salt,
             corruption_policy: self.corruption_policy,
             io_error_policy: self.io_error_policy,
             ignore_zero_blocks: self.ignore_zero_blocks,
             check_at_most_once: self.check_at_most_once,
             try_verify_in_tasklet: self.try_verify_in_tasklet,
-            signature: self.root_hash_sig_key_desc,
+            root_hash_sig_key_desc: self.root_hash_sig_key_desc,
             root: self.root,
             data_sectors: self.data_sectors,
         }
@@ -217,8 +212,7 @@ impl Header {
     /// Starts a target builder with this header's format metadata.
     ///
     /// The hash tree defaults to block one, immediately after a standard
-    /// header block. The UUID remains in the builder but is not a dm-verity
-    /// table parameter and therefore does not affect the constructed target.
+    /// header block. The UUID is not a target-table parameter and is not retained.
     ///
     /// # Errors
     ///
@@ -230,7 +224,27 @@ impl Header {
         hash: DevId,
         root: impl Into<Box<[u8]>>,
     ) -> io::Result<Builder> {
-        Builder::with_header(self, data, hash, 1, root.into())
+        Builder::with_parameters(&self.parameters, data, hash, 1, root.into())
+    }
+}
+
+impl Parameters {
+    /// Starts a headerless target builder with these hash-tree parameters.
+    ///
+    /// The tree defaults to hash block zero. Use [`Builder::hash_start`] for
+    /// another offset. The root digest must come from independently trusted storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] if the root length does not match
+    /// the algorithm or the resulting layout overflows.
+    pub fn builder(
+        &self,
+        data: DevId,
+        hash: DevId,
+        root: impl Into<Box<[u8]>>,
+    ) -> io::Result<Builder> {
+        Builder::with_parameters(self, data, hash, 0, root.into())
     }
 }
 
@@ -245,14 +259,16 @@ mod tests {
     fn header(data_blocks: u64) -> Header {
         Header {
             uuid: [0; 16],
-            hash_type: HashType::default(),
-            algorithm: Algorithm::default(),
-            salt: Salt::default(),
-            data: Geometry {
-                size: BlockSize::default(),
-                count: NonZero::new(data_blocks).unwrap(),
+            parameters: Parameters {
+                hash_type: HashType::default(),
+                algorithm: Algorithm::default(),
+                salt: Salt::default(),
+                data: Geometry {
+                    size: BlockSize::default(),
+                    count: NonZero::new(data_blocks).unwrap(),
+                },
+                hash: BlockSize::default(),
             },
-            hash: BlockSize::default(),
         }
     }
 

@@ -11,8 +11,7 @@ use std::{
 
 use devmap_core::{BlockSize, Geometry};
 use devmap_verity::{
-    AsyncFormat, Format,
-    header::{Algorithm, Constraint, HashType, Header, Salt},
+    Algorithm, AsyncFormat, Constraint, Format, HashType, Header, Parameters, Salt,
 };
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
@@ -134,14 +133,16 @@ impl AsyncSeek for FragmentedCursor {
 fn header(blocks: u64) -> Header {
     Header {
         uuid: [0x5a; 16],
-        hash_type: HashType::Normal,
-        algorithm: Algorithm::Sha256,
-        salt: Salt::new(&[1, 2, 3]).unwrap(),
-        data: Geometry::<Constraint> {
-            size: BlockSize::default(),
-            count: NonZero::new(blocks).unwrap(),
+        parameters: Parameters {
+            hash_type: HashType::Normal,
+            algorithm: Algorithm::Sha256,
+            salt: Salt::new(&[1, 2, 3]).unwrap(),
+            data: Geometry::<Constraint> {
+                size: BlockSize::default(),
+                count: NonZero::new(blocks).unwrap(),
+            },
+            hash: BlockSize::default(),
         },
-        hash: BlockSize::default(),
     }
 }
 

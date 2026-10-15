@@ -5,7 +5,7 @@
 use std::{io::ErrorKind, num::NonZero};
 
 use devmap_core::{BlockSize, Geometry};
-use devmap_verity::header::{Algorithm, Constraint, HashType, Header, Salt};
+use devmap_verity::{Algorithm, Constraint, HashType, Header, Parameters, Salt};
 
 const VERSION: std::ops::Range<usize> = 8..12;
 const HASH_TYPE: std::ops::Range<usize> = 12..16;
@@ -21,14 +21,16 @@ const PADDING: std::ops::Range<usize> = 344..512;
 fn header(algorithm: Algorithm, hash_type: HashType, salt: &[u8]) -> Header {
     Header {
         uuid: [0x5a; 16],
-        hash_type,
-        algorithm,
-        salt: Salt::new(salt).unwrap(),
-        data: Geometry {
-            size: BlockSize::<Constraint>::from_exponent(9).unwrap(),
-            count: NonZero::new(17).unwrap(),
+        parameters: Parameters {
+            hash_type,
+            algorithm,
+            salt: Salt::new(salt).unwrap(),
+            data: Geometry {
+                size: BlockSize::<Constraint>::from_exponent(9).unwrap(),
+                count: NonZero::new(17).unwrap(),
+            },
+            hash: BlockSize::<Constraint>::from_exponent(19).unwrap(),
         },
-        hash: BlockSize::<Constraint>::from_exponent(19).unwrap(),
     }
 }
 
@@ -84,25 +86,27 @@ fn hash_types_and_salt_boundaries_round_trip() {
 fn tree_size_excludes_the_header_and_tracks_every_level() {
     let mut header = Header {
         uuid: [0; 16],
-        hash_type: HashType::Normal,
-        algorithm: Algorithm::Sha256,
-        salt: Salt::default(),
-        data: Geometry {
-            size: BlockSize::default(),
-            count: NonZero::new(1).unwrap(),
+        parameters: Parameters {
+            hash_type: HashType::Normal,
+            algorithm: Algorithm::Sha256,
+            salt: Salt::default(),
+            data: Geometry {
+                size: BlockSize::default(),
+                count: NonZero::new(1).unwrap(),
+            },
+            hash: BlockSize::default(),
         },
-        hash: BlockSize::default(),
     };
 
     assert_eq!(header.prefix_size(), 4096);
     assert_eq!(header.tree_size().unwrap(), 0);
     assert_eq!(header.total_size().unwrap(), 4096);
 
-    header.data.count = NonZero::new(128).unwrap();
+    header.parameters.data.count = NonZero::new(128).unwrap();
     assert_eq!(header.tree_size().unwrap(), 4096);
     assert_eq!(header.total_size().unwrap(), 2 * 4096);
 
-    header.data.count = NonZero::new(129).unwrap();
+    header.parameters.data.count = NonZero::new(129).unwrap();
     assert_eq!(header.tree_size().unwrap(), 3 * 4096);
     assert_eq!(header.total_size().unwrap(), 4 * 4096);
 }
@@ -110,7 +114,7 @@ fn tree_size_excludes_the_header_and_tracks_every_level() {
 #[test]
 fn overflowing_tree_size_is_rejected() {
     let mut header = header(Algorithm::Sha256, HashType::Normal, &[]);
-    header.data.count = NonZero::new(u64::MAX).unwrap();
+    header.parameters.data.count = NonZero::new(u64::MAX).unwrap();
 
     let error = header.tree_size().unwrap_err();
 
@@ -124,8 +128,8 @@ fn overflowing_tree_size_is_rejected() {
 #[test]
 fn total_size_checks_the_prefix_addition() {
     let mut header = header(Algorithm::Sha512, HashType::Normal, &[]);
-    header.hash = BlockSize::from_exponent(9).unwrap();
-    header.data.count = NonZero::new(252_201_579_132_747_753).unwrap();
+    header.parameters.hash = BlockSize::from_exponent(9).unwrap();
+    header.parameters.data.count = NonZero::new(252_201_579_132_747_753).unwrap();
 
     assert_eq!(header.tree_size().unwrap(), u64::MAX - 511);
     assert_eq!(

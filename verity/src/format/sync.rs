@@ -35,7 +35,7 @@ use super::tree::TreeWriter;
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::header::{Header, RECORD_SIZE};
+use crate::{Header, header::RECORD_SIZE};
 
 /// Streams protected data into a standard dm-verity hash volume.
 #[cfg(any(
@@ -105,11 +105,11 @@ impl Format for Header {
         R: Read,
         W: Write + Seek,
     {
-        let data_size = self.data_size()?;
+        let data_size = self.parameters.data_size()?;
         self.total_size()?;
         let encoded = self.encode();
         let padding = self.prefix_size() - RECORD_SIZE as u64;
-        let mut tree = TreeWriter::new(hash, &self)?;
+        let mut tree = TreeWriter::new(hash, &self.parameters)?;
         tree.output_mut().write_all(&encoded)?;
         io::copy(&mut io::repeat(0).take(padding), tree.output_mut())?;
         let copied = io::copy(&mut data.take(data_size), &mut tree)?;

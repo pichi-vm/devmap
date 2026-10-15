@@ -5,7 +5,7 @@ use std::io;
 use digest::DynDigest;
 
 use super::{Drain, Failure, FlushMode};
-use crate::header::{HashType, Header, Salt};
+use crate::{HashType, Parameters, Salt};
 
 pub(super) struct State {
     hash_type: HashType,
@@ -25,16 +25,16 @@ pub(super) struct State {
 
 impl State {
     pub(super) fn new(
-        header: &Header,
+        parameters: &Parameters,
         hasher: Box<dyn DynDigest + Send + Sync>,
     ) -> io::Result<Self> {
         let digest_size = hasher.output_size();
-        let data_block_size = header.data.size.bytes().get();
-        let hash_block_size = header.hash.bytes().get();
-        let maximum_size = header.data_size()?;
-        let hashes_per_block = header.hashes_per_block()?;
-        let tree_size = header.tree_size()?;
-        let blocks: Vec<_> = header.level_blocks(hashes_per_block).collect();
+        let data_block_size = parameters.data.size.bytes().get();
+        let hash_block_size = parameters.hash.bytes().get();
+        let maximum_size = parameters.data_size()?;
+        let hashes_per_block = parameters.hashes_per_block()?;
+        let tree_size = parameters.tree_size()?;
+        let blocks: Vec<_> = parameters.level_blocks(hashes_per_block).collect();
         let mut offsets = vec![0; blocks.len()];
         let mut offset = 0u64;
         for index in (0..blocks.len()).rev() {
@@ -49,14 +49,14 @@ impl State {
             .into_iter()
             .map(|offset| HashLevel::new(offset, hash_block_size as usize))
             .collect();
-        let slot_size = match header.hash_type {
+        let slot_size = match parameters.hash_type {
             HashType::ChromeOs => digest_size,
             HashType::Normal => digest_size.next_power_of_two(),
         };
 
         Ok(Self {
-            hash_type: header.hash_type,
-            salt: header.salt,
+            hash_type: parameters.hash_type,
+            salt: parameters.salt,
             hasher,
             digest: vec![0; digest_size].into_boxed_slice(),
             maximum_size,
