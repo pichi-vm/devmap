@@ -15,9 +15,6 @@ categories = ["os::unix-apis", "api-bindings"]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-[features]
-default = []
-
 [dependencies]
 devmap-core = { version = "0.1.0", path = "../core" }
 iocuddle = "0.4"
