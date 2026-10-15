@@ -100,7 +100,18 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
-    pub(crate) const fn digest_size(self) -> usize {
+    /// Returns the digest length in bytes, including for the root digest.
+    ///
+    /// This excludes padding used in hash-tree blocks and does not require
+    /// the algorithm's hash-family feature to be enabled.
+    ///
+    /// ```
+    /// use devmap_verity::Algorithm;
+    ///
+    /// const ROOT_SIZE: usize = Algorithm::Sha256.digest_size();
+    /// assert_eq!(ROOT_SIZE, 32);
+    /// ```
+    pub const fn digest_size(self) -> usize {
         match self {
             Self::Sha1 | Self::Ripemd160 | Self::Blake2b160 | Self::Blake2s160 => 20,
             Self::Sha224 | Self::Sha3_224 | Self::Blake2s224 => 28,
