@@ -3,10 +3,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::{
+    future::Future as _,
     io::{self, Cursor, ErrorKind, Seek as _, SeekFrom, Write as _},
     num::NonZero,
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 
 use devmap_core::{BlockSize, Geometry};
@@ -21,6 +22,20 @@ struct FragmentedCursor {
     write_size: usize,
     pending: bool,
     seek: Option<SeekFrom>,
+    fault: Option<Fault>,
+    fault_after: usize,
+    written: usize,
+    flushes: usize,
+}
+
+#[derive(Clone, Copy)]
+enum Fault {
+    Write,
+    WriteZero,
+    SeekStart,
+    SeekComplete,
+    Flush,
+    PendingWrite,
 }
 
 impl FragmentedCursor {
@@ -33,6 +48,10 @@ impl FragmentedCursor {
             write_size,
             pending: true,
             seek: None,
+            fault: None,
+            fault_after: usize::MAX,
+            written: 0,
+            flushes: 0,
         }
     }
 
@@ -91,8 +110,21 @@ impl AsyncWrite for FragmentedCursor {
         if this.poll_pending(cx) {
             return Poll::Pending;
         }
-        let count = input.len().min(this.write_size);
-        Poll::Ready(this.inner.write(&input[..count]))
+        if this.written >= this.fault_after {
+            match this.fault {
+                Some(Fault::Write) => return Poll::Ready(Err(ErrorKind::BrokenPipe.into())),
+                Some(Fault::WriteZero) => return Poll::Ready(Ok(0)),
+                Some(Fault::PendingWrite) => return Poll::Pending,
+                _ => {}
+            }
+        }
+        let mut count = input.len().min(this.write_size);
+        if this.written < this.fault_after {
+            count = count.min(this.fault_after - this.written);
+        }
+        let written = this.inner.write(&input[..count])?;
+        this.written += written;
+        Poll::Ready(Ok(written))
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -100,6 +132,10 @@ impl AsyncWrite for FragmentedCursor {
         if this.poll_pending(cx) {
             return Poll::Pending;
         }
+        if matches!(this.fault, Some(Fault::Flush)) && this.written >= this.fault_after {
+            return Poll::Ready(Err(ErrorKind::BrokenPipe.into()));
+        }
+        this.flushes += 1;
         Poll::Ready(this.inner.flush())
     }
 
@@ -111,6 +147,9 @@ impl AsyncWrite for FragmentedCursor {
 impl AsyncSeek for FragmentedCursor {
     fn start_seek(self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         let this = self.get_mut();
+        if matches!(this.fault, Some(Fault::SeekStart)) && this.written >= this.fault_after {
+            return Err(ErrorKind::BrokenPipe.into());
+        }
         if this.seek.is_some() {
             return Err(io::Error::other("seek already in progress"));
         }
@@ -122,6 +161,9 @@ impl AsyncSeek for FragmentedCursor {
         let this = self.get_mut();
         if this.poll_pending(cx) {
             return Poll::Pending;
+        }
+        if matches!(this.fault, Some(Fault::SeekComplete)) && this.written >= this.fault_after {
+            return Poll::Ready(Err(ErrorKind::BrokenPipe.into()));
         }
         Poll::Ready(match this.seek.take() {
             Some(position) => this.inner.seek(position),
@@ -179,14 +221,16 @@ async fn fragmented_pending_io_matches_synchronous_formatting() {
 
 #[tokio::test]
 async fn short_input_reports_unexpected_eof() {
-    let mut data = FragmentedCursor::new(vec![0x5a; 4096], 0, 31, usize::MAX);
-    let mut hash = FragmentedCursor::new(Vec::new(), 0, usize::MAX, 29);
+    for length in [4096, 4096 + 17] {
+        let mut data = FragmentedCursor::new(vec![0x5a; length], 0, 31, usize::MAX);
+        let mut hash = FragmentedCursor::new(Vec::new(), 0, usize::MAX, 29);
 
-    let error = AsyncFormat::format(header(2), &mut data, &mut hash)
-        .await
-        .unwrap_err();
+        let error = AsyncFormat::format(header(2), &mut data, &mut hash)
+            .await
+            .unwrap_err();
 
-    assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+        assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+    }
 }
 
 #[tokio::test]
@@ -200,4 +244,91 @@ async fn oversized_extent_is_rejected_before_writing() {
 
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(hash.bytes(), []);
+}
+
+#[tokio::test]
+async fn output_failures_do_not_return_a_root() {
+    // Block 129 is read before draining the hashes of the first 128 blocks.
+    for (blocks, consumed_at_first_write) in [(2, 2), (300, 129)] {
+        let header = header(blocks);
+        for (fault, after, expected) in [
+            (Fault::Write, 4096 + 13, ErrorKind::BrokenPipe),
+            (Fault::WriteZero, 4096 + 13, ErrorKind::WriteZero),
+            (Fault::SeekStart, 4096, ErrorKind::BrokenPipe),
+            (Fault::SeekComplete, 4096, ErrorKind::BrokenPipe),
+            (Fault::SeekStart, 8192, ErrorKind::BrokenPipe),
+            (Fault::SeekComplete, 8192, ErrorKind::BrokenPipe),
+            (
+                Fault::Flush,
+                usize::try_from(header.total_size().unwrap()).unwrap(),
+                ErrorKind::BrokenPipe,
+            ),
+        ] {
+            let data_size = usize::try_from(header.parameters.data_size().unwrap()).unwrap();
+            let mut data = FragmentedCursor::new(vec![0x5a; data_size], 0, 53, usize::MAX);
+            let mut hash = FragmentedCursor::new(Vec::new(), 0, usize::MAX, 37);
+            hash.fault = Some(fault);
+            hash.fault_after = after;
+            let error = AsyncFormat::format(header, &mut data, &mut hash)
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), expected);
+            assert_eq!(hash.written, after);
+            if matches!(fault, Fault::Write | Fault::WriteZero) {
+                assert_eq!(data.position(), consumed_at_first_write * 4096);
+            }
+        }
+    }
+}
+
+#[test]
+fn cancellation_leaves_partial_output_without_finishing_it() {
+    // The larger tree reserves its first hash block for the upper level.
+    for (blocks, consumed_at_first_write, first_tree_offset) in [(2, 2, 4096), (300, 129, 8192)] {
+        let mut data = FragmentedCursor::new(
+            vec![0x5a; usize::try_from(blocks * 4096).unwrap()],
+            0,
+            usize::MAX,
+            usize::MAX,
+        );
+        let mut hash = FragmentedCursor::new(Vec::new(), 0, usize::MAX, usize::MAX);
+        hash.fault = Some(Fault::PendingWrite);
+        hash.fault_after = 4096 + 13;
+        let mut formatting = Box::pin(AsyncFormat::format(header(blocks), &mut data, &mut hash));
+        let mut context = Context::from_waker(Waker::noop());
+        // Advance past the finite fragmented-I/O steps to the stalled tree write.
+        for _ in 0..1000 {
+            assert!(formatting.as_mut().poll(&mut context).is_pending());
+        }
+        drop(formatting);
+
+        assert_eq!(data.position(), consumed_at_first_write * 4096);
+        assert_eq!(hash.written, 4096 + 13);
+        assert_eq!(hash.bytes().len(), first_tree_offset + 13);
+        // The padding copy flushes once; cancellation must not perform a final flush.
+        assert_eq!(hash.flushes, 1);
+    }
+}
+
+#[tokio::test]
+async fn single_block_has_no_tree_and_preserves_trailing_input() {
+    for exponent in [9, 12, 14] {
+        let mut header = header(1);
+        header.parameters.data.size = BlockSize::from_exponent(exponent).unwrap();
+        let block_size = header.parameters.data.size.bytes().get() as usize;
+        let bytes = vec![0x5a; block_size + 17];
+        let mut expected = Cursor::new(Vec::new());
+        let root = Format::format(header, Cursor::new(&bytes), &mut expected).unwrap();
+        let mut data = FragmentedCursor::new(bytes, 0, 53, usize::MAX);
+        let mut hash = FragmentedCursor::new(Vec::new(), 0, usize::MAX, 37);
+        assert_eq!(
+            AsyncFormat::format(header, &mut data, &mut hash)
+                .await
+                .unwrap(),
+            root
+        );
+        assert_eq!(data.position(), block_size as u64);
+        assert_eq!(hash.bytes(), expected.get_ref());
+        assert_eq!(hash.position(), header.total_size().unwrap());
+    }
 }

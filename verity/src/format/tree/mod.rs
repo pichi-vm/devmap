@@ -3,8 +3,6 @@
 use std::io;
 
 use crate::Parameters;
-#[cfg(feature = "tokio")]
-use state::PendingBlock;
 use state::State;
 
 #[cfg(feature = "tokio")]
@@ -18,10 +16,12 @@ mod sync;
 /// shape. Input slices may have any length; only fragments are copied
 /// into the internal block buffer. Complete aligned blocks are hashed directly.
 ///
-/// `flush` has its conventional meaning: it drains available hash output but
-/// neither pads nor seals incomplete input. Call [`finish`](Self::finish)
-/// after the exact input length has been written and flushed. Dropping the writer
-/// does not flush it. The writer cannot be used after an output error.
+/// The synchronous `Write` implementation drains available hash output on
+/// `flush`, without padding or sealing incomplete input. Call [`finish`](Self::finish)
+/// after the exact input length has been written and flushed. The asynchronous
+/// path accepts chunks with `write_all_async` and drains and flushes them with
+/// `finish_async`. Dropping the writer does not flush it.
+/// The writer cannot be used after an output error.
 #[allow(missing_debug_implementations)]
 #[must_use = "dropping a tree writer does not finish the hash tree"]
 pub(crate) struct TreeWriter<W> {
@@ -29,8 +29,6 @@ pub(crate) struct TreeWriter<W> {
     tree: State,
     output_range: Option<OutputRange>,
     phase: Phase,
-    #[cfg(feature = "tokio")]
-    initializing: bool,
 }
 
 impl<W> TreeWriter<W> {
@@ -57,8 +55,6 @@ impl<W> TreeWriter<W> {
             tree: State::new(parameters, hasher)?,
             output_range: None,
             phase: Phase::Open,
-            #[cfg(feature = "tokio")]
-            initializing: false,
         })
     }
 
@@ -77,7 +73,7 @@ impl<W> TreeWriter<W> {
             Phase::Failed => Err(io::Error::other(
                 "cannot use a tree writer after an output failure",
             )),
-            _ => Err(io::Error::new(
+            Phase::Sealed => Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "verity tree must be flushed before its digest is available",
             )),
@@ -90,13 +86,6 @@ impl<W> TreeWriter<W> {
             Phase::Failed => Err(io::Error::other(
                 "cannot use a tree writer after an output failure",
             )),
-            #[cfg(feature = "tokio")]
-            Phase::Draining(_) | Phase::SeekingEnd { .. } | Phase::FlushingOutput(_) => {
-                Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "an asynchronous tree-writer operation is still in progress",
-                ))
-            }
             Phase::Sealed | Phase::Complete(_) => Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "verity input is already complete",
@@ -119,15 +108,6 @@ struct OutputRange {
 enum Phase {
     Open,
     Sealed,
-    #[cfg(feature = "tokio")]
-    Draining(Draining),
-    #[cfg(feature = "tokio")]
-    SeekingEnd {
-        digest: Box<[u8]>,
-        started: bool,
-    },
-    #[cfg(feature = "tokio")]
-    FlushingOutput(AfterFlush),
     Complete(Box<[u8]>),
     Failed,
 }
@@ -164,45 +144,4 @@ impl Failure {
             Self::Recoverable(error) | Self::Fatal(error) => error,
         }
     }
-}
-
-#[cfg(feature = "tokio")]
-struct Draining {
-    mode: Drain,
-    after: AfterDrain,
-    step: DrainStep,
-}
-
-#[cfg(feature = "tokio")]
-#[derive(Clone, Copy)]
-enum AfterDrain {
-    AcceptInput,
-    FlushIntermediate,
-    Finish,
-}
-
-#[cfg(feature = "tokio")]
-enum DrainStep {
-    Next,
-    Writing(BlockWrite),
-}
-
-#[cfg(feature = "tokio")]
-enum BlockWrite {
-    Starting(PendingBlock),
-    Seeking(PendingBlock),
-    Writing { block: PendingBlock, written: usize },
-}
-
-#[cfg(feature = "tokio")]
-enum AfterFlush {
-    Open,
-    Complete(Box<[u8]>),
-}
-
-#[cfg(feature = "tokio")]
-enum Progress {
-    Continue,
-    Input,
-    Flush,
 }
