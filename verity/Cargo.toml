@@ -16,7 +16,6 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
 tokio = ["dep:tokio"]
 sha1 = ["dep:sha1", "dep:digest"]
 sha2 = ["dep:sha2", "dep:digest"]
