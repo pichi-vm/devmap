@@ -10,6 +10,10 @@ These implement `devmap_linux::targets::Target`. Use `devmap_linux::Control` to 
 target versions, load tables, and manage mappings. Parse table and runtime
 responses through `Row::parse`; snapshot runtime state is represented by `Info`.
 
+`Header` and `Exception` encode and decode persistent snapshot metadata on disk.
+They operate on individual records; applications handle storage I/O and validate
+the surrounding store.
+
 This crate is Linux-only. Applications manage device lifetimes and the
 [kernel's snapshot handover procedure](https://docs.kernel.org/admin-guide/device-mapper/snapshot.html).
 Constructing these Rust values does not create or change a mapping.

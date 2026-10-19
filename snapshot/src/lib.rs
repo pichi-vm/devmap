@@ -5,6 +5,8 @@
 
 mod constraint;
 mod discard;
+mod exception;
+mod header;
 mod info;
 mod merge;
 mod origin;
@@ -22,3 +24,6 @@ pub use parameters::Parameters;
 pub use persistence::Persistence;
 pub use persistent::Persistent;
 pub use snapshot::Snapshot;
+
+pub use exception::Exception;
+pub use header::Header;
