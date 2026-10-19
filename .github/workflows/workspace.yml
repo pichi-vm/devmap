@@ -102,6 +102,8 @@ jobs:
       - name: Test portable crates
         run: |
           cargo test -p devmap-core --all-targets
+          cargo test -p devmap-snapshot --all-targets
+          cargo test -p devmap-snapshot --doc
           cargo test -p devmap-verity --all-features --all-targets
 
   kernel:

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-
+#![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 //! Real-kernel coverage for snapshot-merge handover and data preservation.

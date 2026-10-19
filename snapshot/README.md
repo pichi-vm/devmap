@@ -11,10 +11,11 @@ target versions, load tables, and manage mappings. Parse table and runtime
 responses through `Row::parse`; snapshot runtime state is represented by `Info`.
 
 `Header` and `Exception` encode and decode persistent snapshot metadata on disk.
+These codecs and `Constraint` are available on all platforms.
 They operate on individual records; applications handle storage I/O and validate
 the surrounding store.
 
-This crate is Linux-only. Applications manage device lifetimes and the
+Target descriptions and device control are Linux-only. Applications manage device lifetimes and the
 [kernel's snapshot handover procedure](https://docs.kernel.org/admin-guide/device-mapper/snapshot.html).
 Constructing these Rust values does not create or change a mapping.
 
@@ -24,6 +25,8 @@ Build a table from an existing origin and a dedicated copy-on-write store.
 This example queries the target version but does not create or activate a mapping.
 
 ```no_run
+# #[cfg(target_os = "linux")]
+# mod example {
 use std::io;
 use devmap_core::{BlockSize, Span};
 use devmap_linux::{Control, DevId, Table, targets::Target};
@@ -48,6 +51,7 @@ fn snapshot_table(
         control.version(Snapshot::NAME)?,
     )
 }
+# }
 ```
 
 The `cow` store must be disposable storage reserved for snapshot metadata and

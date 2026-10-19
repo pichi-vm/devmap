@@ -13,9 +13,11 @@ categories = ["os::unix-apis", "api-bindings"]
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 devmap-core = { version = "0.1.0", path = "../core" }
+[target.'cfg(target_os = "linux")'.dependencies]
 devmap-linux = { version = "0.1.0", path = "../linux" }
 
 [dev-dependencies]

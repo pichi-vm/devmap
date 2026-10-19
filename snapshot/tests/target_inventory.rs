@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#![cfg(target_os = "linux")]
 
 use devmap_linux::{DevId, targets::Parse, targets::Target, targets::Version};
 use devmap_snapshot::{Merge, Origin, Snapshot};
