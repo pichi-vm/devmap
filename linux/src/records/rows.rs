@@ -204,6 +204,34 @@ mod tests {
     }
 
     #[test]
+    fn final_zero_status_fits_without_alignment_padding() {
+        // The 40-byte spec and NUL fit in a 47-byte capacity. Kernels may
+        // report the unpadded length even when next includes alignment.
+        for length in [41, 47] {
+            let mut bytes = synthetic_table_status_response(&[(b"zero", "")]);
+            bytes[Header::SIZE + 20..Header::SIZE + 24].copy_from_slice(&48u32.to_ne_bytes());
+            bytes.truncate(Header::SIZE + length);
+            let size = u32::try_from(bytes.len()).unwrap();
+            bytes[12..16].copy_from_slice(&size.to_ne_bytes());
+            let mut command = Command::from_parts(Header::any(), [0; 47]);
+            command.as_mut_bytes()[..bytes.len()].copy_from_slice(&bytes);
+            let mut rows = Rows::<Table, 47>::new(command).unwrap();
+            let row = rows.next().unwrap().unwrap();
+            assert_eq!(row.name(), "zero");
+            assert_eq!(
+                row.parse::<crate::targets::Zero>(crate::targets::Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                })
+                .unwrap(),
+                crate::targets::Zero
+            );
+            assert!(rows.next().is_none());
+        }
+    }
+
+    #[test]
     fn final_row_next_can_extend_past_the_reported_bytes() {
         let mut bytes = synthetic_table_status_response(&[(b"zero", ""), (b"zero", "")]);
         let last = Header::SIZE + 48;

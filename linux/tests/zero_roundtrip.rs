@@ -255,6 +255,20 @@ fn fixed_capacity_queries_report_full_buffers_and_allow_larger_retries() {
         control.info::<40>(dev.id()).unwrap_err().kind(),
         std::io::ErrorKind::StorageFull
     );
+    // Regress the old 47-byte expectation: older kernels can return a
+    // complete final row without its alignment padding, while others report
+    // a full buffer. Both are valid; never require StorageFull here.
+    match control.info::<47>(dev.id()) {
+        Ok(mut rows) => {
+            rows.next()
+                .unwrap()
+                .unwrap()
+                .parse::<Zero>(control.version("zero").unwrap())
+                .unwrap();
+            assert!(rows.next().is_none());
+        }
+        Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::StorageFull),
+    }
     assert_eq!(
         control.deps::<0>(dev.id()).unwrap_err().kind(),
         std::io::ErrorKind::StorageFull
