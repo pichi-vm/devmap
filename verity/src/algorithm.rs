@@ -13,7 +13,19 @@ use std::io;
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::hasher::{Hasher, legacy};
+use crate::hasher::Hasher;
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+use crate::hasher::legacy;
+#[cfg(feature = "sha3")]
+use crate::hasher::modern;
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
 #[cfg(feature = "blake2")]
@@ -159,13 +171,13 @@ impl Algorithm {
             #[cfg(feature = "whirlpool")]
             Self::Whirlpool => Some(legacy(Whirlpool::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_224 => Some(legacy(Sha3_224::default())),
+            Self::Sha3_224 => Some(modern(Sha3_224::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_256 => Some(legacy(Sha3_256::default())),
+            Self::Sha3_256 => Some(modern(Sha3_256::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_384 => Some(legacy(Sha3_384::default())),
+            Self::Sha3_384 => Some(modern(Sha3_384::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_512 => Some(legacy(Sha3_512::default())),
+            Self::Sha3_512 => Some(modern(Sha3_512::default())),
             #[cfg(feature = "streebog")]
             Self::Streebog256 => Some(legacy(Streebog256::default())),
             #[cfg(feature = "streebog")]
