@@ -15,8 +15,7 @@ pub(crate) trait Hasher: Send + Sync {
     feature = "ripemd",
     feature = "whirlpool",
     feature = "streebog",
-    feature = "sm3",
-    feature = "blake2"
+    feature = "sm3"
 ))]
 struct Legacy<T>(T);
 
@@ -25,8 +24,7 @@ struct Legacy<T>(T);
     feature = "ripemd",
     feature = "whirlpool",
     feature = "streebog",
-    feature = "sm3",
-    feature = "blake2"
+    feature = "sm3"
 ))]
 pub(crate) fn legacy<T: digest::DynDigest + Send + Sync + 'static>(hasher: T) -> Box<dyn Hasher> {
     Box::new(Legacy(hasher))
@@ -37,8 +35,7 @@ pub(crate) fn legacy<T: digest::DynDigest + Send + Sync + 'static>(hasher: T) ->
     feature = "ripemd",
     feature = "whirlpool",
     feature = "streebog",
-    feature = "sm3",
-    feature = "blake2"
+    feature = "sm3"
 ))]
 impl<T: digest::DynDigest + Send + Sync> Hasher for Legacy<T> {
     fn output_size(&self) -> usize {
@@ -56,17 +53,17 @@ impl<T: digest::DynDigest + Send + Sync> Hasher for Legacy<T> {
     }
 }
 
-#[cfg(any(feature = "sha2", feature = "sha3"))]
+#[cfg(any(feature = "sha2", feature = "sha3", feature = "blake2"))]
 struct Modern<T>(T);
 
-#[cfg(any(feature = "sha2", feature = "sha3"))]
+#[cfg(any(feature = "sha2", feature = "sha3", feature = "blake2"))]
 pub(crate) fn modern<T: digest_next::DynDigest + Send + Sync + 'static>(
     hasher: T,
 ) -> Box<dyn Hasher> {
     Box::new(Modern(hasher))
 }
 
-#[cfg(any(feature = "sha2", feature = "sha3"))]
+#[cfg(any(feature = "sha2", feature = "sha3", feature = "blake2"))]
 impl<T: digest_next::DynDigest + Send + Sync> Hasher for Modern<T> {
     fn output_size(&self) -> usize {
         self.0.output_size()

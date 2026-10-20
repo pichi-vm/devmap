@@ -19,16 +19,15 @@ use crate::hasher::Hasher;
     feature = "ripemd",
     feature = "whirlpool",
     feature = "streebog",
-    feature = "sm3",
-    feature = "blake2"
+    feature = "sm3"
 ))]
 use crate::hasher::legacy;
-#[cfg(any(feature = "sha2", feature = "sha3"))]
+#[cfg(any(feature = "sha2", feature = "sha3", feature = "blake2"))]
 use crate::hasher::modern;
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
 #[cfg(feature = "blake2")]
-use digest::consts::{U16, U20, U28, U32, U48, U64};
+use digest_next::consts::{U16, U20, U28, U32, U48, U64};
 #[cfg(feature = "ripemd")]
 use ripemd::Ripemd160;
 #[cfg(feature = "sha1")]
@@ -184,21 +183,21 @@ impl Algorithm {
             #[cfg(feature = "sm3")]
             Self::Sm3 => Some(legacy(Sm3::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b160 => Some(legacy(Blake2b::<U20>::default())),
+            Self::Blake2b160 => Some(modern(Blake2b::<U20>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b256 => Some(legacy(Blake2b::<U32>::default())),
+            Self::Blake2b256 => Some(modern(Blake2b::<U32>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b384 => Some(legacy(Blake2b::<U48>::default())),
+            Self::Blake2b384 => Some(modern(Blake2b::<U48>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b512 => Some(legacy(Blake2b::<U64>::default())),
+            Self::Blake2b512 => Some(modern(Blake2b::<U64>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s128 => Some(legacy(Blake2s::<U16>::default())),
+            Self::Blake2s128 => Some(modern(Blake2s::<U16>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s160 => Some(legacy(Blake2s::<U20>::default())),
+            Self::Blake2s160 => Some(modern(Blake2s::<U20>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s224 => Some(legacy(Blake2s::<U28>::default())),
+            Self::Blake2s224 => Some(modern(Blake2s::<U28>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s256 => Some(legacy(Blake2s::<U32>::default())),
+            Self::Blake2s256 => Some(modern(Blake2s::<U32>::default())),
             _ => None,
         }
     }

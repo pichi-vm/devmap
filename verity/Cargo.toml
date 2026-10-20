@@ -24,11 +24,11 @@ ripemd = ["dep:ripemd", "dep:digest"]
 whirlpool = ["dep:whirlpool", "dep:digest"]
 streebog = ["dep:streebog", "dep:digest"]
 sm3 = ["dep:sm3", "dep:digest"]
-blake2 = ["dep:blake2", "dep:digest"]
+blake2 = ["dep:blake2", "dep:digest-next"]
 
 [dependencies]
 devmap-core = { version = "0.1.0", path = "../core" }
-blake2 = { version = "0.10", optional = true }
+blake2 = { version = "0.11", optional = true }
 digest = { version = "0.10", optional = true }
 digest-next = { package = "digest", version = "0.11", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
