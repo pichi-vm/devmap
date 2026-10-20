@@ -2,7 +2,7 @@
 
 use std::io;
 
-use digest::DynDigest;
+use crate::hasher::Hasher;
 
 use super::{Drain, Failure, FlushMode};
 use crate::{HashType, Parameters, Salt};
@@ -10,7 +10,7 @@ use crate::{HashType, Parameters, Salt};
 pub(super) struct State {
     hash_type: HashType,
     salt: Salt,
-    hasher: Box<dyn DynDigest + Send + Sync>,
+    hasher: Box<dyn Hasher>,
     digest: Box<[u8]>,
     maximum_size: u64,
     written: u64,
@@ -24,10 +24,7 @@ pub(super) struct State {
 }
 
 impl State {
-    pub(super) fn new(
-        parameters: &Parameters,
-        hasher: Box<dyn DynDigest + Send + Sync>,
-    ) -> io::Result<Self> {
+    pub(super) fn new(parameters: &Parameters, hasher: Box<dyn Hasher>) -> io::Result<Self> {
         let digest_size = hasher.output_size();
         let data_block_size = parameters.data.size.bytes().get();
         let hash_block_size = parameters.hash.bytes().get();

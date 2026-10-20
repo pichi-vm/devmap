@@ -28,6 +28,17 @@ mod constraint;
 ))]
 mod format;
 mod hash_type;
+#[cfg(any(
+    feature = "sha1",
+    feature = "sha2",
+    feature = "sha3",
+    feature = "ripemd",
+    feature = "whirlpool",
+    feature = "streebog",
+    feature = "sm3",
+    feature = "blake2"
+))]
+mod hasher;
 mod header;
 mod parameters;
 mod salt;

@@ -23,7 +23,7 @@ use std::io;
     feature = "sm3",
     feature = "blake2"
 ))]
-use digest::DynDigest;
+use crate::hasher::Hasher;
 
 /// A dm-verity hash-tree compatibility profile.
 ///
@@ -57,7 +57,7 @@ pub enum HashType {
 impl HashType {
     pub(crate) fn digest(
         self,
-        hasher: &mut dyn DynDigest,
+        hasher: &mut dyn Hasher,
         salt: &[u8],
         block: &[u8],
         output: &mut [u8],
@@ -72,9 +72,7 @@ impl HashType {
                 hasher.update(block);
             }
         }
-        hasher.finalize_into_reset(output).map_err(|_| {
-            io::Error::other("hash output buffer does not match the algorithm's digest size")
-        })
+        hasher.finalize_into_reset(output)
     }
 }
 

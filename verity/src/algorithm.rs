@@ -3,8 +3,6 @@
 use core::{fmt, str::FromStr};
 use std::io;
 
-#[cfg(feature = "blake2")]
-use blake2::{Blake2b, Blake2s};
 #[cfg(any(
     feature = "sha1",
     feature = "sha2",
@@ -15,7 +13,9 @@ use blake2::{Blake2b, Blake2s};
     feature = "sm3",
     feature = "blake2"
 ))]
-use digest::DynDigest;
+use crate::hasher::{Hasher, legacy};
+#[cfg(feature = "blake2")]
+use blake2::{Blake2b, Blake2s};
 #[cfg(feature = "blake2")]
 use digest::consts::{U16, U20, U28, U32, U48, U64};
 #[cfg(feature = "ripemd")]
@@ -142,52 +142,52 @@ impl Algorithm {
         feature = "blake2"
     ))]
     #[allow(unreachable_patterns)]
-    pub(crate) fn hasher(self) -> Option<Box<dyn DynDigest + Send + Sync>> {
+    pub(crate) fn hasher(self) -> Option<Box<dyn Hasher>> {
         match self {
             #[cfg(feature = "sha1")]
-            Self::Sha1 => Some(Box::new(Sha1::default())),
+            Self::Sha1 => Some(legacy(Sha1::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha224 => Some(Box::new(Sha224::default())),
+            Self::Sha224 => Some(legacy(Sha224::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha256 => Some(Box::new(Sha256::default())),
+            Self::Sha256 => Some(legacy(Sha256::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha384 => Some(Box::new(Sha384::default())),
+            Self::Sha384 => Some(legacy(Sha384::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha512 => Some(Box::new(Sha512::default())),
+            Self::Sha512 => Some(legacy(Sha512::default())),
             #[cfg(feature = "ripemd")]
-            Self::Ripemd160 => Some(Box::new(Ripemd160::default())),
+            Self::Ripemd160 => Some(legacy(Ripemd160::default())),
             #[cfg(feature = "whirlpool")]
-            Self::Whirlpool => Some(Box::new(Whirlpool::default())),
+            Self::Whirlpool => Some(legacy(Whirlpool::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_224 => Some(Box::new(Sha3_224::default())),
+            Self::Sha3_224 => Some(legacy(Sha3_224::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_256 => Some(Box::new(Sha3_256::default())),
+            Self::Sha3_256 => Some(legacy(Sha3_256::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_384 => Some(Box::new(Sha3_384::default())),
+            Self::Sha3_384 => Some(legacy(Sha3_384::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_512 => Some(Box::new(Sha3_512::default())),
+            Self::Sha3_512 => Some(legacy(Sha3_512::default())),
             #[cfg(feature = "streebog")]
-            Self::Streebog256 => Some(Box::new(Streebog256::default())),
+            Self::Streebog256 => Some(legacy(Streebog256::default())),
             #[cfg(feature = "streebog")]
-            Self::Streebog512 => Some(Box::new(Streebog512::default())),
+            Self::Streebog512 => Some(legacy(Streebog512::default())),
             #[cfg(feature = "sm3")]
-            Self::Sm3 => Some(Box::new(Sm3::default())),
+            Self::Sm3 => Some(legacy(Sm3::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b160 => Some(Box::new(Blake2b::<U20>::default())),
+            Self::Blake2b160 => Some(legacy(Blake2b::<U20>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b256 => Some(Box::new(Blake2b::<U32>::default())),
+            Self::Blake2b256 => Some(legacy(Blake2b::<U32>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b384 => Some(Box::new(Blake2b::<U48>::default())),
+            Self::Blake2b384 => Some(legacy(Blake2b::<U48>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b512 => Some(Box::new(Blake2b::<U64>::default())),
+            Self::Blake2b512 => Some(legacy(Blake2b::<U64>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s128 => Some(Box::new(Blake2s::<U16>::default())),
+            Self::Blake2s128 => Some(legacy(Blake2s::<U16>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s160 => Some(Box::new(Blake2s::<U20>::default())),
+            Self::Blake2s160 => Some(legacy(Blake2s::<U20>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s224 => Some(Box::new(Blake2s::<U28>::default())),
+            Self::Blake2s224 => Some(legacy(Blake2s::<U28>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s256 => Some(Box::new(Blake2s::<U32>::default())),
+            Self::Blake2s256 => Some(legacy(Blake2s::<U32>::default())),
             _ => None,
         }
     }
