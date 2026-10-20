@@ -89,6 +89,11 @@ jobs:
           for feature in blake2 ripemd sha1 sha2 sha3 sm3 streebog whirlpool; do
             cargo test -p devmap-verity --no-default-features --features "$feature" --all-targets
           done
+          # Exercise both digest generations together without all-features
+          # unification hiding accidental feature dependencies.
+          for features in sha1,sha2 sha3,whirlpool blake2,sm3 ripemd,streebog; do
+            cargo test -p devmap-verity --no-default-features --features "$features" --all-targets
+          done
       - name: Clippy
         run: cargo clippy --workspace --all-features --all-targets -- -D warnings
       - name: Build documentation
