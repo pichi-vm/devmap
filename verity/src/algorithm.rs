@@ -16,13 +16,17 @@ use std::io;
 use crate::hasher::Hasher;
 #[cfg(any(
     feature = "sha1",
-    feature = "ripemd",
     feature = "whirlpool",
     feature = "streebog",
     feature = "sm3"
 ))]
 use crate::hasher::legacy;
-#[cfg(any(feature = "sha2", feature = "sha3", feature = "blake2"))]
+#[cfg(any(
+    feature = "sha2",
+    feature = "sha3",
+    feature = "blake2",
+    feature = "ripemd"
+))]
 use crate::hasher::modern;
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
@@ -165,7 +169,7 @@ impl Algorithm {
             #[cfg(feature = "sha2")]
             Self::Sha512 => Some(modern(Sha512::default())),
             #[cfg(feature = "ripemd")]
-            Self::Ripemd160 => Some(legacy(Ripemd160::default())),
+            Self::Ripemd160 => Some(modern(Ripemd160::default())),
             #[cfg(feature = "whirlpool")]
             Self::Whirlpool => Some(legacy(Whirlpool::default())),
             #[cfg(feature = "sha3")]

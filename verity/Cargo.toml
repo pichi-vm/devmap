@@ -20,7 +20,7 @@ tokio = ["dep:tokio"]
 sha1 = ["dep:sha1", "dep:digest"]
 sha2 = ["dep:sha2", "dep:digest-next"]
 sha3 = ["dep:sha3", "dep:digest-next"]
-ripemd = ["dep:ripemd", "dep:digest"]
+ripemd = ["dep:ripemd", "dep:digest-next"]
 whirlpool = ["dep:whirlpool", "dep:digest"]
 streebog = ["dep:streebog", "dep:digest"]
 sm3 = ["dep:sm3", "dep:digest"]
@@ -32,7 +32,7 @@ blake2 = { version = "0.11", optional = true }
 digest = { version = "0.10", optional = true }
 digest-next = { package = "digest", version = "0.11", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
-ripemd = { version = "0.1", optional = true }
+ripemd = { version = "0.2", optional = true }
 sha1 = { version = "0.10", optional = true }
 sha2 = { version = "0.11", optional = true }
 sha3 = { version = "0.12", optional = true }
