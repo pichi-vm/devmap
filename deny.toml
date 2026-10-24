@@ -1,0 +1,29 @@
+# cargo-deny configuration for devmap (core/linux/snapshot/verity).
+# License allowlist from `cargo metadata` on this tree. Adding a dep with
+# another license fails CI — deliberate review gate.
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",  # unicode-ident AND expression
+]
+confidence-threshold = 0.8
+
+[advisories]
+version = 2
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace path deps + lodown git rev dep (req *) must not trip wildcards.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# verity pulls lodown from git+https://github.com/pichi-vm/lodown?rev=…
+[sources.allow-org]
+github = ["pichi-vm"]
