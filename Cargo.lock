@@ -140,7 +140,6 @@ dependencies = [
  "blake2",
  "devmap-core",
  "devmap-linux",
- "digest 0.10.7",
  "digest 0.11.3",
  "lodown",
  "ripemd",
