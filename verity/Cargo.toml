@@ -33,7 +33,7 @@ digest = { version = "0.10", optional = true }
 digest-next = { package = "digest", version = "0.11", optional = true }
 tokio = { version = "1", features = ["io-util"], optional = true }
 ripemd = { version = "0.2", optional = true }
-sha1 = { version = "0.10", optional = true }
+sha1 = { version = "0.11", optional = true }
 sha2 = { version = "0.11", optional = true }
 sha3 = { version = "0.12", optional = true }
 sm3 = { version = "0.4", optional = true }
