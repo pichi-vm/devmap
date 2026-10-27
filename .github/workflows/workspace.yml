@@ -10,6 +10,11 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+# Fail-fast job DAG. Tier 1 runs in parallel; Tier 2 starts only after
+# every Tier 1 job succeeds. security.yml and docs.yml stay independent.
+#
+#   Tier 1: fmt, clippy, cargo-deny, commit-messages
+#   Tier 2: test, kernel, portable, msrv
 jobs:
   commit-messages:
     name: commit messages
@@ -32,14 +37,38 @@ jobs:
         with:
           command: check
 
-  test:
+  fmt:
+    name: fmt
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
+      - name: Format
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
+  test:
+    needs: [fmt, clippy, cargo-deny, commit-messages]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install reference tools
         run: sudo apt-get update && sudo apt-get install --yes cryptsetup-bin jq
@@ -81,8 +110,6 @@ jobs:
           unsafe_files=$(grep -rlE 'unsafe[[:space:]]*\{' core/src linux/src snapshot/src verity/src | sort)
           expected_files=$(printf '%s\n' core/src/detect.rs linux/src/abi/command.rs)
           test "$unsafe_files" = "$expected_files"
-      - name: Format
-        run: cargo fmt --all --check
       - name: Test all features and targets
         run: cargo test --workspace --all-features --all-targets
       - name: Test minimum features and targets
@@ -104,8 +131,6 @@ jobs:
           for features in sha1,sha2 sha3,whirlpool blake2,sm3 ripemd,streebog; do
             cargo test -p devmap-verity --no-default-features --features "$features" --all-targets
           done
-      - name: Clippy
-        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
       - name: Build documentation
         run: cargo doc --workspace --all-features --no-deps
         env:
@@ -117,6 +142,7 @@ jobs:
 
   portable:
     name: portable (${{ matrix.os }})
+    needs: [fmt, clippy, cargo-deny, commit-messages]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -135,6 +161,7 @@ jobs:
           cargo test -p devmap-verity --all-features --all-targets
 
   kernel:
+    needs: [fmt, clippy, cargo-deny, commit-messages]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -176,6 +203,7 @@ jobs:
         run: bash .github/scripts/kernel-tests.sh "$RUNNER_TEMP/test-binaries" sudo
 
   msrv:
+    needs: [fmt, clippy, cargo-deny, commit-messages]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
