@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 /// An on-disk chunk mapping in a version-one persistent snapshot store.

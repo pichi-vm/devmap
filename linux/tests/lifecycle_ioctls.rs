@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Real-kernel coverage for the device lifecycle ioctls beyond

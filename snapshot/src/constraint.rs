@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 /// Snapshot chunk-size limits: powers of two from 512 bytes through 1 GiB.

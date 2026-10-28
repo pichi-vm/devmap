@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
+
 #![cfg(target_os = "linux")]
 
 //! Supported targets' `STATUSTYPE_INFO` grammar, parsed from a
