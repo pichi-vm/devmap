@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
+
 #![allow(clippy::unwrap_used)]
 use devmap_snapshot::{Exception, Header};
 

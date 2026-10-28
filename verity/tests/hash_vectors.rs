@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Independent known-answer vectors for the algorithm selection and salt order.

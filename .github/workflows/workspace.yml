@@ -13,9 +13,17 @@ env:
 # Fail-fast job DAG. Tier 1 runs in parallel; Tier 2 starts only after
 # every Tier 1 job succeeds. security.yml and docs.yml stay independent.
 #
-#   Tier 1: fmt, clippy, cargo-deny, commit-messages
+#   Tier 1: fmt, clippy, cargo-deny, commit-messages, license-headers
 #   Tier 2: test, kernel, portable, msrv
 jobs:
+  license-headers:
+    name: license headers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: korandoru/hawkeye@v6
+
   commit-messages:
     name: commit messages
     runs-on: ubuntu-24.04
@@ -63,7 +71,7 @@ jobs:
         run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   test:
-    needs: [fmt, clippy, cargo-deny, commit-messages]
+    needs: [fmt, clippy, cargo-deny, commit-messages, license-headers]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -142,7 +150,7 @@ jobs:
 
   portable:
     name: portable (${{ matrix.os }})
-    needs: [fmt, clippy, cargo-deny, commit-messages]
+    needs: [fmt, clippy, cargo-deny, commit-messages, license-headers]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -161,7 +169,7 @@ jobs:
           cargo test -p devmap-verity --all-features --all-targets
 
   kernel:
-    needs: [fmt, clippy, cargo-deny, commit-messages]
+    needs: [fmt, clippy, cargo-deny, commit-messages, license-headers]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -203,7 +211,7 @@ jobs:
         run: bash .github/scripts/kernel-tests.sh "$RUNNER_TEMP/test-binaries" sudo
 
   msrv:
-    needs: [fmt, clippy, cargo-deny, commit-messages]
+    needs: [fmt, clippy, cargo-deny, commit-messages, license-headers]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

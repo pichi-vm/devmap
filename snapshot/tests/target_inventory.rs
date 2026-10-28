@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
+
 #![cfg(target_os = "linux")]
 
 use devmap_linux::{DevId, targets::Parse, targets::Target, targets::Version};

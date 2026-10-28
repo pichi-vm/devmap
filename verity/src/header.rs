@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Semantic contents and fixed-record codec for a standard dm-verity header.
