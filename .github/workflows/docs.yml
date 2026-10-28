@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
+  group: docs-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,24 +24,4 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo doc
-        run: cargo doc --workspace --no-deps --all-features --target-dir "$RUNNER_TEMP/devmap-docs"
-      - name: redirect root to crate
-        run: echo '<meta http-equiv="refresh" content="0; url=devmap_core/index.html">' > "$RUNNER_TEMP/devmap-docs/doc/index.html"
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: ${{ runner.temp }}/devmap-docs/doc
-
-  deploy:
-    name: deploy to pages
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v5
+        run: cargo doc --workspace --no-deps --all-features
