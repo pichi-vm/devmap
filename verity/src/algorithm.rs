@@ -13,25 +13,11 @@ use std::io;
     feature = "sm3",
     feature = "blake2"
 ))]
-use crate::hasher::Hasher;
-#[cfg(any(
-    feature = "sha1",
-    feature = "whirlpool",
-    feature = "streebog",
-    feature = "sm3"
-))]
-use crate::hasher::legacy;
-#[cfg(any(
-    feature = "sha2",
-    feature = "sha3",
-    feature = "blake2",
-    feature = "ripemd"
-))]
-use crate::hasher::modern;
+use crate::hasher::{Hasher, boxed};
 #[cfg(feature = "blake2")]
 use blake2::{Blake2b, Blake2s};
 #[cfg(feature = "blake2")]
-use digest_next::consts::{U16, U20, U28, U32, U48, U64};
+use digest::consts::{U16, U20, U28, U32, U48, U64};
 #[cfg(feature = "ripemd")]
 use ripemd::Ripemd160;
 #[cfg(feature = "sha1")]
@@ -159,49 +145,49 @@ impl Algorithm {
     pub(crate) fn hasher(self) -> Option<Box<dyn Hasher>> {
         match self {
             #[cfg(feature = "sha1")]
-            Self::Sha1 => Some(legacy(Sha1::default())),
+            Self::Sha1 => Some(boxed(Sha1::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha224 => Some(modern(Sha224::default())),
+            Self::Sha224 => Some(boxed(Sha224::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha256 => Some(modern(Sha256::default())),
+            Self::Sha256 => Some(boxed(Sha256::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha384 => Some(modern(Sha384::default())),
+            Self::Sha384 => Some(boxed(Sha384::default())),
             #[cfg(feature = "sha2")]
-            Self::Sha512 => Some(modern(Sha512::default())),
+            Self::Sha512 => Some(boxed(Sha512::default())),
             #[cfg(feature = "ripemd")]
-            Self::Ripemd160 => Some(modern(Ripemd160::default())),
+            Self::Ripemd160 => Some(boxed(Ripemd160::default())),
             #[cfg(feature = "whirlpool")]
-            Self::Whirlpool => Some(legacy(Whirlpool::default())),
+            Self::Whirlpool => Some(boxed(Whirlpool::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_224 => Some(modern(Sha3_224::default())),
+            Self::Sha3_224 => Some(boxed(Sha3_224::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_256 => Some(modern(Sha3_256::default())),
+            Self::Sha3_256 => Some(boxed(Sha3_256::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_384 => Some(modern(Sha3_384::default())),
+            Self::Sha3_384 => Some(boxed(Sha3_384::default())),
             #[cfg(feature = "sha3")]
-            Self::Sha3_512 => Some(modern(Sha3_512::default())),
+            Self::Sha3_512 => Some(boxed(Sha3_512::default())),
             #[cfg(feature = "streebog")]
-            Self::Streebog256 => Some(legacy(Streebog256::default())),
+            Self::Streebog256 => Some(boxed(Streebog256::default())),
             #[cfg(feature = "streebog")]
-            Self::Streebog512 => Some(legacy(Streebog512::default())),
+            Self::Streebog512 => Some(boxed(Streebog512::default())),
             #[cfg(feature = "sm3")]
-            Self::Sm3 => Some(legacy(Sm3::default())),
+            Self::Sm3 => Some(boxed(Sm3::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b160 => Some(modern(Blake2b::<U20>::default())),
+            Self::Blake2b160 => Some(boxed(Blake2b::<U20>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b256 => Some(modern(Blake2b::<U32>::default())),
+            Self::Blake2b256 => Some(boxed(Blake2b::<U32>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b384 => Some(modern(Blake2b::<U48>::default())),
+            Self::Blake2b384 => Some(boxed(Blake2b::<U48>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2b512 => Some(modern(Blake2b::<U64>::default())),
+            Self::Blake2b512 => Some(boxed(Blake2b::<U64>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s128 => Some(modern(Blake2s::<U16>::default())),
+            Self::Blake2s128 => Some(boxed(Blake2s::<U16>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s160 => Some(modern(Blake2s::<U20>::default())),
+            Self::Blake2s160 => Some(boxed(Blake2s::<U20>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s224 => Some(modern(Blake2s::<U28>::default())),
+            Self::Blake2s224 => Some(boxed(Blake2s::<U28>::default())),
             #[cfg(feature = "blake2")]
-            Self::Blake2s256 => Some(modern(Blake2s::<U32>::default())),
+            Self::Blake2s256 => Some(boxed(Blake2s::<U32>::default())),
             _ => None,
         }
     }
