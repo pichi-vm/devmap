@@ -1,7 +1,9 @@
 name: security
 
 on:
+  # Pull request branches are checked through pull_request, so they do not run twice.
   push:
+    branches: [main]
     paths:
       - "**/Cargo.toml"
       - Cargo.lock
@@ -14,6 +16,13 @@ on:
   schedule:
     - cron: "17 9 * * 1"
   workflow_dispatch:
+
+# A newer update to the same pull request stops the older run.
+# Every other run (main pushes, scheduled and manual runs) gets its own
+# group so it is never stopped.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
