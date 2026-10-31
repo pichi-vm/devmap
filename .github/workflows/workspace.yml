@@ -1,8 +1,17 @@
 name: workspace
 
 on:
+  # Pull request branches are checked through pull_request, so they do not run twice.
   push:
+    branches: [main]
   pull_request:
+
+# A newer update to the same pull request stops the older run.
+# Every other run, such as a push to main, gets its own group so it is
+# never stopped.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
