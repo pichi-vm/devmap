@@ -24,6 +24,6 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 
-# verity pulls lodown from git+https://github.com/pichi-vm/lodown?rev=…
+# verity pulls lodown from git+https://github.com/pichi-vm/lodown?branch=main
 [sources.allow-org]
 github = ["pichi-vm"]

@@ -238,9 +238,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: dtolnay/rust-toolchain@1.89.0
       - uses: Swatinem/rust-cache@v2
-      - name: Compile all targets at the minimum Rust version
+      - name: Compile all targets at the minimum test dependency Rust version
         run: |
           cargo test --workspace --all-features --all-targets --no-run
           cargo test --workspace --all-features --doc

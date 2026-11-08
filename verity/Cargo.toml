@@ -47,7 +47,7 @@ tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "rt"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-lodown = { git = "https://github.com/pichi-vm/lodown", rev = "2492c468cc7968c512aa4f3f58220ab36d6424b3" }
+lodown = { git = "https://github.com/pichi-vm/lodown", branch = "main" }
 
 [[test]]
 name = "format"
