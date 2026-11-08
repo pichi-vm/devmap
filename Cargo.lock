@@ -216,7 +216,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 [[package]]
 name = "lodown"
 version = "0.1.0"
-source = "git+https://github.com/pichi-vm/lodown?rev=2492c468cc7968c512aa4f3f58220ab36d6424b3#2492c468cc7968c512aa4f3f58220ab36d6424b3"
+source = "git+https://github.com/pichi-vm/lodown?branch=main#e7645d9534462b9a76ea3a06865a305c448e0e46"
 dependencies = [
  "iocuddle 0.3.0",
  "zerocopy",
