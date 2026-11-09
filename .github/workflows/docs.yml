@@ -11,9 +11,12 @@ env:
 permissions:
   contents: read
 
+# A newer push to the same pull request or branch cancels the older run.
+# Each run on main gets its own group, so runs on main are never
+# cancelled or dropped while waiting.
 concurrency:
-  group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
