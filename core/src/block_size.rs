@@ -6,6 +6,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZero;
+use std::{io, str::FromStr};
 
 use crate::{Constraint, General};
 
@@ -106,6 +107,26 @@ impl<C: Constraint> fmt::Debug for BlockSize<C> {
             .debug_tuple("BlockSize")
             .field(&self.bytes())
             .finish()
+    }
+}
+
+/// Formats the block size as a decimal byte count.
+impl<C: Constraint> fmt::Display for BlockSize<C> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.bytes.fmt(formatter)
+    }
+}
+
+impl<C: Constraint> FromStr for BlockSize<C> {
+    type Err = io::Error;
+
+    /// Parses a decimal byte count using the same constraints as `from_bytes`.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let bytes = text
+            .parse()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Self::from_bytes(bytes)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid block size"))
     }
 }
 
