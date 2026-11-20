@@ -57,7 +57,7 @@ impl<C: Constraint> BlockSize<C> {
 
     /// Returns the base-two exponent of the block size.
     pub const fn exponent(self) -> u32 {
-        self.bytes.get().trailing_zeros()
+        self.bytes.trailing_zeros()
     }
 
     /// Converts this block size to another constraint.
