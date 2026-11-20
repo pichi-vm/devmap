@@ -5,6 +5,19 @@ use std::num::NonZero;
 
 use devmap_core::{BlockSize, Constraint, General};
 
+#[test]
+fn text_representation_uses_constrained_bytes() {
+    for bytes in [512, 4096, 524_288] {
+        let text = bytes.to_string();
+        let size: BlockSize<Restricted> = text.parse().unwrap();
+        assert_eq!(size.bytes().get(), bytes);
+        assert_eq!(size.to_string(), text);
+    }
+    for text in ["", "0", "256", "513", "1048576", "4294967296", "4KiB"] {
+        assert!(text.parse::<BlockSize<Restricted>>().is_err(), "{text}");
+    }
+}
+
 #[derive(Debug)]
 enum Restricted {}
 
